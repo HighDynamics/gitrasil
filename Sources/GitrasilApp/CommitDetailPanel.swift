@@ -6,7 +6,9 @@ import GitrasilCore
 struct CommitDetailPanel: View {
     let detail: CommitDetail
     let selectedPath: String?
+    let canDrop: Bool
     let onSelectFile: (FileChange) -> Void
+    let onDrop: () -> Void
     let onClose: () -> Void
 
     var body: some View {
@@ -19,6 +21,11 @@ struct CommitDetailPanel: View {
                     Pill(text: "\(detail.commitCount) commits")
                 }
                 Spacer()
+                if canDrop {
+                    Button("Drop", systemImage: "trash", role: .destructive, action: onDrop)
+                        .buttonStyle(.borderless)
+                        .help("Remove this commit from the branch (undoable)")
+                }
                 Button { onClose() } label: { Image(systemName: "xmark") }
                     .buttonStyle(.borderless)
             }

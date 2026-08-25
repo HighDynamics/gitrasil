@@ -98,9 +98,23 @@ struct WorktreeTabView: View {
 
             Spacer()
 
+            if let snapshot = store.snapshot, snapshot.statusFacts.behind, isMutable(snapshot),
+               let trunk = snapshot.trunkRef {
+                Button {
+                    Task { await store.rebaseOnto(target: trunk) }
+                } label: {
+                    Label("Rebase onto \(snapshot.trunkName ?? trunk)", systemImage: "arrow.triangle.merge")
+                }
+                .buttonStyle(.borderless)
+            }
+
             if store.isRefreshing {
                 ProgressView().controlSize(.small)
             }
+            Button { Task { await store.undo() } } label: {
+                Label("Undo", systemImage: "arrow.uturn.backward")
+            }
+            .buttonStyle(.borderless)
             Button { showTerminal.toggle() } label: {
                 Label("Terminal", systemImage: "terminal")
             }
@@ -128,6 +142,20 @@ struct WorktreeTabView: View {
 
     @ViewBuilder
     private var content: some View {
+        VStack(spacing: 0) {
+            OperationBar(
+                inProgress: store.snapshot?.inProgress,
+                mutationError: store.mutationError,
+                onContinue: { Task { await store.continueOperation() } },
+                onAbort: { Task { await store.abortOperation() } },
+                onDismiss: { store.dismissMutationError() }
+            )
+            mainContent
+        }
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
         if let snapshot = store.snapshot {
             if snapshot.graph.isEmpty {
                 CenteredMessage(text: "No commits yet")
@@ -199,7 +227,9 @@ struct WorktreeTabView: View {
                 CommitDetailPanel(
                     detail: detail,
                     selectedPath: selectedFile?.path,
+                    canDrop: selectedCommit.map(canDrop) ?? false,
                     onSelectFile: selectFile,
+                    onDrop: dropSelected,
                     onClose: clearSelection
                 )
                 .frame(minHeight: 140, idealHeight: 220)
@@ -209,6 +239,23 @@ struct WorktreeTabView: View {
 
     private func hasTruncation(_ graph: HistoryGraph) -> Bool {
         graph.segments.contains(where: \.isTruncatable) || (graph.trunkAhead?.isTruncatable ?? false)
+    }
+
+    /// History edits are available only on a clean, attached worktree with no operation in flight.
+    private func isMutable(_ snapshot: WorktreeSnapshot) -> Bool {
+        !snapshot.statusFacts.dirty && !snapshot.isDetached && snapshot.inProgress == nil
+    }
+
+    /// A commit is droppable when it's on the worktree's own line and the worktree is mutable.
+    private func canDrop(_ commit: CommitNode) -> Bool {
+        guard let snapshot = store.snapshot, isMutable(snapshot) else { return false }
+        let cw = snapshot.graph.segments.first { $0.kind == .currentWorktree }
+        return cw?.commits.contains { $0.sha == commit.sha } ?? false
+    }
+
+    private func dropSelected() {
+        guard let commit = selectedCommit else { return }
+        Task { await store.drop(oldest: commit.sha, newest: commit.sha) }
     }
 }
 
