@@ -31,17 +31,12 @@ added on top later.
 
 ```bash
 swift build
-swift run gitrasil-smoke   # verifies the core end-to-end against real git
+swift test
 ```
 
-### Note on the test suite
-
-The canonical tests are XCTest (`Tests/GitrasilCoreTests`), which is what CI runs. **They do not
-run under this checkout's Xcode (14.3)** — its bundled XCTest helper is too old for the host macOS
-and segfaults during test discovery. Until Xcode is updated (target: a modern Xcode with the
-macOS 14 SDK), use `swift run gitrasil-smoke`, which mirrors the same assertions through a plain
-executable. Once Xcode is current, `swift test` becomes the primary command and the smoke runner
-can retire.
+Tests stand up real git repositories in temp dirs (`GitrasilTestSupport`) and assert on the
+derived values — no mocking of git. The topology and status derivations, the highest-risk logic,
+are covered case-by-case there.
 
 ## Toolchain floors
 
