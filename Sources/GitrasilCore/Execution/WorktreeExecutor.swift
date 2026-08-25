@@ -19,6 +19,8 @@ public actor WorktreeExecutor {
         case statuses
         case graph
         case inProgress
+        /// A full worktree-snapshot re-derive (the store's re-derive on every change).
+        case snapshot
         case custom(String)
     }
 

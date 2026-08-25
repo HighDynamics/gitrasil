@@ -1,13 +1,12 @@
-// swift-tools-version:5.8
+// swift-tools-version:5.9
 import PackageDescription
 
-// The platform-agnostic core of Gitrasil. Deliberately dependency-free and UI-free
-// so ~90% of the app is unit-testable from the CLI (`swift test`) without Xcode or a
-// running SwiftUI surface. The SwiftUI app shell (macOS 14+, Observation, SwiftTerm)
-// is a separate target added later.
+// GitrasilCore is the platform-agnostic core — deliberately UI-free so ~90% of the app is
+// unit-testable from the CLI (`swift test`). The macOS 14 floor gives the reactive store the
+// Observation framework, and the (later) SwiftUI shell mature SwiftUI.
 let package = Package(
     name: "Gitrasil",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v14)],
     products: [
         .library(name: "GitrasilCore", targets: ["GitrasilCore"]),
     ],
