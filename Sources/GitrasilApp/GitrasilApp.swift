@@ -2,27 +2,6 @@ import SwiftUI
 import AppKit
 import GitrasilCore
 
-@main
-struct GitrasilApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-
-    var body: some Scene {
-        WindowGroup {
-            RootView()
-                .frame(minWidth: 760, minHeight: 520)
-        }
-    }
-}
-
-/// Ensures the app comes to the foreground with a normal window when launched via `swift run`.
-final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-    }
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
-}
-
 /// Opens a repository (auto from an argument, or via a picker) and hosts its worktree view.
 /// v1 shows the repository's main worktree; the multi-tab / add-worktree flow is a later handoff.
 struct RootView: View {
