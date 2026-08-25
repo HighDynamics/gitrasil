@@ -99,6 +99,22 @@ public enum Topology {
         return r
     }
 
+    /// A rebase paused on a conflict: cw and main both change the same line, then `rebase main`
+    /// halts. Leaves the worktree mid-operation (rebase-merge/ present, working tree conflicted).
+    public static func conflictedRebase() async throws -> FixtureRepo {
+        let r = try FixtureRepo()
+        try await r.initRepo()
+        try await r.commitFile("x.txt", "base\n", message: "root")
+        try await r.createBranch("cw")
+        try await r.commitFile("x.txt", "cw change\n", message: "cw-1")
+        try await r.checkout("main")
+        try await r.commitFile("x.txt", "main change\n", message: "main-1")
+        try await r.checkout("cw")
+        // Rebase conflicts on x.txt and pauses; exits non-zero, so don't route through `git`.
+        _ = try await r.runner.run(["rebase", "main"])
+        return r
+    }
+
     /// An initialized repo with no commits yet.
     public static func empty() async throws -> FixtureRepo {
         let r = try FixtureRepo()
