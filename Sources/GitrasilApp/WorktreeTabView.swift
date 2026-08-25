@@ -14,6 +14,12 @@ struct WorktreeTabView: View {
     @State private var diff: FileDiff?
     @State private var isLoadingDiff = false
 
+    enum NavMode: String, CaseIterable { case history = "History", files = "Files" }
+    @State private var navMode: NavMode = .history
+    @State private var explorerStatus: [String: WorkingFileStatus] = [:]
+    @State private var explorerIgnored: Set<String> = []
+    @State private var selectedExplorerPath: String?
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -45,6 +51,23 @@ struct WorktreeTabView: View {
 
     private func clearSelection() {
         selectedCommit = nil; detail = nil; selectedFile = nil; diff = nil
+    }
+
+    private func openExplorerFile(_ path: String, meetingBase: String?) {
+        guard let meetingBase else { return }
+        selectedExplorerPath = path
+        isLoadingDiff = true
+        Task {
+            diff = try? await store.fileDiff(source: .explorer(meetingBase: meetingBase), path: path)
+            isLoadingDiff = false
+        }
+    }
+
+    private func loadExplorerData() async {
+        if let data = try? await store.explorerData() {
+            explorerStatus = data.status
+            explorerIgnored = data.ignored
+        }
     }
 
     // MARK: Header
@@ -109,10 +132,37 @@ struct WorktreeTabView: View {
         }
     }
 
-    /// The left navigation column: the history graph, with the commit detail panel docked below it
-    /// when a commit is selected (design brief §5 — the graph stays visible above).
+    /// The left navigation column: a History / Files toggle over either the history graph (with the
+    /// commit detail panel docked below on selection) or the directory explorer (design brief §7).
     @ViewBuilder
     private func navigationColumn(_ snapshot: WorktreeSnapshot) -> some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $navMode) {
+                ForEach(NavMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(8)
+            Divider()
+
+            switch navMode {
+            case .history:
+                historyColumn(snapshot)
+            case .files:
+                FileTreeView(
+                    rootURL: store.worktreeURL,
+                    status: explorerStatus,
+                    ignored: explorerIgnored,
+                    selectedPath: selectedExplorerPath,
+                    onOpen: { openExplorerFile($0, meetingBase: snapshot.graph.meetingCommit?.sha) }
+                )
+                .task(id: navMode) { await loadExplorerData() }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func historyColumn(_ snapshot: WorktreeSnapshot) -> some View {
         VSplitView {
             ScrollView([.vertical, .horizontal]) {
                 HistoryGraphView(
