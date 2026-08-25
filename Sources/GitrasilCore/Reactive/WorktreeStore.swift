@@ -79,6 +79,16 @@ public final class WorktreeStore {
         return try await task.value
     }
 
+    /// Working-tree status decorations and the ignored-path set (drives the directory explorer).
+    public func explorerData() async throws -> (status: [String: WorkingFileStatus], ignored: Set<String>) {
+        let task = await executor.read(.custom("explorer")) { runner in
+            async let status = Derivations.workingTreeStatus(runner: runner)
+            async let ignored = Derivations.ignoredPaths(runner: runner)
+            return try await (status, ignored)
+        }
+        return try await task.value
+    }
+
     /// A view-only file diff for the given source (drives the file viewer).
     public func fileDiff(source: DiffSource, path: String) async throws -> FileDiff {
         let task = await executor.read(.custom("diff:\(path)")) { runner in
