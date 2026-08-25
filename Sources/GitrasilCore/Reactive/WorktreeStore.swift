@@ -68,6 +68,25 @@ public final class WorktreeStore {
         }
     }
 
+    // MARK: On-demand derivations (routed through the executor so they serialize with everything
+    // else and coalesce with rapid re-selection).
+
+    /// Files and metadata for a selected commit (drives the commit detail panel).
+    public func commitDetail(sha: String) async throws -> CommitDetail {
+        let task = await executor.read(.custom("detail:\(sha)")) { runner in
+            try await Derivations.commitDetail(sha: sha, runner: runner)
+        }
+        return try await task.value
+    }
+
+    /// A view-only file diff for the given source (drives the file viewer).
+    public func fileDiff(source: DiffSource, path: String) async throws -> FileDiff {
+        let task = await executor.read(.custom("diff:\(path)")) { runner in
+            try await Derivations.fileDiff(source: source, path: path, runner: runner)
+        }
+        return try await task.value
+    }
+
     private func installWatcher() async {
         guard watcher == nil else { return }
         var paths = [worktreeURL.path]
