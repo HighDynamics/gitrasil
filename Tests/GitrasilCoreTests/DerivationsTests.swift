@@ -1,4 +1,5 @@
 import XCTest
+import GitrasilTestSupport
 @testable import GitrasilCore
 
 final class DerivationsTests: XCTestCase {

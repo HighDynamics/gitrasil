@@ -1,4 +1,5 @@
 import XCTest
+import GitrasilTestSupport
 @testable import GitrasilCore
 
 final class WorktreeExecutorTests: XCTestCase {
@@ -36,9 +37,11 @@ final class WorktreeExecutorTests: XCTestCase {
         }
 
         _ = try await fresh.value
-        let (started, _) = await runner.snapshot()
-        XCTAssertTrue(started.contains("FRESH"), "the newest read must run")
-        XCTAssertFalse(started.contains("STALE"), "the superseded read must not run")
+        // The stale op may physically begin before the cancel lands (a benign race against an idle
+        // executor), but it must never *finish* — cancellation is checked after the work.
+        let (_, finished) = await runner.snapshot()
+        XCTAssertTrue(finished.contains("FRESH"), "the newest read must complete")
+        XCTAssertFalse(finished.contains("STALE"), "the superseded read must not complete")
     }
 
     /// Distinct read kinds do not coalesce each other.

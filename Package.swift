@@ -14,14 +14,17 @@ let package = Package(
     ],
     targets: [
         .target(name: "GitrasilCore"),
+        // Fixture-repo harness and topology scenario builders, shared by the XCTest suite and the
+        // smoke runner so both exercise the identical git states (architecture decision #13).
+        .target(name: "GitrasilTestSupport", dependencies: ["GitrasilCore"]),
         .testTarget(
             name: "GitrasilCoreTests",
-            dependencies: ["GitrasilCore"]
+            dependencies: ["GitrasilCore", "GitrasilTestSupport"]
         ),
         // A dependency-free smoke runner. The canonical test suite is XCTest
         // (`GitrasilCoreTests`), but this repo's current Xcode (14.3) ships an XCTest
         // helper too old for the host macOS and segfaults during discovery. Until Xcode is
         // updated, `swift run gitrasil-smoke` verifies the core end-to-end against real git.
-        .executableTarget(name: "gitrasil-smoke", dependencies: ["GitrasilCore"]),
+        .executableTarget(name: "gitrasil-smoke", dependencies: ["GitrasilCore", "GitrasilTestSupport"]),
     ]
 )
