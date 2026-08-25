@@ -41,13 +41,17 @@ are covered case-by-case there.
 ## Run the app
 
 ```bash
-swift run GitrasilApp /path/to/a/git/repo
+scripts/run.sh /path/to/a/git/repo
 ```
 
-Pass a repository path to open it directly, or omit it and use **Open Repository…** in the window.
-The window renders the worktree's status header and history graph, and refreshes live as the repo
-changes on disk. This first cut is view-only; the file viewer, explorer, terminal, and history
-mutations are still to come.
+This builds the app, wraps it in a minimal `.app` bundle, and launches it — necessary because a
+bare SwiftPM executable is not reliably shown a window by macOS. Pass a repository path to open it
+directly, or omit it and use **Open Repository…** in the window.
+
+The window shows the worktree's status header, an interactive history graph (select a commit for
+its detail panel and file diffs), a directory explorer (History / Files toggle), a file viewer, and
+an embedded terminal scoped to the worktree — all refreshing live as the repo changes on disk. The
+diff viewer is view-only. History mutations (rebase/drop/cherry-pick) are still to come.
 
 ## Toolchain floors
 
