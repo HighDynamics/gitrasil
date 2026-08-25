@@ -8,6 +8,8 @@ import GitrasilCore
 struct HistoryGraphView: View {
     let graph: HistoryGraph
     let expandTruncated: Bool
+    var selectedSHA: String? = nil
+    var onSelect: (CommitNode) -> Void = { _ in }
 
     private let rowHeight: CGFloat = 46
     private let topPad: CGFloat = 14
@@ -32,6 +34,22 @@ struct HistoryGraphView: View {
             drawNodes(trunk, x: trunkX, textX: trunkX + 16, in: &context)
         }
         .frame(width: 620, height: height, alignment: .topLeading)
+        .contentShape(Rectangle())
+        .gesture(SpatialTapGesture().onEnded { value in
+            if let commit = commit(at: value.location) { onSelect(commit) }
+        })
+    }
+
+    /// Map a tap location to the commit under it, if any.
+    private func commit(at location: CGPoint) -> CommitNode? {
+        let index = Int((location.y - topPad) / rowHeight)
+        let onTrunk = !trunk.isEmpty && location.x > (spineX + trunkX) / 2
+        let rows = onTrunk ? trunk : spine
+        guard index >= 0, index < rows.count else { return nil }
+        switch rows[index].content {
+        case .commit(let c, _), .meeting(let c, _): return c
+        case .hidden: return nil
+        }
     }
 
     private func y(_ index: Int) -> CGFloat { topPad + CGFloat(index) * rowHeight + rowHeight / 2 }
@@ -62,6 +80,11 @@ struct HistoryGraphView: View {
             let center = CGPoint(x: x, y: y(i))
             switch row.content {
             case .commit(let commit, let open), .meeting(let commit, let open):
+                if let selectedSHA, commit.sha == selectedSHA {
+                    let halo = CGRect(x: center.x - dotRadius - 4, y: center.y - dotRadius - 4,
+                                      width: (dotRadius + 4) * 2, height: (dotRadius + 4) * 2)
+                    context.fill(Path(ellipseIn: halo), with: .color(Palette.identity.opacity(0.25)))
+                }
                 drawDot(at: center, identity: row.isIdentity, open: open, ring: row.isMeeting, in: &context)
                 drawText(row.label, sha: commit.shortSHA, subject: commit.subject,
                          at: CGPoint(x: textX, y: y(i)), in: &context)

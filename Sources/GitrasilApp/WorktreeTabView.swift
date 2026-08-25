@@ -8,12 +8,43 @@ struct WorktreeTabView: View {
     let store: WorktreeStore
     @State private var expandTruncated = false
 
+    @State private var selectedCommit: CommitNode?
+    @State private var detail: CommitDetail?
+    @State private var selectedFile: FileChange?
+    @State private var diff: FileDiff?
+    @State private var isLoadingDiff = false
+
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
             content
         }
+    }
+
+    // MARK: Selection flow
+
+    private func selectCommit(_ commit: CommitNode) {
+        selectedCommit = commit
+        selectedFile = nil
+        diff = nil
+        detail = nil
+        Task { detail = try? await store.commitDetail(sha: commit.sha) }
+    }
+
+    private func selectFile(_ file: FileChange) {
+        guard let commit = selectedCommit else { return }
+        selectedFile = file
+        isLoadingDiff = true
+        Task {
+            diff = try? await store.fileDiff(
+                source: .commit(sha: commit.sha, shortSHA: commit.shortSHA), path: file.path)
+            isLoadingDiff = false
+        }
+    }
+
+    private func clearSelection() {
+        selectedCommit = nil; detail = nil; selectedFile = nil; diff = nil
     }
 
     // MARK: Header
@@ -64,24 +95,51 @@ struct WorktreeTabView: View {
             if snapshot.graph.isEmpty {
                 CenteredMessage(text: "No commits yet")
             } else {
-                ScrollView([.vertical, .horizontal]) {
-                    HistoryGraphView(graph: snapshot.graph, expandTruncated: expandTruncated)
-                        .padding(20)
-                }
-                .overlay(alignment: .bottomTrailing) {
-                    if hasTruncation(snapshot.graph) {
-                        Button(expandTruncated ? "Collapse" : "Expand all") {
-                            expandTruncated.toggle()
-                        }
-                        .buttonStyle(.bordered)
-                        .padding(12)
-                    }
+                HSplitView {
+                    navigationColumn(snapshot)
+                        .frame(minWidth: 320, idealWidth: 380)
+                    FileViewer(diff: diff, isLoading: isLoadingDiff)
+                        .frame(minWidth: 360)
                 }
             }
         } else if let error = store.lastError {
             CenteredMessage(text: error, isError: true)
         } else {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// The left navigation column: the history graph, with the commit detail panel docked below it
+    /// when a commit is selected (design brief §5 — the graph stays visible above).
+    @ViewBuilder
+    private func navigationColumn(_ snapshot: WorktreeSnapshot) -> some View {
+        VSplitView {
+            ScrollView([.vertical, .horizontal]) {
+                HistoryGraphView(
+                    graph: snapshot.graph,
+                    expandTruncated: expandTruncated,
+                    selectedSHA: selectedCommit?.sha,
+                    onSelect: selectCommit
+                )
+                .padding(16)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if hasTruncation(snapshot.graph) {
+                    Button(expandTruncated ? "Collapse" : "Expand all") { expandTruncated.toggle() }
+                        .buttonStyle(.bordered)
+                        .padding(10)
+                }
+            }
+
+            if let detail {
+                CommitDetailPanel(
+                    detail: detail,
+                    selectedPath: selectedFile?.path,
+                    onSelectFile: selectFile,
+                    onClose: clearSelection
+                )
+                .frame(minHeight: 140, idealHeight: 220)
+            }
         }
     }
 
