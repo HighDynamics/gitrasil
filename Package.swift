@@ -11,9 +11,17 @@ let package = Package(
         .library(name: "GitrasilCore", targets: ["GitrasilCore"]),
         .executable(name: "GitrasilApp", targets: ["GitrasilApp"]),
     ],
+    dependencies: [
+        // Embedded PTY terminal (engineering notes → Embedded terminal). MIT, proven in shipping
+        // macOS apps (CodeEdit, La Terminal).
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", from: "1.2.0"),
+    ],
     targets: [
         .target(name: "GitrasilCore"),
-        .executableTarget(name: "GitrasilApp", dependencies: ["GitrasilCore"]),
+        .executableTarget(
+            name: "GitrasilApp",
+            dependencies: ["GitrasilCore", .product(name: "SwiftTerm", package: "SwiftTerm")]
+        ),
         // Fixture-repo harness and topology scenario builders that stand up real git repos in
         // temp dirs, so derivations are asserted against actual git output (architecture
         // decision #13).

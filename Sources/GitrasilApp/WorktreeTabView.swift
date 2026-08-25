@@ -20,11 +20,21 @@ struct WorktreeTabView: View {
     @State private var explorerIgnored: Set<String> = []
     @State private var selectedExplorerPath: String?
 
+    @State private var showTerminal = true
+
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-            content
+            if showTerminal {
+                VSplitView {
+                    content.frame(minHeight: 220)
+                    TerminalPanel(workingDirectory: store.worktreeURL)
+                        .frame(minHeight: 120, idealHeight: 200)
+                }
+            } else {
+                content
+            }
         }
     }
 
@@ -91,6 +101,10 @@ struct WorktreeTabView: View {
             if store.isRefreshing {
                 ProgressView().controlSize(.small)
             }
+            Button { showTerminal.toggle() } label: {
+                Label("Terminal", systemImage: "terminal")
+            }
+            .buttonStyle(.borderless)
             Button {
                 Task { await store.refresh() }
             } label: {
