@@ -38,6 +38,17 @@ Tests stand up real git repositories in temp dirs (`GitrasilTestSupport`) and as
 derived values — no mocking of git. The topology and status derivations, the highest-risk logic,
 are covered case-by-case there.
 
+## Run the app
+
+```bash
+swift run GitrasilApp /path/to/a/git/repo
+```
+
+Pass a repository path to open it directly, or omit it and use **Open Repository…** in the window.
+The window renders the worktree's status header and history graph, and refreshes live as the repo
+changes on disk. This first cut is view-only; the file viewer, explorer, terminal, and history
+mutations are still to come.
+
 ## Toolchain floors
 
 - **git ≥ 2.30** (modern security baseline; all needed plumbing predates it).
