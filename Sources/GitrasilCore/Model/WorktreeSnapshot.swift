@@ -40,16 +40,28 @@ public struct WorktreeSnapshot: Sendable, Equatable {
     /// A halted operation, if any (continue/abort bar visible while non-nil).
     public let inProgress: InProgressOperation?
 
+    /// The trunk ref this worktree compares against (e.g. `main`, `origin/main`) — the rebase-onto
+    /// target and the "Behind" reference point.
+    public let trunkRef: String?
+
     public init(
         branch: BranchIdentity,
         statusFacts: WorktreeStatusFacts,
         graph: HistoryGraph,
-        inProgress: InProgressOperation?
+        inProgress: InProgressOperation?,
+        trunkRef: String?
     ) {
         self.branch = branch
         self.statusFacts = statusFacts
         self.graph = graph
         self.inProgress = inProgress
+        self.trunkRef = trunkRef
+    }
+
+    /// The trunk's short display name (last path component of `trunkRef`).
+    public var trunkName: String? {
+        guard let trunkRef else { return nil }
+        return String(trunkRef.split(separator: "/").last ?? Substring(trunkRef))
     }
 
     /// The single highest-priority badge to show on the tab, or nil when clean.

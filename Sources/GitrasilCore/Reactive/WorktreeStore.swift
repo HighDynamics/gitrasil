@@ -21,6 +21,10 @@ public final class WorktreeStore {
     /// True while a re-derive is in flight (drives the light refresh affordance, §11).
     public private(set) var isRefreshing = false
 
+    /// A message from the last failed/blocked mutation (dirty tree, git failure, nothing to undo),
+    /// shown as a dismissible banner. Cleared by `dismissMutationError()` or a successful mutation.
+    public private(set) var mutationError: String?
+
     public let worktreeURL: URL
 
     private let runner: GitRunning
@@ -31,7 +35,11 @@ public final class WorktreeStore {
     public init(worktreeURL: URL, trunkOverride: String? = nil) {
         self.worktreeURL = worktreeURL
         self.trunkOverride = trunkOverride
-        self.runner = GitRunner(workdir: worktreeURL)
+        // Never spawn an interactive editor for our own git commands (e.g. rebase --continue);
+        // the user resolves conflicts in their own editor/terminal.
+        self.runner = GitRunner(workdir: worktreeURL, extraEnvironment: [
+            "GIT_EDITOR": "true", "GIT_SEQUENCE_EDITOR": "true",
+        ])
         self.executor = WorktreeExecutor(runner: runner)
     }
 
@@ -95,6 +103,82 @@ public final class WorktreeStore {
             try await Derivations.fileDiff(source: source, path: path, runner: runner)
         }
         return try await task.value
+    }
+
+    // MARK: Mutations (design brief §9)
+
+    public func dismissMutationError() { mutationError = nil }
+
+    /// Rebase the current branch onto a target ref (a branch tip or trunk).
+    public func rebaseOnto(target: String) async {
+        await mutate { runner, branch in
+            _ = try await Mutations.rebaseOnto(target: target, branch: branch, runner: runner)
+        }
+    }
+
+    /// Drop a contiguous range of the current branch's own commits.
+    public func drop(oldest: String, newest: String) async {
+        await mutate { runner, branch in
+            _ = try await Mutations.drop(oldest: oldest, newest: newest, branch: branch, runner: runner)
+        }
+    }
+
+    /// Cherry-pick a contiguous range from another branch into the current one.
+    public func cherryPick(oldest: String, newest: String) async {
+        await mutate { runner, branch in
+            _ = try await Mutations.cherryPick(oldest: oldest, newest: newest, branch: branch, runner: runner)
+        }
+    }
+
+    /// Continue the in-progress operation (from the continue/abort bar).
+    public func continueOperation() async {
+        guard let operation = snapshot?.inProgress else { return }
+        await mutateNoBranch { runner in
+            _ = try await Mutations.continueOperation(operation, runner: runner)
+        }
+    }
+
+    /// Abort the in-progress operation.
+    public func abortOperation() async {
+        guard let operation = snapshot?.inProgress else { return }
+        await mutateNoBranch { runner in
+            try await Mutations.abortOperation(operation, runner: runner)
+        }
+    }
+
+    /// Undo the last mutation (reset to the most recent backup ref).
+    public func undo() async {
+        await mutate { runner, branch in try await Mutations.undo(branch: branch, runner: runner) }
+    }
+
+    /// Run a mutation that needs the current branch name, then re-derive authoritatively — a
+    /// mutation's completion drives the snapshot (arch decision #1), so the continue/abort bar and
+    /// badges reflect real git state whether the mutation completed or paused on a conflict.
+    private func mutate(_ operation: @Sendable @escaping (GitRunning, String) async throws -> Void) async {
+        guard let branch = snapshot?.branch.name else {
+            mutationError = MutationError.detachedHead.message
+            return
+        }
+        await runMutation { runner in try await operation(runner, branch) }
+    }
+
+    private func mutateNoBranch(_ operation: @Sendable @escaping (GitRunning) async throws -> Void) async {
+        await runMutation(operation)
+    }
+
+    private func runMutation(_ operation: @Sendable @escaping (GitRunning) async throws -> Void) async {
+        isRefreshing = true
+        let task = await executor.mutate { runner in try await operation(runner) }
+        do {
+            try await task.value
+            mutationError = nil
+        } catch let error as MutationError {
+            mutationError = error.message
+        } catch {
+            mutationError = String(describing: error)
+        }
+        isRefreshing = false
+        await refresh()   // authoritative re-derive after the mutation settles
     }
 
     private func installWatcher() async {
