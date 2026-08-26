@@ -16,7 +16,9 @@ extension Derivations {
     /// - Parameters:
     ///   - runner: git access for this worktree.
     ///   - trunkOverride: optional per-repo trunk override (engineering notes → Trunk detection).
-    public static func historyGraph(runner: GitRunning, trunkOverride: String? = nil) async throws -> HistoryGraph {
+    public static func historyGraph(
+        runner: GitRunning, trunkOverride: String? = nil, revealedBranches: [String] = []
+    ) async throws -> HistoryGraph {
         // 1. Resolve cw's HEAD commit. If it doesn't resolve, the repo has no commits yet.
         let headResult = try await runner.run(["rev-parse", "--verify", "-q", "HEAD^{commit}"])
         guard headResult.status == 0 else { return .empty }
@@ -57,13 +59,31 @@ extension Derivations {
             }
         }
 
-        // 8. Working-tree dirtiness (open-circle hint at the tip).
+        // 8. Revealed branches (cherry-pick sources): each branch's commits ahead of its merge-base
+        // with cw, as its own grey lane.
+        var revealedLanes: [GraphSegment] = []
+        for name in revealedBranches {
+            let tipResult = try await runner.run(["rev-parse", "--verify", "-q", "\(name)^{commit}"])
+            guard tipResult.status == 0 else { continue }
+            let tip = tipResult.trimmedStdout
+            // Only commits unique to this branch — exclude anything already reachable from cw or the
+            // trunk lane, so main's ahead-commits don't reappear under a branch that descends from main.
+            var excludes = [head]
+            if let trunkTip { excludes.append(trunkTip) }
+            let commits = try await commits(tip: tip, excluding: excludes, runner: runner)
+            if !commits.isEmpty {
+                revealedLanes.append(GraphSegment(kind: .revealed(branch: name), commits: commits))
+            }
+        }
+
+        // 9. Working-tree dirtiness (open-circle hint at the tip).
         let dirty = try await isDirty(runner: runner)
 
         return HistoryGraph(
             meetingCommit: meetingNode,
             segments: segments,
             trunkAhead: trunkAhead,
+            revealedLanes: revealedLanes,
             branchesBetween: branchesBetween,
             isEmpty: false,
             isDetached: isDetached,
@@ -117,9 +137,23 @@ extension Derivations {
         return tips
     }
 
+    /// All local branch short names (for the "show other branches" picker).
+    public static func localBranches(runner: GitRunning) async throws -> [String] {
+        let out = try await runner.runChecked(["for-each-ref", "--format=%(refname:short)", "refs/heads"])
+        return (out.stdoutString ?? "").split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+    }
+
     /// First-parent commits in a range (`A..B`), newest first, merges collapsed to mainline.
     static func commits(range: String, runner: GitRunning) async throws -> [CommitNode] {
         let out = try await runner.runChecked(["log", "--first-parent", "-z", "--format=\(commitFormat)", range])
+        return parseCommits(out.stdoutString ?? "")
+    }
+
+    /// First-parent commits reachable from `tip` but not from any `excluding` ref, newest first.
+    static func commits(tip: String, excluding: [String], runner: GitRunning) async throws -> [CommitNode] {
+        var args = ["log", "--first-parent", "-z", "--format=\(commitFormat)", tip]
+        args.append(contentsOf: excluding.map { "^\($0)" })
+        let out = try await runner.runChecked(args)
         return parseCommits(out.stdoutString ?? "")
     }
 

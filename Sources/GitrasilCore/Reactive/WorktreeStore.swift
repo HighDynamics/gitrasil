@@ -25,6 +25,9 @@ public final class WorktreeStore {
     /// shown as a dismissible banner. Cleared by `dismissMutationError()` or a successful mutation.
     public private(set) var mutationError: String?
 
+    /// Branches the user has revealed in the graph (cherry-pick/rebase sources, design brief §5).
+    public private(set) var revealedBranches: Set<String> = []
+
     public let worktreeURL: URL
 
     private let runner: GitRunning
@@ -63,8 +66,10 @@ public final class WorktreeStore {
         defer { isRefreshing = false }
 
         let override = trunkOverride
+        let revealed = Array(revealedBranches)
         let task = await executor.read(.snapshot) { runner in
-            try await Derivations.worktreeSnapshot(runner: runner, trunkOverride: override)
+            try await Derivations.worktreeSnapshot(
+                runner: runner, trunkOverride: override, revealedBranches: revealed)
         }
         do {
             snapshot = try await task.value
@@ -103,6 +108,36 @@ public final class WorktreeStore {
             try await Derivations.fileDiff(source: source, path: path, runner: runner)
         }
         return try await task.value
+    }
+
+    // MARK: Revealed branches (design brief §5, "show other branches")
+
+    /// Reveal a branch in the graph and re-derive.
+    public func reveal(_ branch: String) async {
+        revealedBranches.insert(branch)
+        await refresh()
+    }
+
+    /// Hide a previously-revealed branch.
+    public func hide(_ branch: String) async {
+        revealedBranches.remove(branch)
+        await refresh()
+    }
+
+    /// Local branches that can be revealed — all except the current worktree's branch, the trunk,
+    /// and the intermediate branches already shown in the graph.
+    public func availableBranches() async throws -> [String] {
+        let task = await executor.read(.custom("branches")) { runner in
+            try await Derivations.localBranches(runner: runner)
+        }
+        let all = try await task.value
+        var excluded = Set<String>()
+        if let name = snapshot?.branch.name { excluded.insert(name) }
+        if let trunk = snapshot?.trunkName { excluded.insert(trunk) }
+        for segment in snapshot?.graph.segments ?? [] {
+            if case .intermediate(let branch) = segment.kind { excluded.insert(branch) }
+        }
+        return all.filter { !excluded.contains($0) }
     }
 
     // MARK: Mutations (design brief §9)

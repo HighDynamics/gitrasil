@@ -4,8 +4,11 @@ extension Derivations {
 
     /// Assemble the full `WorktreeSnapshot` — the one immutable value the reactive store publishes.
     /// Folds the history graph, status facts, branch identity, and in-progress operation together.
-    public static func worktreeSnapshot(runner: GitRunning, trunkOverride: String? = nil) async throws -> WorktreeSnapshot {
-        let graph = try await historyGraph(runner: runner, trunkOverride: trunkOverride)
+    public static func worktreeSnapshot(
+        runner: GitRunning, trunkOverride: String? = nil, revealedBranches: [String] = []
+    ) async throws -> WorktreeSnapshot {
+        let graph = try await historyGraph(
+            runner: runner, trunkOverride: trunkOverride, revealedBranches: revealedBranches)
         let trunkRef = try? await resolveTrunk(runner: runner, override: trunkOverride)
 
         // In-progress operation (filesystem markers in the worktree's own git dir).

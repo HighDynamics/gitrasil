@@ -31,6 +31,9 @@ public struct GraphSegment: Sendable, Equatable {
         /// Trunk's ahead-commits, drawn as a separate grey lane forking from the meeting commit.
         /// Grey, labeled, truncatable.
         case trunkAhead(branch: String)
+        /// A branch the user revealed via "show other branches" — a cherry-pick source. Grey,
+        /// labeled, truncatable.
+        case revealed(branch: String)
     }
 
     /// Segments longer than this collapse to their tip by default (cw is exempt).
@@ -50,7 +53,7 @@ public struct GraphSegment: Sendable, Equatable {
     public var isTruncatable: Bool {
         switch kind {
         case .currentWorktree: return false
-        case .intermediate, .trunkAhead: return commits.count > Self.truncationThreshold
+        case .intermediate, .trunkAhead, .revealed: return commits.count > Self.truncationThreshold
         }
     }
 
@@ -65,7 +68,7 @@ public struct GraphSegment: Sendable, Equatable {
     public var branchLabel: String? {
         switch kind {
         case .currentWorktree: return nil
-        case .intermediate(let b), .trunkAhead(let b): return b
+        case .intermediate(let b), .trunkAhead(let b), .revealed(let b): return b
         }
     }
 }
@@ -84,6 +87,10 @@ public struct HistoryGraph: Sendable, Equatable {
     /// Trunk's ahead-commits as a separate grey fork lane off the meeting commit, when trunk is
     /// ahead; `nil` when trunk is not ahead.
     public let trunkAhead: GraphSegment?
+
+    /// Branches the user revealed via "show other branches" — additional grey lanes whose commits
+    /// are cherry-pick sources (design brief §5).
+    public let revealedLanes: [GraphSegment]
 
     /// How many intermediate branches sit between cw and trunk (drives the "N between" pill).
     public let branchesBetween: Int
@@ -104,6 +111,7 @@ public struct HistoryGraph: Sendable, Equatable {
         meetingCommit: CommitNode?,
         segments: [GraphSegment],
         trunkAhead: GraphSegment?,
+        revealedLanes: [GraphSegment] = [],
         branchesBetween: Int,
         isEmpty: Bool,
         isDetached: Bool,
@@ -113,6 +121,7 @@ public struct HistoryGraph: Sendable, Equatable {
         self.meetingCommit = meetingCommit
         self.segments = segments
         self.trunkAhead = trunkAhead
+        self.revealedLanes = revealedLanes
         self.branchesBetween = branchesBetween
         self.isEmpty = isEmpty
         self.isDetached = isDetached
@@ -122,6 +131,6 @@ public struct HistoryGraph: Sendable, Equatable {
 
     /// The empty-repository graph.
     public static let empty = HistoryGraph(
-        meetingCommit: nil, segments: [], trunkAhead: nil, branchesBetween: 0,
+        meetingCommit: nil, segments: [], trunkAhead: nil, revealedLanes: [], branchesBetween: 0,
         isEmpty: true, isDetached: false, isOnTrunk: false, hasUncommittedChanges: false)
 }

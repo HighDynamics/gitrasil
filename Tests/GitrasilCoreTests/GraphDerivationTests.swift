@@ -109,6 +109,45 @@ final class GraphDerivationTests: XCTestCase {
         XCTAssertEqual(graph.meetingCommit?.subject, "root-2")
     }
 
+    func testRevealedBranchAppearsAsLane() async throws {
+        let repo = try FixtureRepo()
+        try await repo.initRepo()
+        try await repo.commitFile("a.txt", "a\n", message: "root")
+        try await repo.createBranch("other")
+        try await repo.commitFile("o.txt", "o\n", message: "on-other-1")
+        try await repo.commitFile("o2.txt", "o2\n", message: "on-other-2")
+        try await repo.checkout("main")
+        try await repo.createBranch("cw")
+        try await repo.commitFile("cw.txt", "cw\n", message: "cw-1")
+
+        let bare = try await Derivations.historyGraph(runner: repo.runner)
+        XCTAssertTrue(bare.revealedLanes.isEmpty, "nothing revealed by default")
+
+        let graph = try await Derivations.historyGraph(runner: repo.runner, revealedBranches: ["other"])
+        XCTAssertEqual(graph.revealedLanes.count, 1)
+        XCTAssertEqual(graph.revealedLanes.first?.kind, .revealed(branch: "other"))
+        XCTAssertEqual(graph.revealedLanes.first?.commits.map(\.subject), ["on-other-2", "on-other-1"])
+    }
+
+    func testRevealedBranchExcludesTrunkAndCwCommits() async throws {
+        let repo = try FixtureRepo()
+        try await repo.initRepo()
+        try await repo.commitFile("a.txt", "a\n", message: "root")
+        try await repo.createBranch("cw")
+        try await repo.commitFile("cw.txt", "cw\n", message: "cw-1")
+        try await repo.checkout("main")
+        try await repo.commitFile("m.txt", "m\n", message: "main-ahead")
+        // Branch off the advanced main, so main-ahead is an ancestor of the revealed branch.
+        try await repo.createBranch("fix")
+        try await repo.commitFile("fix.txt", "f\n", message: "fix-only")
+        try await repo.checkout("cw")
+
+        let graph = try await Derivations.historyGraph(runner: repo.runner, revealedBranches: ["fix"])
+        let lane = graph.revealedLanes.first
+        XCTAssertEqual(lane?.commits.map(\.subject), ["fix-only"],
+                       "revealed lane shows only commits unique to the branch, not main's ahead-commits")
+    }
+
     func testUncommittedChangesFlag() async throws {
         let repo = try await Topology.caseA()
         try repo.writeFile("cw1.txt", "dirty")
