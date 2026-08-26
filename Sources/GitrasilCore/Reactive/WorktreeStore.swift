@@ -25,8 +25,10 @@ public final class WorktreeStore {
     /// shown as a dismissible banner. Cleared by `dismissMutationError()` or a successful mutation.
     public private(set) var mutationError: String?
 
-    /// Branches the user has revealed in the graph (cherry-pick/rebase sources, design brief §5).
-    public private(set) var revealedBranches: Set<String> = []
+    /// Branches the user has revealed in the graph, in reveal order (cherry-pick/rebase sources,
+    /// design brief §5). Order is preserved so a lane placed on screen never moves when a later
+    /// branch is revealed — the graph assigns lanes in this order.
+    public private(set) var revealedBranches: [String] = []
 
     public let worktreeURL: URL
 
@@ -66,7 +68,7 @@ public final class WorktreeStore {
         defer { isRefreshing = false }
 
         let override = trunkOverride
-        let revealed = Array(revealedBranches)
+        let revealed = revealedBranches
         let task = await executor.read(.snapshot) { runner in
             try await Derivations.worktreeSnapshot(
                 runner: runner, trunkOverride: override, revealedBranches: revealed)
@@ -120,15 +122,15 @@ public final class WorktreeStore {
 
     // MARK: Revealed branches (design brief §5, "show other branches")
 
-    /// Reveal a branch in the graph and re-derive.
+    /// Reveal a branch in the graph (appended in reveal order) and re-derive.
     public func reveal(_ branch: String) async {
-        revealedBranches.insert(branch)
+        if !revealedBranches.contains(branch) { revealedBranches.append(branch) }
         await refresh()
     }
 
     /// Hide a previously-revealed branch.
     public func hide(_ branch: String) async {
-        revealedBranches.remove(branch)
+        revealedBranches.removeAll { $0 == branch }
         await refresh()
     }
 
