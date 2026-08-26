@@ -55,7 +55,9 @@ extension Derivations {
         if let trunkTip, trunkTip != meeting {
             let aheadCommits = try await commits(range: "\(meeting)..\(trunkTip)", runner: runner)
             if !aheadCommits.isEmpty {
-                trunkAhead = GraphSegment(kind: .trunkAhead(branch: trunkLocalName), commits: aheadCommits)
+                // Trunk's ahead-commits fork from the meeting commit.
+                trunkAhead = GraphSegment(kind: .trunkAhead(branch: trunkLocalName),
+                                          commits: aheadCommits, forkBase: meeting)
             }
         }
 
@@ -72,7 +74,13 @@ extension Derivations {
             if let trunkTip { excludes.append(trunkTip) }
             let commits = try await commits(tip: tip, excluding: excludes, runner: runner)
             if !commits.isEmpty {
-                revealedLanes.append(GraphSegment(kind: .revealed(branch: name), commits: commits))
+                // The lane forks from the first-parent of its oldest commit (which may sit in
+                // another lane — e.g. a branch off an advanced main rejoins at main's tip).
+                let oldest = commits[commits.count - 1].sha
+                let parentResult = try await runner.run(["rev-parse", "--verify", "-q", "\(oldest)^"])
+                let forkBase = parentResult.status == 0 ? parentResult.trimmedStdout : nil
+                revealedLanes.append(GraphSegment(kind: .revealed(branch: name),
+                                                  commits: commits, forkBase: forkBase))
             }
         }
 

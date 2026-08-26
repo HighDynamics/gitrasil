@@ -44,9 +44,14 @@ public struct GraphSegment: Sendable, Equatable {
     /// expand/collapse state survives re-derives instead of being reset on every FSEvents tick.
     public let commits: [CommitNode]
 
-    public init(kind: Kind, commits: [CommitNode]) {
+    /// For a forking lane (trunk-ahead or revealed), the SHA of the commit its oldest commit forks
+    /// from — where its lane rejoins the graph. `nil` for the cw spine and intermediates.
+    public let forkBase: String?
+
+    public init(kind: Kind, commits: [CommitNode], forkBase: String? = nil) {
         self.kind = kind
         self.commits = commits
+        self.forkBase = forkBase
     }
 
     /// cw is never truncated; other segments truncate when longer than the threshold.

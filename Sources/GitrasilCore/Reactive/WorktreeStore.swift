@@ -92,6 +92,14 @@ public final class WorktreeStore {
         return try await task.value
     }
 
+    /// Metadata and the union of files for a selected contiguous range (drives the detail panel).
+    public func rangeDetail(oldest: String, newest: String) async throws -> CommitDetail {
+        let task = await executor.read(.custom("range:\(oldest):\(newest)")) { runner in
+            try await Derivations.rangeDetail(oldest: oldest, newest: newest, runner: runner)
+        }
+        return try await task.value
+    }
+
     /// Working-tree status decorations and the ignored-path set (drives the directory explorer).
     public func explorerData() async throws -> (status: [String: WorkingFileStatus], ignored: Set<String>) {
         let task = await executor.read(.custom("explorer")) { runner in
