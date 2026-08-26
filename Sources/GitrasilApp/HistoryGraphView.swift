@@ -292,8 +292,15 @@ private struct Row {
         for segment in graph.segments {
             for commit in segment.commits { spineDepth[commit.sha] = depthCursor; depthCursor += 1 }
         }
-        if let meeting = graph.meetingCommit { spineDepth[meeting.sha] = depthCursor }
-        let belowMeeting = depthCursor + 1   // fork points not on the spine sort outermost
+        if let meeting = graph.meetingCommit { spineDepth[meeting.sha] = depthCursor; depthCursor += 1 }
+        // Continue depth up main's ahead-commits (oldest→newest), past the meeting: a branch that
+        // forks off one of them is farther from cw than main's own meeting fork, so it sorts beyond
+        // main — deterministically, by where on main it forks — instead of all landing at a single
+        // fallback depth.
+        for commit in (graph.trunkAhead?.commits.reversed() ?? []) {
+            spineDepth[commit.sha] = depthCursor; depthCursor += 1
+        }
+        let belowMeeting = depthCursor   // fork points on nothing drawn sort outermost of all
 
         // Assign fork branches to lanes. `laneSegments[i]` is one lane, bottom→top; `laneTops[i]` is
         // that lane's current tip SHA (advances as continuations stack on top).
@@ -314,9 +321,10 @@ private struct Row {
 
         // Order lanes by fork proximity to cw: a lane's fork point is its base (first) segment's
         // forkBase; shallower depth → inner lane (nearer cw). A branch that forks off cw's own spine
-        // therefore sits inside main, which forks at the meeting (deepest) and lands outermost. The
-        // sort is stable on the original order so equal-depth lanes keep their reveal order — a lane
-        // already on screen never swaps places when another is revealed.
+        // therefore sits inside main, which forks at the meeting — so main is drawn outside every
+        // spine-rooted branch. (A branch that instead forks off one of main's own ahead-commits sits
+        // further out still.) The sort is stable on the original order so equal-depth lanes keep their
+        // reveal order — a lane already on screen never swaps places when another is revealed.
         func forkDepth(_ chain: [GraphSegment]) -> Int {
             guard let base = chain.first?.forkBase else { return belowMeeting }
             return spineDepth[base] ?? belowMeeting
@@ -353,10 +361,20 @@ private struct Row {
 
         // Attach ref pills for revealed branches that point at a drawn commit but add no commits.
         if !graph.revealedPointers.isEmpty {
+            var matched = Set<String>()
             for i in rows.indices {
                 if let sha = rows[i].commit?.sha, let names = graph.revealedPointers[sha] {
                     rows[i].extraLabels = names
+                    matched.insert(sha)
                 }
+            }
+            // A pointer whose tip is behind the meeting (an ancestor of it) matches no drawn row;
+            // anchor it on the meeting commit so the branch still surfaces instead of vanishing —
+            // exactly the drop this mechanism exists to prevent.
+            let orphaned = graph.revealedPointers.filter { !matched.contains($0.key) }
+                .flatMap(\.value).sorted()
+            if !orphaned.isEmpty, let meetingIndex = rows.lastIndex(where: { $0.isMeeting }) {
+                rows[meetingIndex].extraLabels += orphaned
             }
         }
         return rows
