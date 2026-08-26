@@ -148,6 +148,31 @@ final class GraphDerivationTests: XCTestCase {
                        "revealed lane shows only commits unique to the branch, not main's ahead-commits")
     }
 
+    func testRevealedBranchPartitionsAtIntermediary() async throws {
+        let repo = try FixtureRepo()
+        try await repo.initRepo()                                    // main
+        try await repo.commitFile("r.txt", "r\n", message: "root")
+        try await repo.createBranch("seed")
+        try await repo.commitFile("b1.txt", "1\n", message: "base-1")
+        try await repo.commitFile("b2.txt", "2\n", message: "base-2")
+        try await repo.git(["branch", "mid"])                        // intermediary tip at base-2
+        try await repo.commitFile("o1.txt", "1\n", message: "own-1")
+        try await repo.commitFile("o2.txt", "2\n", message: "own-2") // seed tip
+        try await repo.checkout("main")
+        try await repo.createBranch("cw")                            // cw diverges from seed at root
+        try await repo.commitFile("cw.txt", "c\n", message: "cw-1")
+
+        let graph = try await Derivations.historyGraph(runner: repo.runner, revealedBranches: ["seed"])
+        // seed's own commits stay a .revealed segment; the `mid` intermediary is split into its own
+        // .intermediate segment rather than being swallowed into seed's lane.
+        let revealed = graph.revealedLanes.first { if case .revealed = $0.kind { return true } else { return false } }
+        let intermediate = graph.revealedLanes.first { if case .intermediate = $0.kind { return true } else { return false } }
+        XCTAssertEqual(revealed?.kind, .revealed(branch: "seed"))
+        XCTAssertEqual(revealed?.commits.map(\.subject), ["own-2", "own-1"])
+        XCTAssertEqual(intermediate?.kind, .intermediate(branch: "mid"))
+        XCTAssertEqual(intermediate?.commits.map(\.subject), ["base-2", "base-1"])
+    }
+
     func testRevealedBranchWithNoOwnCommitsBecomesPointer() async throws {
         let repo = try FixtureRepo()
         try await repo.initRepo()

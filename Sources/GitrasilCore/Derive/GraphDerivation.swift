@@ -83,8 +83,12 @@ extension Derivations {
                 let oldest = commits[commits.count - 1].sha
                 let parentResult = try await runner.run(["rev-parse", "--verify", "-q", "\(oldest)^"])
                 let forkBase = parentResult.status == 0 ? parentResult.trimmedStdout : nil
-                revealedLanes.append(GraphSegment(kind: .revealed(branch: name),
-                                                  commits: commits, forkBase: forkBase))
+                // Partition at intermediary branch tips, mirroring the cw spine, so history that
+                // actually belongs to an intermediary branch isn't drawn as if this branch owned it:
+                // the branch's own commits form the top (.revealed) segment, each intermediary below
+                // becomes its own labeled .intermediate segment. They chain into one lane.
+                revealedLanes.append(contentsOf: partitionRevealedLane(
+                    commits, branch: name, branchTips: branchTips, baseForkBase: forkBase))
             } else {
                 // No unique commits — the branch points at a commit already drawn (its own tip).
                 revealedPointers[tip, default: []].append(name)
@@ -130,6 +134,37 @@ extension Derivations {
         }
         if !current.isEmpty { result.append(GraphSegment(kind: currentKind, commits: current)) }
         return result
+    }
+
+    /// Partition a revealed branch's unique commits (newest→oldest) at intermediary branch tips,
+    /// mirroring `partitionIntoSegments` for the cw spine. The top run is the branch's own commits
+    /// (`.revealed`); each branch tip below (skipping the branch's own tip at index 0) starts an
+    /// `.intermediate` segment. Segments are returned bottom→top with `forkBase` set — the bottom
+    /// forks from `baseForkBase`, each upper segment from the tip of the segment below it — so the
+    /// lane builder chains them into a single lane.
+    static func partitionRevealedLane(
+        _ commits: [CommitNode], branch: String, branchTips: [String: String], baseForkBase: String?
+    ) -> [GraphSegment] {
+        var runs: [(kind: GraphSegment.Kind, commits: [CommitNode])] = []
+        var kind: GraphSegment.Kind = .revealed(branch: branch)
+        var current: [CommitNode] = []
+        for (index, commit) in commits.enumerated() {
+            if index > 0, let tipBranch = branchTips[commit.sha] {
+                if !current.isEmpty { runs.append((kind, current)) }
+                kind = .intermediate(branch: tipBranch)
+                current = [commit]
+            } else {
+                current.append(commit)
+            }
+        }
+        if !current.isEmpty { runs.append((kind, current)) }
+
+        var out: [GraphSegment] = []
+        for (i, run) in runs.enumerated() {
+            let forkBase = i + 1 < runs.count ? runs[i + 1].commits.first?.sha : baseForkBase
+            out.append(GraphSegment(kind: run.kind, commits: run.commits, forkBase: forkBase))
+        }
+        return out.reversed()   // bottom→top, so the bottom creates the lane and upper runs continue it
     }
 
     /// Map of full-SHA → local branch short-name for branch tips, excluding the given names
