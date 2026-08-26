@@ -32,6 +32,10 @@ public actor WorktreeExecutor {
 
     /// Cancel handles for the currently-outstanding read of each kind (for coalescing).
     private var readCancels: [ReadKind: () -> Void] = [:]
+    /// Generation per kind, so a completed read only clears its own cancel entry (not a newer one
+    /// that superseded it). Without this the map grows without bound as the store issues per-sha /
+    /// per-path `.custom` reads.
+    private var readGenerations: [ReadKind: Int] = [:]
 
     public init(runner: GitRunning) {
         self.runner = runner
@@ -53,9 +57,21 @@ public actor WorktreeExecutor {
         _ operation: @Sendable @escaping (GitRunning) async throws -> T
     ) -> Task<T, Error> {
         readCancels[kind]?()
+        let generation = (readGenerations[kind] ?? 0) + 1
+        readGenerations[kind] = generation
         let task = enqueue(cancellable: true, operation)
         readCancels[kind] = { task.cancel() }
+        // Prune this kind's entry once the read settles, unless a newer read has superseded it.
+        // The Task inherits this actor's isolation, so clearRead runs isolated without a hop.
+        Task { _ = try? await task.value; self.clearRead(kind, generation: generation) }
         return task
+    }
+
+    private func clearRead(_ kind: ReadKind, generation: Int) {
+        if readGenerations[kind] == generation {
+            readCancels[kind] = nil
+            readGenerations[kind] = nil
+        }
     }
 
     private func enqueue<T: Sendable>(
