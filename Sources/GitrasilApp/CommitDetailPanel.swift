@@ -7,8 +7,10 @@ struct CommitDetailPanel: View {
     let detail: CommitDetail
     let selectedPath: String?
     let canDrop: Bool
+    let canCherryPick: Bool
     let onSelectFile: (FileChange) -> Void
     let onDrop: () -> Void
+    let onCherryPick: () -> Void
     let onClose: () -> Void
 
     var body: some View {
@@ -21,6 +23,11 @@ struct CommitDetailPanel: View {
                     Pill(text: "\(detail.commitCount) commits")
                 }
                 Spacer()
+                if canCherryPick {
+                    Button("Cherry-pick", systemImage: "arrow.down.doc", action: onCherryPick)
+                        .buttonStyle(.borderless)
+                        .help("Pick this commit into the current worktree")
+                }
                 if canDrop {
                     Button("Drop", systemImage: "trash", role: .destructive, action: onDrop)
                         .buttonStyle(.borderless)

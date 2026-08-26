@@ -21,6 +21,7 @@ struct WorktreeTabView: View {
     @State private var selectedExplorerPath: String?
 
     @State private var showTerminal = true
+    @State private var availableBranches: [String] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -206,30 +207,37 @@ struct WorktreeTabView: View {
     @ViewBuilder
     private func historyColumn(_ snapshot: WorktreeSnapshot) -> some View {
         VSplitView {
-            ScrollView([.vertical, .horizontal]) {
-                HistoryGraphView(
-                    graph: snapshot.graph,
-                    expandTruncated: expandTruncated,
-                    selectedSHA: selectedCommit?.sha,
-                    onSelect: selectCommit
-                )
-                .padding(16)
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if hasTruncation(snapshot.graph) {
-                    Button(expandTruncated ? "Collapse" : "Expand all") { expandTruncated.toggle() }
-                        .buttonStyle(.bordered)
-                        .padding(10)
+            VStack(spacing: 0) {
+                branchesToolbar
+                Divider()
+                ScrollView([.vertical, .horizontal]) {
+                    HistoryGraphView(
+                        graph: snapshot.graph,
+                        expandTruncated: expandTruncated,
+                        selectedSHA: selectedCommit?.sha,
+                        onSelect: selectCommit
+                    )
+                    .padding(16)
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if hasTruncation(snapshot.graph) {
+                        Button(expandTruncated ? "Collapse" : "Expand all") { expandTruncated.toggle() }
+                            .buttonStyle(.bordered)
+                            .padding(10)
+                    }
                 }
             }
+            .task { await loadBranches() }
 
             if let detail {
                 CommitDetailPanel(
                     detail: detail,
                     selectedPath: selectedFile?.path,
                     canDrop: selectedCommit.map(canDrop) ?? false,
+                    canCherryPick: selectedCommit.map(canCherryPick) ?? false,
                     onSelectFile: selectFile,
                     onDrop: dropSelected,
+                    onCherryPick: cherryPickSelected,
                     onClose: clearSelection
                 )
                 .frame(minHeight: 140, idealHeight: 220)
@@ -237,8 +245,45 @@ struct WorktreeTabView: View {
         }
     }
 
+    /// The "show other branches" control (design brief §5): reveal/hide branches as cherry-pick
+    /// sources in the graph.
+    private var branchesToolbar: some View {
+        HStack(spacing: 8) {
+            Menu {
+                if availableBranches.isEmpty {
+                    Text("No other branches").foregroundStyle(.secondary)
+                }
+                ForEach(availableBranches, id: \.self) { branch in
+                    let revealed = store.revealedBranches.contains(branch)
+                    Button {
+                        Task { revealed ? await store.hide(branch) : await store.reveal(branch) }
+                    } label: {
+                        Label(branch, systemImage: revealed ? "checkmark" : "circle")
+                    }
+                }
+            } label: {
+                Label("Show branches", systemImage: "arrow.triangle.branch")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+
+            if !store.revealedBranches.isEmpty {
+                Text(store.revealedBranches.sorted().joined(separator: ", "))
+                    .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+    }
+
     private func hasTruncation(_ graph: HistoryGraph) -> Bool {
-        graph.segments.contains(where: \.isTruncatable) || (graph.trunkAhead?.isTruncatable ?? false)
+        graph.segments.contains(where: \.isTruncatable)
+            || (graph.trunkAhead?.isTruncatable ?? false)
+            || graph.revealedLanes.contains(where: \.isTruncatable)
+    }
+
+    private func loadBranches() async {
+        availableBranches = (try? await store.availableBranches()) ?? []
     }
 
     /// History edits are available only on a clean, attached worktree with no operation in flight.
@@ -256,6 +301,20 @@ struct WorktreeTabView: View {
     private func dropSelected() {
         guard let commit = selectedCommit else { return }
         Task { await store.drop(oldest: commit.sha, newest: commit.sha) }
+    }
+
+    /// A commit can be cherry-picked when it's on a revealed (other-branch) lane and the worktree
+    /// is mutable.
+    private func canCherryPick(_ commit: CommitNode) -> Bool {
+        guard let snapshot = store.snapshot, isMutable(snapshot) else { return false }
+        return snapshot.graph.revealedLanes.contains { lane in
+            lane.commits.contains { $0.sha == commit.sha }
+        }
+    }
+
+    private func cherryPickSelected() {
+        guard let commit = selectedCommit else { return }
+        Task { await store.cherryPick(oldest: commit.sha, newest: commit.sha) }
     }
 }
 

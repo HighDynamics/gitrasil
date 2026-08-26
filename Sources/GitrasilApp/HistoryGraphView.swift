@@ -17,20 +17,22 @@ struct HistoryGraphView: View {
     private let railLeft: CGFloat = 18
     private let laneGap: CGFloat = 22
     private let dotRadius: CGFloat = 6
-    private var textX: CGFloat { railLeft + laneGap + 24 }
 
     private var rows: [Row] { Row.build(from: graph, expanded: expandTruncated) }
 
     var body: some View {
         let rows = self.rows
         let height = topPad * 2 + CGFloat(max(rows.count, 1)) * rowHeight
+        // Text column starts past the widest lane in use.
+        let maxLane = rows.map(\.lane).max() ?? 0
+        let textX = railLeft + laneGap * CGFloat(maxLane + 1) + 16
 
         Canvas { context, _ in
             drawConnectors(rows, in: &context)
             drawForkIntoMeeting(rows, in: &context)
-            drawNodes(rows, in: &context)
+            drawNodes(rows, textX: textX, in: &context)
         }
-        .frame(width: 640, height: height, alignment: .topLeading)
+        .frame(width: max(640, textX + 380), height: height, alignment: .topLeading)
         .contentShape(Rectangle())
         .gesture(SpatialTapGesture().onEnded { value in
             if let commit = commit(at: value.location, rows: rows) { onSelect(commit) }
@@ -65,18 +67,21 @@ struct HistoryGraphView: View {
         }
     }
 
-    /// The trunk-ahead lane rejoins the main lane at the meeting commit (a diagonal from the oldest
-    /// trunk-ahead row down to the meeting row).
+    /// Every forked lane (trunk-ahead and each revealed branch) rejoins the main lane at the meeting
+    /// commit — a diagonal from the lane's oldest row down to the meeting row.
     private func drawForkIntoMeeting(_ rows: [Row], in context: inout GraphicsContext) {
         guard let meeting = rows.lastIndex(where: { $0.isMeeting }) else { return }
-        guard let lastFork = rows.indices.filter({ rows[$0].lane == 1 }).last else { return }
-        var path = Path()
-        path.move(to: CGPoint(x: laneX(1), y: y(lastFork)))
-        path.addLine(to: CGPoint(x: laneX(0), y: y(meeting)))
-        context.stroke(path, with: .color(Color.gray.opacity(0.55)), lineWidth: 2)
+        let forkLanes = Set(rows.map(\.lane)).filter { $0 > 0 }
+        for lane in forkLanes {
+            guard let lastFork = rows.indices.filter({ rows[$0].lane == lane }).last else { continue }
+            var path = Path()
+            path.move(to: CGPoint(x: laneX(lane), y: y(lastFork)))
+            path.addLine(to: CGPoint(x: laneX(0), y: y(meeting)))
+            context.stroke(path, with: .color(Color.gray.opacity(0.55)), lineWidth: 2)
+        }
     }
 
-    private func drawNodes(_ rows: [Row], in context: inout GraphicsContext) {
+    private func drawNodes(_ rows: [Row], textX: CGFloat, in context: inout GraphicsContext) {
         for (index, row) in rows.enumerated() {
             let center = CGPoint(x: laneX(row.lane), y: y(index))
             switch row.content {
@@ -90,7 +95,7 @@ struct HistoryGraphView: View {
                 drawText(row.label, sha: commit.shortSHA, subject: commit.subject,
                          at: CGPoint(x: textX, y: y(index)), in: &context)
             case .hidden(let count):
-                drawHidden(count, at: center, in: &context)
+                drawHidden(count, at: center, textX: textX, in: &context)
             }
         }
     }
@@ -128,7 +133,7 @@ struct HistoryGraphView: View {
         context.draw(subjectText, at: CGPoint(x: x + shaSize.width, y: point.y), anchor: .leading)
     }
 
-    private func drawHidden(_ count: Int, at center: CGPoint, in context: inout GraphicsContext) {
+    private func drawHidden(_ count: Int, at center: CGPoint, textX: CGFloat, in context: inout GraphicsContext) {
         let dots = context.resolve(Text("⋮").font(.system(size: 15, weight: .bold)).foregroundColor(.secondary))
         context.draw(dots, at: center, anchor: .center)
         let text = context.resolve(Text("\(count) commit\(count == 1 ? "" : "s") hidden")
@@ -183,16 +188,22 @@ private struct Row {
             }
         }
 
-        if let trunk = graph.trunkAhead {
-            let commits = expanded ? trunk.commits : trunk.collapsedCommits
+        // Each forked lane (trunk-ahead, then revealed branches) gets the next lane index.
+        var nextLane = 1
+        func appendLane(_ segment: GraphSegment) {
+            let lane = nextLane; nextLane += 1
+            let commits = expanded ? segment.commits : segment.collapsedCommits
             for (i, commit) in commits.enumerated() {
-                rows.append(Row(content: .commit(commit, open: false), lane: 1,
-                                isIdentity: false, label: i == 0 ? trunk.branchLabel : nil))
+                rows.append(Row(content: .commit(commit, open: false), lane: lane,
+                                isIdentity: false, label: i == 0 ? segment.branchLabel : nil))
             }
-            if trunk.isTruncatable && !expanded {
-                rows.append(Row(content: .hidden(trunk.hiddenCount), lane: 1, isIdentity: false, label: nil))
+            if segment.isTruncatable && !expanded {
+                rows.append(Row(content: .hidden(segment.hiddenCount), lane: lane, isIdentity: false, label: nil))
             }
         }
+
+        if let trunk = graph.trunkAhead { appendLane(trunk) }
+        for revealed in graph.revealedLanes { appendLane(revealed) }
 
         if let meeting = graph.meetingCommit {
             rows.append(Row(content: .meeting(meeting, open: false), lane: 0, isIdentity: false, label: nil))
