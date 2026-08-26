@@ -64,6 +64,9 @@ extension Derivations {
         // 8. Revealed branches (cherry-pick sources): each branch's commits ahead of its merge-base
         // with cw, as its own grey lane.
         var revealedLanes: [GraphSegment] = []
+        // A revealed branch whose tip already sits on the graph has no commits of its own; it's kept
+        // as a ref pill on that commit (revealedPointers) rather than dropped.
+        var revealedPointers: [String: [String]] = [:]
         // Exclude anything already drawn: cw, the trunk lane, and each revealed lane processed so
         // far — so a commit shared between lanes appears once, in the first lane that claims it.
         var revealedExcludes = [head]
@@ -82,6 +85,9 @@ extension Derivations {
                 let forkBase = parentResult.status == 0 ? parentResult.trimmedStdout : nil
                 revealedLanes.append(GraphSegment(kind: .revealed(branch: name),
                                                   commits: commits, forkBase: forkBase))
+            } else {
+                // No unique commits — the branch points at a commit already drawn (its own tip).
+                revealedPointers[tip, default: []].append(name)
             }
         }
 
@@ -93,6 +99,7 @@ extension Derivations {
             segments: segments,
             trunkAhead: trunkAhead,
             revealedLanes: revealedLanes,
+            revealedPointers: revealedPointers,
             branchesBetween: branchesBetween,
             isEmpty: false,
             isDetached: isDetached,

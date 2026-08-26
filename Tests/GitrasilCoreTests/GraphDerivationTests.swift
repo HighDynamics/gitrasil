@@ -148,6 +148,21 @@ final class GraphDerivationTests: XCTestCase {
                        "revealed lane shows only commits unique to the branch, not main's ahead-commits")
     }
 
+    func testRevealedBranchWithNoOwnCommitsBecomesPointer() async throws {
+        let repo = try FixtureRepo()
+        try await repo.initRepo()
+        try await repo.commitFile("a.txt", "a\n", message: "root")
+        try await repo.createBranch("cw")
+        let c1 = try await repo.commitFile("c1.txt", "1\n", message: "c1")
+        try await repo.commitFile("c2.txt", "2\n", message: "cw tip")
+        try await repo.git(["branch", "parked", c1])   // points at a commit already on cw's spine
+
+        let graph = try await Derivations.historyGraph(runner: repo.runner, revealedBranches: ["parked"])
+        XCTAssertTrue(graph.revealedLanes.isEmpty, "no lane — parked adds no commits of its own")
+        XCTAssertEqual(graph.revealedPointers[c1], ["parked"],
+                       "the branch is kept as a ref pill on the commit it points at, not dropped")
+    }
+
     func testUncommittedChangesFlag() async throws {
         let repo = try await Topology.caseA()
         try repo.writeFile("cw1.txt", "dirty")

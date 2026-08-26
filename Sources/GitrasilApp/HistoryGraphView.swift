@@ -192,12 +192,8 @@ private struct CommitRowView: View {
         case .commit(let commit), .meeting(let commit):
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    if let label = row.label {
-                        Text(label)
-                            .font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
-                            .padding(.horizontal, 6).padding(.vertical, 1)
-                            .background(Color.gray.opacity(0.18), in: RoundedRectangle(cornerRadius: 4))
-                    }
+                    if let label = row.label { refPill(label) }
+                    ForEach(row.extraLabels, id: \.self) { refPill($0) }
                     Text(commit.subject).font(.system(size: 13)).lineLimit(1)
                 }
                 Text("\(commit.shortSHA) · \(commit.author) · \(RelativeTime.string(commit.date))")
@@ -222,6 +218,13 @@ private struct CommitRowView: View {
                 actionButton("Drop", systemImage: "trash", destructive: true) { onDrop() }
             }
         }
+    }
+
+    private func refPill(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(Color.gray.opacity(0.18), in: RoundedRectangle(cornerRadius: 4))
     }
 
     private func actionButton(_ title: String, systemImage: String, destructive: Bool = false,
@@ -262,6 +265,9 @@ private struct Row {
     let isDropSource: Bool
     let isCherrySource: Bool
     let rebaseBranch: String?
+    /// Revealed branches that point at this exact commit but have no commits of their own — shown as
+    /// extra ref pills (a worktree parked at an intermediary, say).
+    var extraLabels: [String] = []
 
     var isMeeting: Bool { if case .meeting = content { return true } else { return false } }
     var commit: CommitNode? {
@@ -278,8 +284,19 @@ private struct Row {
     /// lane's current tip continues straight up in that lane (a chain stacks into one line); a second
     /// branch off the same commit takes a new lane to the left and joins with an angular fork.
     static func build(from graph: HistoryGraph, expanded: Bool) -> [Row] {
-        // Assign fork branches to lanes. `laneSegments[i]` is lane (i+1), bottom→top; `laneTops[i]`
-        // is that lane's current tip SHA (advances as continuations stack on top).
+        // Depth of every commit on cw's spine (cw's own commits, then intermediaries, newest→oldest)
+        // and the meeting at the bottom. A fork lane is ordered by how deep its fork point sits: the
+        // shallower (closer to cw's tip), the nearer cw it's drawn.
+        var spineDepth: [String: Int] = [:]
+        var depthCursor = 0
+        for segment in graph.segments {
+            for commit in segment.commits { spineDepth[commit.sha] = depthCursor; depthCursor += 1 }
+        }
+        if let meeting = graph.meetingCommit { spineDepth[meeting.sha] = depthCursor }
+        let belowMeeting = depthCursor + 1   // fork points not on the spine sort outermost
+
+        // Assign fork branches to lanes. `laneSegments[i]` is one lane, bottom→top; `laneTops[i]` is
+        // that lane's current tip SHA (advances as continuations stack on top).
         var laneSegments: [[GraphSegment]] = []
         var laneTops: [String] = []
 
@@ -288,12 +305,28 @@ private struct Row {
                 laneSegments[i].append(segment)                       // continue this lane
                 laneTops[i] = segment.commits.first?.sha ?? laneTops[i]
             } else {
-                laneSegments.append([segment])                        // new lane, to the left
+                laneSegments.append([segment])                        // new lane
                 laneTops.append(segment.commits.first?.sha ?? "")
             }
         }
-        if let trunk = graph.trunkAhead { addBranch(trunk) }          // lane 1
+        if let trunk = graph.trunkAhead { addBranch(trunk) }
         for revealed in graph.revealedLanes { addBranch(revealed) }
+
+        // Order lanes by fork proximity to cw: a lane's fork point is its base (first) segment's
+        // forkBase; shallower depth → inner lane (nearer cw). A branch that forks off cw's own spine
+        // therefore sits inside main, which forks at the meeting (deepest) and lands outermost. The
+        // sort is stable on the original order so equal-depth lanes keep their reveal order — a lane
+        // already on screen never swaps places when another is revealed.
+        func forkDepth(_ chain: [GraphSegment]) -> Int {
+            guard let base = chain.first?.forkBase else { return belowMeeting }
+            return spineDepth[base] ?? belowMeeting
+        }
+        laneSegments = laneSegments.enumerated()
+            .sorted { a, b in
+                let da = forkDepth(a.element), db = forkDepth(b.element)
+                return da == db ? a.offset < b.offset : da < db
+            }
+            .map(\.element)
 
         var rows: [Row] = []
 
@@ -316,6 +349,15 @@ private struct Row {
             rows.append(Row(content: .meeting(meeting), lane: 0, isIdentity: false, open: false,
                             label: nil, forkBaseSHA: nil, isDropSource: false,
                             isCherrySource: false, rebaseBranch: nil))
+        }
+
+        // Attach ref pills for revealed branches that point at a drawn commit but add no commits.
+        if !graph.revealedPointers.isEmpty {
+            for i in rows.indices {
+                if let sha = rows[i].commit?.sha, let names = graph.revealedPointers[sha] {
+                    rows[i].extraLabels = names
+                }
+            }
         }
         return rows
     }
