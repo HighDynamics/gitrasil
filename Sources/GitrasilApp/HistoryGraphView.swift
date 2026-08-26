@@ -13,6 +13,8 @@ import GitrasilCore
 /// mutation buttons on hover; shift-click extends a contiguous range.
 struct HistoryGraphView: View {
     let graph: HistoryGraph
+    /// The current worktree's identity color, used for its spine, dots, and selection highlight.
+    var identityColor: Color = Palette.worktreeColors[0]
     let expandTruncated: Bool
     let selectedSHAs: Set<String>
     let isMutable: Bool
@@ -57,6 +59,7 @@ struct HistoryGraphView: View {
                         ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                             CommitRowView(
                                 row: row,
+                                identityColor: identityColor,
                                 leadingInset: railWidth,
                                 isSelected: row.commit.map { selectedSHAs.contains($0.sha) } ?? false,
                                 isMutable: isMutable,
@@ -103,7 +106,7 @@ struct HistoryGraphView: View {
                 var path = Path()
                 path.move(to: CGPoint(x: laneX(lane, maxLane: maxLane), y: y(a)))
                 path.addLine(to: CGPoint(x: laneX(lane, maxLane: maxLane), y: y(b)))
-                let color = rows[a].isIdentity ? Palette.identity : Color.gray.opacity(0.55)
+                let color = rows[a].isIdentity ? identityColor : Color.gray.opacity(0.55)
                 context.stroke(path, with: .color(color), lineWidth: 2)
             }
         }
@@ -137,9 +140,9 @@ struct HistoryGraphView: View {
             if selectedSHAs.contains(commit.sha) {
                 let halo = CGRect(x: center.x - dotRadius - 4, y: center.y - dotRadius - 4,
                                   width: (dotRadius + 4) * 2, height: (dotRadius + 4) * 2)
-                context.fill(Path(ellipseIn: halo), with: .color(Palette.identity.opacity(0.25)))
+                context.fill(Path(ellipseIn: halo), with: .color(identityColor.opacity(0.25)))
             }
-            let color = row.isIdentity ? Palette.identity : Color.gray
+            let color = row.isIdentity ? identityColor : Color.gray
             let rect = CGRect(x: center.x - dotRadius, y: center.y - dotRadius, width: dotRadius * 2, height: dotRadius * 2)
             if row.open {
                 context.fill(Path(ellipseIn: rect), with: .color(Color(nsColor: .windowBackgroundColor)))
@@ -157,6 +160,7 @@ struct HistoryGraphView: View {
 
 private struct CommitRowView: View {
     let row: Row
+    let identityColor: Color
     let leadingInset: CGFloat
     let isSelected: Bool
     let isMutable: Bool
@@ -234,7 +238,7 @@ private struct CommitRowView: View {
 
     private var background: some View {
         RoundedRectangle(cornerRadius: 5)
-            .fill(isSelected ? Palette.identity.opacity(0.14) : (hovered ? Color.gray.opacity(0.08) : .clear))
+            .fill(isSelected ? identityColor.opacity(0.14) : (hovered ? Color.gray.opacity(0.08) : .clear))
             .padding(.horizontal, 4)
     }
 }

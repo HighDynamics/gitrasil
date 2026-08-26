@@ -2,31 +2,31 @@ import SwiftUI
 import AppKit
 import GitrasilCore
 
-/// Opens a repository (auto from an argument, or via a picker) and hosts its worktree view.
-/// v1 shows the repository's main worktree; the multi-tab / add-worktree flow is a later handoff.
+/// Opens a repository (auto from an argument, or via a picker) and hosts its worktree tabs — one
+/// tab per worktree, via `RepositoryStore`.
 struct RootView: View {
-    @State private var store: WorktreeStore?
+    @State private var repo: RepositoryStore?
 
     var body: some View {
         Group {
-            if let store {
-                WorktreeTabView(store: store)
+            if let repo {
+                RepositoryView(repo: repo)
             } else {
                 OpenRepoView(onOpen: open)
             }
         }
         .task {
             // Auto-open a repo passed as the first CLI argument, if it looks like one.
-            guard store == nil, CommandLine.arguments.count > 1 else { return }
+            guard repo == nil, CommandLine.arguments.count > 1 else { return }
             let url = URL(fileURLWithPath: CommandLine.arguments[1])
             if isRepository(url) { open(url) }
         }
     }
 
     private func open(_ url: URL) {
-        let store = WorktreeStore(worktreeURL: url)
-        self.store = store
-        Task { await store.start() }
+        let repo = RepositoryStore(anchorURL: url)
+        self.repo = repo
+        Task { await repo.start() }
     }
 
     private func isRepository(_ url: URL) -> Bool {

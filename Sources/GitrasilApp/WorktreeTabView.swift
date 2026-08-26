@@ -6,6 +6,9 @@ import GitrasilCore
 /// live, reactive snapshot.
 struct WorktreeTabView: View {
     let store: WorktreeStore
+    /// This worktree's identity color (from `RepositoryStore.colorIndex`), shared by the header dot
+    /// and the graph spine.
+    var identityColor: Color = Palette.worktreeColors[0]
     @State private var expandTruncated = false
 
     @State private var selectedCommit: CommitNode?
@@ -124,7 +127,7 @@ struct WorktreeTabView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Circle().fill(Palette.identity).frame(width: 12, height: 12)
+            Circle().fill(identityColor).frame(width: 12, height: 12)
 
             Text(branchLabel).font(.system(size: 15, weight: .semibold))
 
@@ -255,6 +258,7 @@ struct WorktreeTabView: View {
                 // HEAD sits), so it isn't wrapped in an outer ScrollView here.
                 HistoryGraphView(
                     graph: snapshot.graph,
+                    identityColor: identityColor,
                     expandTruncated: expandTruncated,
                     selectedSHAs: selectedSHAs,
                     isMutable: isMutable(snapshot),
@@ -371,8 +375,21 @@ struct WorktreeTabView: View {
 // MARK: - Small components
 
 enum Palette {
-    /// The single worktree's identity color for v1 (per-worktree assignment is later work).
-    static let identity = Color(red: 0.80, green: 0.40, blue: 0.20)
+    /// Distinct per-worktree identity colors, chosen by `RepositoryStore`'s stable color index so a
+    /// worktree keeps its color across the tab strip, header, and graph spine.
+    static let worktreeColors: [Color] = [
+        Color(red: 0.80, green: 0.40, blue: 0.20),   // terracotta (the original v1 color)
+        Color(red: 0.20, green: 0.50, blue: 0.70),   // blue
+        Color(red: 0.35, green: 0.55, blue: 0.30),   // green
+        Color(red: 0.55, green: 0.35, blue: 0.65),   // purple
+        Color(red: 0.78, green: 0.58, blue: 0.15),   // amber
+        Color(red: 0.70, green: 0.30, blue: 0.45),   // magenta
+    ]
+
+    /// The identity color for a worktree's stable color index (wraps if there are more worktrees
+    /// than colors).
+    static func identity(_ index: Int) -> Color { worktreeColors[index % worktreeColors.count] }
+
     static let grey = Color.secondary
 }
 
