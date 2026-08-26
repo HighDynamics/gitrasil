@@ -45,15 +45,6 @@ private struct DirectoryContents: View {
     let onOpen: (String) -> Void
 
     @State private var entries: [Entry]?
-    private let isRoot: Bool
-
-    init(url: URL, relativePath: String, depth: Int, status: [String: WorkingFileStatus],
-         ignored: Set<String>, filter: String, selectedPath: String?, onOpen: @escaping (String) -> Void) {
-        self.url = url; self.relativePath = relativePath; self.depth = depth
-        self.status = status; self.ignored = ignored; self.filter = filter
-        self.selectedPath = selectedPath; self.onOpen = onOpen
-        self.isRoot = relativePath.isEmpty
-    }
 
     var body: some View {
         ForEach(visibleEntries) { entry in
@@ -69,11 +60,20 @@ private struct DirectoryContents: View {
                     .onTapGesture { onOpen(entry.relativePath) }
             }
         }
-        .onAppear { if entries == nil { entries = Entry.load(url, relativePath, ignored, status) } }
+        // Enumerate off the main actor so a filter that force-expands many directories doesn't
+        // freeze the UI with synchronous `contentsOfDirectory` walks on the main thread.
+        .task { await loadIfNeeded() }
+    }
+
+    private func loadIfNeeded() async {
+        guard entries == nil else { return }
+        entries = await Task.detached(priority: .userInitiated) { [url, relativePath, ignored, status] in
+            Entry.load(url, relativePath, ignored, status)
+        }.value
     }
 
     private var visibleEntries: [Entry] {
-        let all = entries ?? (isRoot ? Entry.load(url, relativePath, ignored, status) : [])
+        let all = entries ?? []
         guard !filter.isEmpty else { return all }
         // Keep directories (to navigate into) and files matching the filter.
         return all.filter { $0.isDirectory || $0.name.localizedCaseInsensitiveContains(filter) }
@@ -155,7 +155,7 @@ private struct FileLeaf: View {
 }
 
 /// One tree entry (a file or directory) with its worktree-relative path.
-private struct Entry: Identifiable {
+private struct Entry: Identifiable, Sendable {
     let url: URL
     let name: String
     let relativePath: String
