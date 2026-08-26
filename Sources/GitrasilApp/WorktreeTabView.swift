@@ -8,7 +8,7 @@ struct WorktreeTabView: View {
     let store: WorktreeStore
     /// This worktree's identity color (from `RepositoryStore.colorIndex`), shared by the header dot
     /// and the graph spine.
-    var identityColor: Color = Palette.worktreeColors[0]
+    var identityColor: Color = Palette.identity(0)
     /// Identity color per branch for branches that are themselves worktrees, so a lane in this graph
     /// that represents another worktree is drawn in that worktree's color.
     var worktreeColors: [String: Color] = [:]
@@ -390,11 +390,20 @@ enum Palette {
         Color(red: 0.55, green: 0.35, blue: 0.65),   // purple
         Color(red: 0.78, green: 0.58, blue: 0.15),   // amber
         Color(red: 0.70, green: 0.30, blue: 0.45),   // magenta
+        Color(red: 0.20, green: 0.60, blue: 0.58),   // teal
+        Color(red: 0.55, green: 0.55, blue: 0.25),   // olive
+        Color(red: 0.40, green: 0.45, blue: 0.72),   // indigo
+        Color(red: 0.80, green: 0.45, blue: 0.50),   // rose
     ]
 
-    /// The identity color for a worktree's stable color index (wraps if there are more worktrees
-    /// than colors).
-    static func identity(_ index: Int) -> Color { worktreeColors[index % worktreeColors.count] }
+    /// The identity color for a worktree's stable color index. Beyond the hand-picked set it rotates
+    /// the hue by the golden angle so any number of worktrees stay visually separable — no two share
+    /// a color. (The theme pass can revisit the exact palette.)
+    static func identity(_ index: Int) -> Color {
+        if index < worktreeColors.count { return worktreeColors[index] }
+        let hue = (0.07 + Double(index) * 0.61803398875).truncatingRemainder(dividingBy: 1.0)
+        return Color(hue: hue, saturation: 0.52, brightness: 0.68)
+    }
 
     static let grey = Color.secondary
 }

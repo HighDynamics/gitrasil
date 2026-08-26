@@ -14,7 +14,7 @@ import GitrasilCore
 struct HistoryGraphView: View {
     let graph: HistoryGraph
     /// The current worktree's identity color, used for its spine, dots, and selection highlight.
-    var identityColor: Color = Palette.worktreeColors[0]
+    var identityColor: Color = Palette.identity(0)
     /// Identity color per branch for branches that are themselves worktrees, so any lane that
     /// represents a worktree (a revealed branch, trunk, an intermediate) is drawn in that worktree's
     /// color rather than grey. Branches with no worktree stay grey.
