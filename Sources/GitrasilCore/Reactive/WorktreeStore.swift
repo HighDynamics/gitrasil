@@ -42,8 +42,16 @@ public final class WorktreeStore {
         self.trunkOverride = trunkOverride
         // Never spawn an interactive editor for our own git commands (e.g. rebase --continue);
         // the user resolves conflicts in their own editor/terminal.
+        //
+        // GIT_OPTIONAL_LOCKS=0 makes our frequent reads (git status on every refresh) truly
+        // read-only: without it, status takes the optional index lock to refresh the stat cache —
+        // and after a reset --hard (undo) or rebase, files share the index's second-granularity
+        // mtime and stay "racy", so status re-locks on every call. The transient .git/index.lock
+        // create/delete lands in the watched git dir, firing FSEvents → refresh → status → lock, a
+        // self-sustaining ~100% CPU loop while the app looks idle. Mutations still take their real
+        // (non-optional) locks, so history edits are unaffected.
         self.runner = GitRunner(workdir: worktreeURL, extraEnvironment: [
-            "GIT_EDITOR": "true", "GIT_SEQUENCE_EDITOR": "true",
+            "GIT_EDITOR": "true", "GIT_SEQUENCE_EDITOR": "true", "GIT_OPTIONAL_LOCKS": "0",
         ])
         self.executor = WorktreeExecutor(runner: runner)
     }
