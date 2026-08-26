@@ -43,6 +43,18 @@ final class CommitDetailDerivationTests: XCTestCase {
         XCTAssertEqual(detail.files.first?.previousPath, "a.txt")
     }
 
+    func testRangeDetailIncludingRootCommit() async throws {
+        let repo = try FixtureRepo()
+        try await repo.initRepo()
+        let root = try await repo.commitFile("a.txt", "a\n", message: "root")
+        let c2 = try await repo.commitFile("b.txt", "b\n", message: "c2")
+
+        // Range whose oldest is the parentless root — must fall back to the empty tree, not throw.
+        let detail = try await Derivations.rangeDetail(oldest: root, newest: c2, runner: repo.runner)
+        XCTAssertEqual(detail.commitCount, 2)
+        XCTAssertEqual(Set(detail.files.map(\.path)), ["a.txt", "b.txt"])
+    }
+
     func testRangeDetailUnionsFiles() async throws {
         let repo = try FixtureRepo()
         try await repo.initRepo()

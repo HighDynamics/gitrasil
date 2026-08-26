@@ -35,7 +35,10 @@ public enum Mutations {
     public static func cherryPick(oldest: String, newest: String, branch: String, runner: GitRunning) async throws -> MutationOutcome {
         try await ensureMutable(runner: runner)
         _ = try await writeBackup(branch: branch, runner: runner)
-        return try await runPausable(["cherry-pick", "\(oldest)^..\(newest)"], runner: runner)
+        // A single commit uses the plain form (which works even for a parentless root commit);
+        // a span uses the `oldest^..newest` range.
+        let arg = oldest == newest ? oldest : "\(oldest)^..\(newest)"
+        return try await runPausable(["cherry-pick", arg], runner: runner)
     }
 
     // MARK: Conflict flow
@@ -61,8 +64,11 @@ public enum Mutations {
 
     // MARK: Undo
 
-    /// Reset the branch to its most recent backup ref (single-level undo for v1).
+    /// Reset the branch to its most recent backup ref (single-level undo for v1). Blocked on a
+    /// dirty or detached worktree, like every other mutation — `reset --hard` would otherwise
+    /// discard uncommitted work, contradicting the "block on dirty, never auto-stash" model.
     public static func undo(branch: String, runner: GitRunning) async throws {
+        try await ensureMutable(runner: runner)
         guard let latest = try await latestBackup(branch: branch, runner: runner) else {
             throw MutationError.noBackup
         }

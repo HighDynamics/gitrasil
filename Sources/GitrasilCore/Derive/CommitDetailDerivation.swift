@@ -19,8 +19,16 @@ extension Derivations {
     /// across the whole span, each with its net change type (design brief §5).
     public static func rangeDetail(oldest: String, newest: String, runner: GitRunning) async throws -> CommitDetail {
         let node = try await commit(newest, runner: runner)
-        let count = Int(try await runner.runChecked(["rev-list", "--count", "\(oldest)^..\(newest)"]).trimmedStdout) ?? 1
-        let out = try await runner.runChecked(["diff", "--name-status", "-M", "-z", "\(oldest)^", newest])
+        // A parentless (root) oldest has no `oldest^`; fall back to the empty tree so a
+        // root-inclusive range still resolves (mirrors DiffDerivation).
+        let hasParent = (try? await runner.runChecked(["rev-parse", "--verify", "-q", "\(oldest)^"])) != nil
+        let left = hasParent ? "\(oldest)^" : emptyTreeHash
+
+        let countArgs = hasParent ? ["rev-list", "--count", "\(oldest)^..\(newest)"]
+                                  : ["rev-list", "--count", newest]
+        let count = Int(try await runner.runChecked(countArgs).trimmedStdout) ?? 1
+
+        let out = try await runner.runChecked(["diff", "--name-status", "-M", "-z", left, newest])
         let files = parseNameStatus(out.stdoutString ?? "")
         return CommitDetail(commit: node, fullMessage: node.subject, files: files, commitCount: count)
     }

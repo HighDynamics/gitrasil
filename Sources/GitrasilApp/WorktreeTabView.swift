@@ -155,6 +155,8 @@ struct WorktreeTabView: View {
                 Label("Undo", systemImage: "arrow.uturn.backward")
             }
             .buttonStyle(.borderless)
+            .disabled(store.snapshot.map { !isMutable($0) } ?? true)
+            .help(mutabilityReason ?? "Undo the last history edit")
             Button { showTerminal.toggle() } label: {
                 Label("Terminal", systemImage: "terminal")
             }

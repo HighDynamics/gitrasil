@@ -98,6 +98,23 @@ final class MutationsEngineTests: XCTestCase {
         XCTAssertNil(stillInProgress)
     }
 
+    func testUndoBlockedOnDirtyTree() async throws {
+        let repo = try FixtureRepo()
+        try await repo.initRepo()
+        try await repo.commitFile("a.txt", "a\n", message: "root")
+        try await repo.createBranch("cw")
+        let c1 = try await repo.commitFile("b.txt", "b\n", message: "c1")
+        _ = try await Mutations.drop(oldest: c1, newest: c1, branch: "cw", runner: repo.runner)
+
+        try repo.writeFile("a.txt", "dirty\n")   // dirty the tree
+        do {
+            try await Mutations.undo(branch: "cw", runner: repo.runner)
+            XCTFail("undo must not reset --hard over uncommitted work")
+        } catch MutationError.workingTreeDirty {
+            // expected — undo blocks like every other mutation
+        }
+    }
+
     func testDirtyTreeBlocksMutation() async throws {
         let repo = try FixtureRepo()
         try await repo.initRepo()

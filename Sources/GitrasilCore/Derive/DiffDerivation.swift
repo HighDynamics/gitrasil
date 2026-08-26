@@ -3,7 +3,7 @@ import Foundation
 extension Derivations {
 
     /// The empty-tree object hash — a stable diff baseline for a parentless (root) commit.
-    private static let emptyTreeHash = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+    static let emptyTreeHash = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
     /// Compute a view-only file diff for the given source (design brief §6). Renders git's own
     /// unified-diff output; binary differences are flagged for external handoff rather than shown.
