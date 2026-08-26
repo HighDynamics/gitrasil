@@ -62,6 +62,17 @@ private final class DataBox: @unchecked Sendable {
     var err = Data()
 }
 
+public extension GitRunner {
+    /// Environment shared by the app's git runners, so the two stores can't drift:
+    /// - `GIT_EDITOR`/`GIT_SEQUENCE_EDITOR=true` never open an interactive editor (e.g. during
+    ///   `rebase --continue`); the user resolves conflicts in their own editor/terminal.
+    /// - `GIT_OPTIONAL_LOCKS=0` keeps our frequent reads truly read-only (see `WorktreeStore` for
+    ///   the FSEvents lock-loop this prevents).
+    static let appEnvironment: [String: String] = [
+        "GIT_EDITOR": "true", "GIT_SEQUENCE_EDITOR": "true", "GIT_OPTIONAL_LOCKS": "0",
+    ]
+}
+
 /// The real runner: launches `git` via `/usr/bin/env` so it honors the user's PATH,
 /// exactly like their own terminal (the whole reason we shell out instead of using libgit2).
 public struct GitRunner: GitRunning {

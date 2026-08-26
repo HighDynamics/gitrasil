@@ -24,7 +24,6 @@ public final class RepositoryStore {
 
     private let anchorURL: URL
     private let runner: GitRunning
-    private let makeRunnerEnvironment: [String: String]
 
     private var stores: [URL: WorktreeStore] = [:]
     private var colorIndexByPath: [URL: Int] = [:]
@@ -35,10 +34,7 @@ public final class RepositoryStore {
     ///   worktree is selected first when it resolves to one.
     public init(anchorURL: URL) {
         self.anchorURL = anchorURL.standardizedFileURL
-        self.makeRunnerEnvironment = [
-            "GIT_EDITOR": "true", "GIT_SEQUENCE_EDITOR": "true", "GIT_OPTIONAL_LOCKS": "0",
-        ]
-        self.runner = GitRunner(workdir: anchorURL, extraEnvironment: makeRunnerEnvironment)
+        self.runner = GitRunner(workdir: anchorURL, extraEnvironment: GitRunner.appEnvironment)
     }
 
     /// Enumerate worktrees, select one, and begin watching for add/remove. Safe to call once.
@@ -77,24 +73,22 @@ public final class RepositoryStore {
         return store
     }
 
-    /// The selected worktree's store, or nil before the first enumeration.
-    public var selectedStore: WorktreeStore? {
-        selectedPath.map { store(for: $0) }
-    }
-
     /// A stable identity-color index for a worktree, assigned on first sighting and preserved across
     /// refreshes so a tab never changes color when another worktree is added or removed.
     public func colorIndex(for path: URL) -> Int {
         colorIndexByPath[path] ?? 0
     }
 
-    /// Re-enumerate worktrees. Publishes only when the list actually changed, drops stores for
-    /// worktrees that disappeared, and keeps the selection valid.
+    /// Re-enumerate worktrees. Publishes only when what the tab strip shows actually changed, drops
+    /// stores for worktrees that disappeared, and keeps the selection valid.
     public func refreshWorktrees() async {
         do {
             let fresh = try await Derivations.worktrees(runner: runner).filter { !$0.isBare }
             lastError = nil
-            guard fresh != worktrees else { return }
+            // Compare on the fields the strip renders — not `head`, which moves on every commit in
+            // any worktree and is shown only for detached ones. Otherwise every commit would
+            // re-publish `worktrees` and re-render the tabs.
+            guard fresh.map(Self.tabSignature) != worktrees.map(Self.tabSignature) else { return }
 
             for info in fresh where colorIndexByPath[info.path] == nil {
                 colorIndexByPath[info.path] = nextColorIndex
@@ -110,10 +104,19 @@ public final class RepositoryStore {
             worktrees = fresh
             if let selectedPath, !livePaths.contains(selectedPath) {
                 self.selectedPath = fresh.first?.path
+                // Pre-create the reselected store here too, so the view body only reads an existing
+                // store (never mutates `stores` during a view update).
+                if let path = self.selectedPath { _ = store(for: path) }
             }
         } catch {
             lastError = String(describing: error)
         }
+    }
+
+    /// What the tab strip actually distinguishes: identity, label, and — only when detached — the
+    /// HEAD it displays. Deliberately excludes `head` for attached worktrees.
+    private static func tabSignature(_ w: WorktreeInfo) -> String {
+        "\(w.path.path)|\(w.branch ?? "")|\(w.isDetached)|\(w.isLocked)|\(w.isMain)|\(w.isDetached ? (w.head ?? "") : "")"
     }
 
     private func installWatcher() async {
