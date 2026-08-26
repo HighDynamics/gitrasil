@@ -1,95 +1,96 @@
 import SwiftUI
 import GitrasilCore
 
-/// Draws the simplified history graph: the current-worktree spine (identity color) with its
-/// intermediate branch segments and the meeting commit at the base, plus trunk's ahead-commits as
-/// a separate grey fork lane. Truncated segments collapse to a "N hidden" row. A first, legible
-/// rendering — the topology doc's structure made visible; the AppKit-canvas polish comes later.
+/// Draws the simplified history graph as a railroad: a narrow multi-lane rail on the left (dots +
+/// connectors, with trunk's ahead-commits forking into their own lane and rejoining at the meeting
+/// commit) and a single commit-subject column to its right. Every commit is one row; the current
+/// worktree's lane is its identity color, everything else grey. Truncated segments collapse to a
+/// "N hidden" row.
 struct HistoryGraphView: View {
     let graph: HistoryGraph
     let expandTruncated: Bool
     var selectedSHA: String? = nil
     var onSelect: (CommitNode) -> Void = { _ in }
 
-    private let rowHeight: CGFloat = 46
-    private let topPad: CGFloat = 14
-    private let spineX: CGFloat = 22
-    private let trunkX: CGFloat = 168
+    private let rowHeight: CGFloat = 44
+    private let topPad: CGFloat = 12
+    private let railLeft: CGFloat = 18
+    private let laneGap: CGFloat = 22
     private let dotRadius: CGFloat = 6
+    private var textX: CGFloat { railLeft + laneGap + 24 }
 
-    private var spine: [Row] { Row.spine(of: graph, expanded: expandTruncated) }
-    private var trunk: [Row] { Row.trunkAhead(of: graph, expanded: expandTruncated) }
+    private var rows: [Row] { Row.build(from: graph, expanded: expandTruncated) }
 
     var body: some View {
-        let rows = max(spine.count, trunk.count)
-        let height = topPad * 2 + CGFloat(max(rows, 1)) * rowHeight
+        let rows = self.rows
+        let height = topPad * 2 + CGFloat(max(rows.count, 1)) * rowHeight
 
         Canvas { context, _ in
-            drawLane(spine, x: spineX, in: &context)
-            if !trunk.isEmpty {
-                drawLane(trunk, x: trunkX, in: &context)
-                connectTrunkToMeeting(&context)
-            }
-            drawNodes(spine, x: spineX, textX: spineX + 16, in: &context)
-            drawNodes(trunk, x: trunkX, textX: trunkX + 16, in: &context)
+            drawConnectors(rows, in: &context)
+            drawForkIntoMeeting(rows, in: &context)
+            drawNodes(rows, in: &context)
         }
-        .frame(width: 620, height: height, alignment: .topLeading)
+        .frame(width: 640, height: height, alignment: .topLeading)
         .contentShape(Rectangle())
         .gesture(SpatialTapGesture().onEnded { value in
-            if let commit = commit(at: value.location) { onSelect(commit) }
+            if let commit = commit(at: value.location, rows: rows) { onSelect(commit) }
         })
     }
 
-    /// Map a tap location to the commit under it, if any.
-    private func commit(at location: CGPoint) -> CommitNode? {
-        let index = Int((location.y - topPad) / rowHeight)
-        let onTrunk = !trunk.isEmpty && location.x > (spineX + trunkX) / 2
-        let rows = onTrunk ? trunk : spine
-        guard index >= 0, index < rows.count else { return nil }
-        switch rows[index].content {
-        case .commit(let c, _), .meeting(let c, _): return c
-        case .hidden: return nil
-        }
-    }
-
     private func y(_ index: Int) -> CGFloat { topPad + CGFloat(index) * rowHeight + rowHeight / 2 }
+    private func laneX(_ lane: Int) -> CGFloat { railLeft + CGFloat(lane) * laneGap }
+
+    private func commit(at location: CGPoint, rows: [Row]) -> CommitNode? {
+        let index = Int((location.y - topPad) / rowHeight)
+        guard index >= 0, index < rows.count else { return nil }
+        return rows[index].commit
+    }
 
     // MARK: Drawing
 
-    private func drawLane(_ rows: [Row], x: CGFloat, in context: inout GraphicsContext) {
-        guard rows.count > 1 else { return }
-        for i in 0..<(rows.count - 1) {
-            var path = Path()
-            path.move(to: CGPoint(x: x, y: y(i)))
-            path.addLine(to: CGPoint(x: x, y: y(i + 1)))
-            let color = rows[i].isIdentity ? Palette.identity : Color.gray.opacity(0.55)
-            context.stroke(path, with: .color(color), lineWidth: 2)
+    /// Connect consecutive rows within each lane. Lane rows need not be adjacent in the list (a
+    /// trunk-ahead run sits between the last intermediate commit and the meeting), so we connect
+    /// consecutive rows *of the same lane*, which draws the main lane straight past the fork.
+    private func drawConnectors(_ rows: [Row], in context: inout GraphicsContext) {
+        let lanes = Set(rows.map(\.lane))
+        for lane in lanes {
+            let indices = rows.indices.filter { rows[$0].lane == lane }
+            for (a, b) in zip(indices, indices.dropFirst()) {
+                var path = Path()
+                path.move(to: CGPoint(x: laneX(lane), y: y(a)))
+                path.addLine(to: CGPoint(x: laneX(lane), y: y(b)))
+                let color = rows[b].isIdentity ? Palette.identity : Color.gray.opacity(0.55)
+                context.stroke(path, with: .color(color), lineWidth: 2)
+            }
         }
     }
 
-    private func connectTrunkToMeeting(_ context: inout GraphicsContext) {
-        guard let last = trunk.indices.last, let meetingIndex = spine.indices.last else { return }
+    /// The trunk-ahead lane rejoins the main lane at the meeting commit (a diagonal from the oldest
+    /// trunk-ahead row down to the meeting row).
+    private func drawForkIntoMeeting(_ rows: [Row], in context: inout GraphicsContext) {
+        guard let meeting = rows.lastIndex(where: { $0.isMeeting }) else { return }
+        guard let lastFork = rows.indices.filter({ rows[$0].lane == 1 }).last else { return }
         var path = Path()
-        path.move(to: CGPoint(x: trunkX, y: y(last)))
-        path.addLine(to: CGPoint(x: spineX, y: y(meetingIndex)))
+        path.move(to: CGPoint(x: laneX(1), y: y(lastFork)))
+        path.addLine(to: CGPoint(x: laneX(0), y: y(meeting)))
         context.stroke(path, with: .color(Color.gray.opacity(0.55)), lineWidth: 2)
     }
 
-    private func drawNodes(_ rows: [Row], x: CGFloat, textX: CGFloat, in context: inout GraphicsContext) {
-        for (i, row) in rows.enumerated() {
-            let center = CGPoint(x: x, y: y(i))
+    private func drawNodes(_ rows: [Row], in context: inout GraphicsContext) {
+        for (index, row) in rows.enumerated() {
+            let center = CGPoint(x: laneX(row.lane), y: y(index))
             switch row.content {
             case .commit(let commit, let open), .meeting(let commit, let open):
-                if let selectedSHA, commit.sha == selectedSHA {
+                if commit.sha == selectedSHA {
                     let halo = CGRect(x: center.x - dotRadius - 4, y: center.y - dotRadius - 4,
                                       width: (dotRadius + 4) * 2, height: (dotRadius + 4) * 2)
                     context.fill(Path(ellipseIn: halo), with: .color(Palette.identity.opacity(0.25)))
                 }
                 drawDot(at: center, identity: row.isIdentity, open: open, ring: row.isMeeting, in: &context)
                 drawText(row.label, sha: commit.shortSHA, subject: commit.subject,
-                         at: CGPoint(x: textX, y: y(i)), in: &context)
+                         at: CGPoint(x: textX, y: y(index)), in: &context)
             case .hidden(let count):
-                drawHidden(count, at: center, textX: textX, in: &context)
+                drawHidden(count, at: center, in: &context)
             }
         }
     }
@@ -101,7 +102,7 @@ struct HistoryGraphView: View {
             context.fill(Path(ellipseIn: rect), with: .color(Color(nsColor: .windowBackgroundColor)))
             context.stroke(Path(ellipseIn: rect), with: .color(color), lineWidth: 2)
         } else if ring {
-            context.stroke(Path(ellipseIn: rect.insetBy(dx: -1, dy: -1)), with: .color(color), lineWidth: 2)
+            context.stroke(Path(ellipseIn: rect), with: .color(color), lineWidth: 2)
         } else {
             context.fill(Path(ellipseIn: rect), with: .color(color))
         }
@@ -111,8 +112,7 @@ struct HistoryGraphView: View {
         var x = point.x
         if let label {
             let pill = context.resolve(Text(label)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.secondary))
+                .font(.system(size: 10, weight: .semibold)).foregroundColor(.secondary))
             let size = pill.measure(in: CGSize(width: 400, height: 20))
             let bg = CGRect(x: x, y: point.y - size.height / 2 - 1, width: size.width + 10, height: size.height + 2)
             context.fill(Path(roundedRect: bg, cornerRadius: 4), with: .color(Color.gray.opacity(0.18)))
@@ -120,22 +120,19 @@ struct HistoryGraphView: View {
             x += size.width + 16
         }
         let shaText = context.resolve(Text(sha + "  ")
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundColor(.secondary))
+            .font(.system(size: 11, design: .monospaced)).foregroundColor(.secondary))
         let shaSize = shaText.measure(in: CGSize(width: 200, height: 20))
         context.draw(shaText, at: CGPoint(x: x, y: point.y), anchor: .leading)
 
-        let subjectText = context.resolve(Text(truncate(subject, 52))
-            .font(.system(size: 12)))
+        let subjectText = context.resolve(Text(truncate(subject, 60)).font(.system(size: 12)))
         context.draw(subjectText, at: CGPoint(x: x + shaSize.width, y: point.y), anchor: .leading)
     }
 
-    private func drawHidden(_ count: Int, at center: CGPoint, textX: CGFloat, in context: inout GraphicsContext) {
+    private func drawHidden(_ count: Int, at center: CGPoint, in context: inout GraphicsContext) {
         let dots = context.resolve(Text("⋮").font(.system(size: 15, weight: .bold)).foregroundColor(.secondary))
         context.draw(dots, at: center, anchor: .center)
         let text = context.resolve(Text("\(count) commit\(count == 1 ? "" : "s") hidden")
-            .font(.system(size: 11).italic())
-            .foregroundColor(.secondary))
+            .font(.system(size: 11).italic()).foregroundColor(.secondary))
         context.draw(text, at: CGPoint(x: textX, y: center.y), anchor: .leading)
     }
 
@@ -144,9 +141,7 @@ struct HistoryGraphView: View {
     }
 }
 
-// MARK: - Row view model
-
-/// A single rendered graph row, flattened from the topology structure for drawing.
+/// One rendered graph row: a commit (or meeting, or a "N hidden" marker) placed in a lane.
 private struct Row {
     enum Content {
         case commit(CommitNode, open: Bool)
@@ -155,45 +150,52 @@ private struct Row {
     }
 
     let content: Content
+    /// 0 = the current-worktree spine (with its intermediate branches and the meeting commit);
+    /// 1 = trunk's ahead-commits forking off.
+    let lane: Int
     let isIdentity: Bool
     let label: String?
 
     var isMeeting: Bool { if case .meeting = content { return true } else { return false } }
 
-    /// The worktree spine: cw's commits (identity), then each intermediate segment, then meeting.
-    static func spine(of graph: HistoryGraph, expanded: Bool) -> [Row] {
+    var commit: CommitNode? {
+        switch content {
+        case .commit(let c, _), .meeting(let c, _): return c
+        case .hidden: return nil
+        }
+    }
+
+    /// Flatten the graph into a single ordered row list: the cw spine and intermediates (lane 0),
+    /// then trunk's ahead-commits (lane 1), then the meeting commit (lane 0) at the base.
+    static func build(from graph: HistoryGraph, expanded: Bool) -> [Row] {
         var rows: [Row] = []
+
         for segment in graph.segments {
             let isIdentity = segment.kind == .currentWorktree
             let commits = expanded ? segment.commits : segment.collapsedCommits
             for (i, commit) in commits.enumerated() {
                 let open = isIdentity && i == 0 && graph.hasUncommittedChanges
-                rows.append(Row(content: .commit(commit, open: open),
-                                isIdentity: isIdentity,
-                                label: i == 0 ? segment.branchLabel : nil))
+                rows.append(Row(content: .commit(commit, open: open), lane: 0,
+                                isIdentity: isIdentity, label: i == 0 ? segment.branchLabel : nil))
             }
             if segment.isTruncatable && !expanded {
-                rows.append(Row(content: .hidden(segment.hiddenCount), isIdentity: false, label: nil))
+                rows.append(Row(content: .hidden(segment.hiddenCount), lane: 0, isIdentity: false, label: nil))
             }
         }
-        if let meeting = graph.meetingCommit {
-            rows.append(Row(content: .meeting(meeting, open: false), isIdentity: false, label: nil))
-        }
-        return rows
-    }
 
-    /// The trunk-ahead fork lane (grey), when trunk is ahead.
-    static func trunkAhead(of graph: HistoryGraph, expanded: Bool) -> [Row] {
-        guard let segment = graph.trunkAhead else { return [] }
-        var rows: [Row] = []
-        let commits = expanded ? segment.commits : segment.collapsedCommits
-        for (i, commit) in commits.enumerated() {
-            rows.append(Row(content: .commit(commit, open: false),
-                            isIdentity: false,
-                            label: i == 0 ? segment.branchLabel : nil))
+        if let trunk = graph.trunkAhead {
+            let commits = expanded ? trunk.commits : trunk.collapsedCommits
+            for (i, commit) in commits.enumerated() {
+                rows.append(Row(content: .commit(commit, open: false), lane: 1,
+                                isIdentity: false, label: i == 0 ? trunk.branchLabel : nil))
+            }
+            if trunk.isTruncatable && !expanded {
+                rows.append(Row(content: .hidden(trunk.hiddenCount), lane: 1, isIdentity: false, label: nil))
+            }
         }
-        if segment.isTruncatable && !expanded {
-            rows.append(Row(content: .hidden(segment.hiddenCount), isIdentity: false, label: nil))
+
+        if let meeting = graph.meetingCommit {
+            rows.append(Row(content: .meeting(meeting, open: false), lane: 0, isIdentity: false, label: nil))
         }
         return rows
     }
