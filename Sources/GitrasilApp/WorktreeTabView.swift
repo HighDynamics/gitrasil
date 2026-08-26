@@ -251,20 +251,19 @@ struct WorktreeTabView: View {
             VStack(spacing: 0) {
                 branchesToolbar
                 Divider()
-                ScrollView([.vertical, .horizontal]) {
-                    HistoryGraphView(
-                        graph: snapshot.graph,
-                        expandTruncated: expandTruncated,
-                        selectedSHAs: selectedSHAs,
-                        isMutable: isMutable(snapshot),
-                        mutabilityReason: mutabilityReason,
-                        onSelect: selectCommit,
-                        onDrop: dropCommit,
-                        onCherryPick: cherryPickCommit,
-                        onRebase: rebaseOnto
-                    )
-                    .padding(16)
-                }
+                // HistoryGraphView owns its own scroll (it starts pinned to the bottom, where cw's
+                // HEAD sits), so it isn't wrapped in an outer ScrollView here.
+                HistoryGraphView(
+                    graph: snapshot.graph,
+                    expandTruncated: expandTruncated,
+                    selectedSHAs: selectedSHAs,
+                    isMutable: isMutable(snapshot),
+                    mutabilityReason: mutabilityReason,
+                    onSelect: selectCommit,
+                    onDrop: dropCommit,
+                    onCherryPick: cherryPickCommit,
+                    onRebase: rebaseOnto
+                )
                 .overlay(alignment: .bottomTrailing) {
                     if hasTruncation(snapshot.graph) {
                         Button(expandTruncated ? "Collapse" : "Expand all") { expandTruncated.toggle() }

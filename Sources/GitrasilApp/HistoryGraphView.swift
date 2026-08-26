@@ -2,10 +2,15 @@ import SwiftUI
 import AppKit
 import GitrasilCore
 
-/// The full history graph: a Canvas "rail" (dots, lane connectors, and fork lines drawn to each
-/// lane's true parent commit) behind a column of SwiftUI commit rows. Each row shows subject +
-/// sha · author · time, highlights when selected, and reveals its contextual mutation buttons on
-/// hover (design brief §5, §9). Row and rail share one row height so they stay aligned.
+/// The full history graph. The diverging (meeting) commit is the bottom-most commit; branches fan
+/// upward from it. The current worktree — with its intermediate ancestors — is the right-most lane
+/// and the lowest branch (the first one off the diverging point), sitting just above the meeting.
+/// Other branches (trunk-ahead, then revealed) stack above it and to the left, each joining the
+/// commit it actually forks from. The view scrolls to HEAD by default.
+///
+/// A Canvas rail (dots + connectors) sits behind a column of SwiftUI commit rows; both share one
+/// row height so they stay aligned. Rows carry per-commit metadata and reveal their contextual
+/// mutation buttons on hover; shift-click extends a contiguous range.
 struct HistoryGraphView: View {
     let graph: HistoryGraph
     let expandTruncated: Bool
@@ -18,84 +23,114 @@ struct HistoryGraphView: View {
     var onRebase: (String) -> Void = { _ in }
 
     private let rowHeight: CGFloat = 52
-    private let railLeft: CGFloat = 18
+    private let leadingPad: CGFloat = 18
     private let laneGap: CGFloat = 22
     private let dotRadius: CGFloat = 6
 
     private var rows: [Row] { Row.build(from: graph, expanded: expandTruncated) }
+    private var headSHA: String? { graph.segments.first?.commits.first?.sha }
 
     var body: some View {
         let rows = self.rows
+        let headSHA = self.headSHA
         let maxLane = rows.map(\.lane).max() ?? 0
-        let railWidth = laneX(maxLane) + dotRadius + 14
+        let railWidth = leadingPad + CGFloat(maxLane) * laneGap + dotRadius + 16
         let height = CGFloat(max(rows.count, 1)) * rowHeight
 
-        ZStack(alignment: .topLeading) {
-            Canvas { context, _ in
-                drawConnectors(rows, in: &context)
-                drawForks(rows, in: &context)
-                drawDots(rows, in: &context)
-            }
-            .frame(width: railWidth, height: height)
-            .allowsHitTesting(false)
+        ScrollViewReader { proxy in
+            ScrollView([.vertical, .horizontal]) {
+                ZStack(alignment: .topLeading) {
+                    Canvas { context, _ in
+                        drawConnectors(rows, maxLane: maxLane, in: &context)
+                        drawForks(rows, maxLane: maxLane, in: &context)
+                        drawDots(rows, maxLane: maxLane, in: &context)
+                    }
+                    .frame(width: railWidth, height: height)
+                    .allowsHitTesting(false)
 
-            VStack(spacing: 0) {
-                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                    CommitRowView(
-                        row: row,
-                        isSelected: row.commit.map { selectedSHAs.contains($0.sha) } ?? false,
-                        isMutable: isMutable,
-                        mutabilityReason: mutabilityReason,
-                        onTap: { extend in row.commit.map { onSelect($0, extend) } },
-                        onDrop: { row.commit.map(onDrop) },
-                        onCherryPick: { row.commit.map(onCherryPick) },
-                        onRebase: onRebase
-                    )
-                    .frame(height: rowHeight)
+                    // Rows span the full width (the rail shows through behind them) and inset their
+                    // content past the rail, so scrolling to a row keeps the rail on-screen.
+                    VStack(spacing: 0) {
+                        ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                            CommitRowView(
+                                row: row,
+                                leadingInset: railWidth,
+                                isSelected: row.commit.map { selectedSHAs.contains($0.sha) } ?? false,
+                                isMutable: isMutable,
+                                mutabilityReason: mutabilityReason,
+                                onTap: { extend in row.commit.map { onSelect($0, extend) } },
+                                onDrop: { row.commit.map(onDrop) },
+                                onCherryPick: { row.commit.map(onCherryPick) },
+                                onRebase: onRebase
+                            )
+                            .frame(height: rowHeight)
+                            .id(index)
+                        }
+                    }
                 }
+                .frame(width: railWidth + 560, height: height, alignment: .topLeading)
+                .padding(16)
             }
-            .padding(.leading, railWidth)
+            .onAppear { scrollToHead(proxy, rows: rows, headSHA: headSHA) }
+            .onChange(of: headSHA) { _, _ in scrollToHead(proxy, rows: rows, headSHA: headSHA) }
+            .onChange(of: rows.count) { _, _ in scrollToHead(proxy, rows: rows, headSHA: headSHA) }
         }
-        .frame(width: railWidth + 560, height: height, alignment: .topLeading)
     }
 
+    private func scrollToHead(_ proxy: ScrollViewProxy, rows: [Row], headSHA: String?) {
+        guard let headSHA, let index = rows.firstIndex(where: { $0.commit?.sha == headSHA }) else { return }
+        // Center HEAD vertically but keep the rail pinned to the leading edge (x: 0), so scrolling
+        // to HEAD doesn't push the lanes off-screen.
+        DispatchQueue.main.async { proxy.scrollTo(index, anchor: UnitPoint(x: 0, y: 0.5)) }
+    }
+
+    // Row 0 at the top; newest commits toward the top, the meeting commit at the bottom. The
+    // current-worktree lane (0) is the right-most.
     private func y(_ index: Int) -> CGFloat { CGFloat(index) * rowHeight + rowHeight / 2 }
-    private func laneX(_ lane: Int) -> CGFloat { railLeft + CGFloat(lane) * laneGap }
+    private func laneX(_ lane: Int, maxLane: Int) -> CGFloat {
+        leadingPad + CGFloat(maxLane - lane) * laneGap
+    }
 
     // MARK: Rail drawing
 
-    private func drawConnectors(_ rows: [Row], in context: inout GraphicsContext) {
+    private func drawConnectors(_ rows: [Row], maxLane: Int, in context: inout GraphicsContext) {
         for lane in Set(rows.map(\.lane)) {
             let indices = rows.indices.filter { rows[$0].lane == lane }
             for (a, b) in zip(indices, indices.dropFirst()) {
                 var path = Path()
-                path.move(to: CGPoint(x: laneX(lane), y: y(a)))
-                path.addLine(to: CGPoint(x: laneX(lane), y: y(b)))
-                let color = rows[b].isIdentity ? Palette.identity : Color.gray.opacity(0.55)
+                path.move(to: CGPoint(x: laneX(lane, maxLane: maxLane), y: y(a)))
+                path.addLine(to: CGPoint(x: laneX(lane, maxLane: maxLane), y: y(b)))
+                let color = rows[a].isIdentity ? Palette.identity : Color.gray.opacity(0.55)
                 context.stroke(path, with: .color(color), lineWidth: 2)
             }
         }
     }
 
-    /// Draw each forking lane's join line to its true parent commit's row (falling back to the
-    /// meeting commit if that parent isn't a visible row).
-    private func drawForks(_ rows: [Row], in context: inout GraphicsContext) {
+    /// A forking lane joins the commit it branches from with an angular path: straight down its own
+    /// lane to just above the parent, then a single diagonal step into it — so the branch is fully
+    /// in its lane by the row above the fork.
+    private func drawForks(_ rows: [Row], maxLane: Int, in context: inout GraphicsContext) {
         let meeting = rows.lastIndex { $0.isMeeting }
         for (index, row) in rows.enumerated() {
             guard let forkBase = row.forkBaseSHA else { continue }
-            let targetIndex = rows.firstIndex { $0.commit?.sha == forkBase } ?? meeting
-            guard let targetIndex else { continue }
+            guard let target = (rows.firstIndex { $0.commit?.sha == forkBase } ?? meeting),
+                  target > index else { continue }
+            let sourceX = laneX(row.lane, maxLane: maxLane)
+            let targetX = laneX(rows[target].lane, maxLane: maxLane)
             var path = Path()
-            path.move(to: CGPoint(x: laneX(row.lane), y: y(index)))
-            path.addLine(to: CGPoint(x: laneX(rows[targetIndex].lane), y: y(targetIndex)))
+            path.move(to: CGPoint(x: sourceX, y: y(index)))
+            if target - 1 > index {
+                path.addLine(to: CGPoint(x: sourceX, y: y(target - 1)))   // stay in-lane…
+            }
+            path.addLine(to: CGPoint(x: targetX, y: y(target)))          // …then one diagonal step
             context.stroke(path, with: .color(Color.gray.opacity(0.55)), lineWidth: 2)
         }
     }
 
-    private func drawDots(_ rows: [Row], in context: inout GraphicsContext) {
+    private func drawDots(_ rows: [Row], maxLane: Int, in context: inout GraphicsContext) {
         for (index, row) in rows.enumerated() {
             guard let commit = row.commit else { continue }
-            let center = CGPoint(x: laneX(row.lane), y: y(index))
+            let center = CGPoint(x: laneX(row.lane, maxLane: maxLane), y: y(index))
             if selectedSHAs.contains(commit.sha) {
                 let halo = CGRect(x: center.x - dotRadius - 4, y: center.y - dotRadius - 4,
                                   width: (dotRadius + 4) * 2, height: (dotRadius + 4) * 2)
@@ -119,6 +154,7 @@ struct HistoryGraphView: View {
 
 private struct CommitRowView: View {
     let row: Row
+    let leadingInset: CGFloat
     let isSelected: Bool
     let isMutable: Bool
     let mutabilityReason: String?
@@ -135,7 +171,7 @@ private struct CommitRowView: View {
             Spacer(minLength: 8)
             if hovered { actions }
         }
-        .padding(.horizontal, 12)
+        .padding(.leading, leadingInset).padding(.trailing, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(background)
         .contentShape(Rectangle())
@@ -210,6 +246,7 @@ private struct Row {
     }
 
     let content: Content
+    /// 0 = the current-worktree spine (drawn right-most); higher lanes are fork lanes to its left.
     let lane: Int
     let isIdentity: Bool
     let open: Bool
@@ -227,63 +264,99 @@ private struct Row {
         }
     }
 
+    /// Flatten the graph into rows, newest at the top and the meeting commit at the bottom.
+    ///
+    /// Lanes follow `git log --graph`: the current-worktree spine is lane 0 (right-most). Trunk-ahead
+    /// is lane 1; further branches add lanes to the left. A branch that is the *first* to fork from a
+    /// lane's current tip continues straight up in that lane (a chain stacks into one line); a second
+    /// branch off the same commit takes a new lane to the left and joins with an angular fork.
     static func build(from graph: HistoryGraph, expanded: Bool) -> [Row] {
+        // Assign fork branches to lanes. `laneSegments[i]` is lane (i+1), bottom→top; `laneTops[i]`
+        // is that lane's current tip SHA (advances as continuations stack on top).
+        var laneSegments: [[GraphSegment]] = []
+        var laneTops: [String] = []
+
+        func addBranch(_ segment: GraphSegment) {
+            if let base = segment.forkBase, let i = laneTops.firstIndex(of: base) {
+                laneSegments[i].append(segment)                       // continue this lane
+                laneTops[i] = segment.commits.first?.sha ?? laneTops[i]
+            } else {
+                laneSegments.append([segment])                        // new lane, to the left
+                laneTops.append(segment.commits.first?.sha ?? "")
+            }
+        }
+        if let trunk = graph.trunkAhead { addBranch(trunk) }          // lane 1
+        for revealed in graph.revealedLanes { addBranch(revealed) }
+
         var rows: [Row] = []
 
-        // Lane 0: the cw spine and its intermediate branches.
+        // Fork lanes, left-most (highest lane index) first so branches fan upward to the left.
+        for (index, segments) in laneSegments.enumerated().reversed() {
+            let lane = index + 1
+            rows.append(contentsOf: forkLaneRows(segments, lane: lane, expanded: expanded))
+        }
+
+        // cw spine (lane 0), lowest branch: cw's commits, then its intermediates, newest→oldest.
         for segment in graph.segments {
-            let isIdentity = segment.kind == .currentWorktree
-            let commits = expanded ? segment.commits : segment.collapsedCommits
-            for (i, commit) in commits.enumerated() {
-                rows.append(Row(
-                    content: .commit(commit), lane: 0, isIdentity: isIdentity,
-                    open: isIdentity && i == 0 && graph.hasUncommittedChanges,
-                    label: i == 0 ? segment.branchLabel : nil,
-                    forkBaseSHA: nil,
-                    isDropSource: isIdentity,
-                    isCherrySource: false,
-                    rebaseBranch: i == 0 ? segment.branchLabel : nil))
-            }
-            if segment.isTruncatable && !expanded {
-                rows.append(hiddenRow(segment.hiddenCount, lane: 0))
-            }
+            rows.append(contentsOf: laneRows(segment, lane: 0,
+                                             isIdentity: segment.kind == .currentWorktree,
+                                             dirty: graph.hasUncommittedChanges,
+                                             cherry: false, expanded: expanded))
         }
 
-        // Lanes 1+: trunk-ahead, then each revealed branch.
-        var nextLane = 1
-        func appendLane(_ segment: GraphSegment, cherry: Bool) {
-            let lane = nextLane; nextLane += 1
-            let start = rows.count
-            let commits = expanded ? segment.commits : segment.collapsedCommits
-            for (i, commit) in commits.enumerated() {
-                rows.append(Row(
-                    content: .commit(commit), lane: lane, isIdentity: false, open: false,
-                    label: i == 0 ? segment.branchLabel : nil,
-                    forkBaseSHA: nil,
-                    isDropSource: false,
-                    isCherrySource: cherry,
-                    rebaseBranch: i == 0 ? segment.branchLabel : nil))
-            }
-            if segment.isTruncatable && !expanded {
-                rows.append(hiddenRow(segment.hiddenCount, lane: lane))
-            }
-            // The lane's oldest visible row carries the fork-join to its parent.
-            if rows.count > start { rows[rows.count - 1].forkBaseSHA = segment.forkBase }
-        }
-
-        if let trunk = graph.trunkAhead { appendLane(trunk, cherry: false) }
-        for revealed in graph.revealedLanes { appendLane(revealed, cherry: true) }
-
+        // The diverging point, bottom-most.
         if let meeting = graph.meetingCommit {
-            rows.append(Row(
-                content: .meeting(meeting), lane: 0, isIdentity: false, open: false,
-                label: nil, forkBaseSHA: nil, isDropSource: false, isCherrySource: false, rebaseBranch: nil))
+            rows.append(Row(content: .meeting(meeting), lane: 0, isIdentity: false, open: false,
+                            label: nil, forkBaseSHA: nil, isDropSource: false,
+                            isCherrySource: false, rebaseBranch: nil))
         }
         return rows
     }
 
-    private static func hiddenRow(_ count: Int, lane: Int) -> Row {
-        Row(content: .hidden(count), lane: lane, isIdentity: false, open: false,
-            label: nil, forkBaseSHA: nil, isDropSource: false, isCherrySource: false, rebaseBranch: nil)
+    /// Rows for one fork lane (its stacked segments, top→bottom). Continuations sit contiguously
+    /// above the segment they extend (a straight in-lane line); only the lane's bottom segment
+    /// carries the angular join down to the commit it forks from.
+    private static func forkLaneRows(_ segments: [GraphSegment], lane: Int, expanded: Bool) -> [Row] {
+        var out: [Row] = []
+        for segment in segments.reversed() {   // top (newest continuation) → bottom (base)
+            let cherry: Bool = { if case .revealed = segment.kind { return true } else { return false } }()
+            out.append(contentsOf: laneRows(segment, lane: lane, isIdentity: false,
+                                            dirty: false, cherry: cherry, expanded: expanded))
+        }
+        if let base = segments.first, !out.isEmpty { out[out.count - 1].forkBaseSHA = base.forkBase }
+        return out
+    }
+
+    /// A segment's rows, newest→oldest, with truncation shown as a hidden marker below the tip and
+    /// the branch label on the newest (tip) commit.
+    private static func laneRows(_ segment: GraphSegment, lane: Int, isIdentity: Bool,
+                                 dirty: Bool, cherry: Bool, expanded: Bool) -> [Row] {
+        var out: [Row] = []
+        if segment.isTruncatable && !expanded {
+            if let tip = segment.collapsedCommits.first {
+                out.append(commitRow(tip, lane: lane, isIdentity: isIdentity, isTip: true,
+                                     dirty: dirty, cherry: cherry, label: segment.branchLabel))
+            }
+            out.append(Row(content: .hidden(segment.hiddenCount), lane: lane, isIdentity: false,
+                           open: false, label: nil, forkBaseSHA: nil, isDropSource: false,
+                           isCherrySource: false, rebaseBranch: nil))
+        } else {
+            for (i, commit) in segment.commits.enumerated() {   // newest → oldest
+                let isTip = i == 0
+                out.append(commitRow(commit, lane: lane, isIdentity: isIdentity, isTip: isTip,
+                                     dirty: dirty, cherry: cherry,
+                                     label: isTip ? segment.branchLabel : nil))
+            }
+        }
+        return out
+    }
+
+    private static func commitRow(_ commit: CommitNode, lane: Int, isIdentity: Bool, isTip: Bool,
+                                  dirty: Bool, cherry: Bool, label: String?) -> Row {
+        Row(content: .commit(commit), lane: lane, isIdentity: isIdentity,
+            open: isIdentity && isTip && dirty,
+            label: label, forkBaseSHA: nil,
+            isDropSource: isIdentity, isCherrySource: cherry,
+            rebaseBranch: isTip ? label : nil)
     }
 }
