@@ -36,6 +36,9 @@ struct HistoryGraphView: View {
         let maxLane = rows.map(\.lane).max() ?? 0
         let railWidth = leadingPad + CGFloat(maxLane) * laneGap + dotRadius + 16
         let height = CGFloat(max(rows.count, 1)) * rowHeight
+        // A definite content width: rows must NOT be maxWidth-flexible inside a horizontally
+        // scrollable ScrollView, or the layout never stabilizes and SwiftUI re-lays-out forever.
+        let contentWidth = railWidth + 560
 
         ScrollViewReader { proxy in
             ScrollView([.vertical, .horizontal]) {
@@ -48,8 +51,8 @@ struct HistoryGraphView: View {
                     .frame(width: railWidth, height: height)
                     .allowsHitTesting(false)
 
-                    // Rows span the full width (the rail shows through behind them) and inset their
-                    // content past the rail, so scrolling to a row keeps the rail on-screen.
+                    // Rows span the full content width (the rail shows through behind them) and
+                    // inset their content past the rail, so scrolling keeps the rail on-screen.
                     VStack(spacing: 0) {
                         ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                             CommitRowView(
@@ -63,12 +66,12 @@ struct HistoryGraphView: View {
                                 onCherryPick: { row.commit.map(onCherryPick) },
                                 onRebase: onRebase
                             )
-                            .frame(height: rowHeight)
+                            .frame(width: contentWidth, height: rowHeight)
                             .id(index)
                         }
                     }
                 }
-                .frame(width: railWidth + 560, height: height, alignment: .topLeading)
+                .frame(width: contentWidth, height: height, alignment: .topLeading)
                 .padding(16)
             }
             .onAppear { scrollToHead(proxy, rows: rows, headSHA: headSHA) }
