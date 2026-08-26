@@ -15,6 +15,10 @@ struct HistoryGraphView: View {
     let graph: HistoryGraph
     /// The current worktree's identity color, used for its spine, dots, and selection highlight.
     var identityColor: Color = Palette.worktreeColors[0]
+    /// Identity color per branch for branches that are themselves worktrees, so any lane that
+    /// represents a worktree (a revealed branch, trunk, an intermediate) is drawn in that worktree's
+    /// color rather than grey. Branches with no worktree stay grey.
+    var worktreeColors: [String: Color] = [:]
     let expandTruncated: Bool
     let selectedSHAs: Set<String>
     let isMutable: Bool
@@ -99,6 +103,14 @@ struct HistoryGraphView: View {
 
     // MARK: Rail drawing
 
+    /// The identity color of the worktree a row's lane represents, or nil for a lane that isn't a
+    /// worktree (drawn grey). The cw spine resolves to `identityColor`.
+    private func laneColor(_ row: Row) -> Color? {
+        if row.isIdentity { return identityColor }
+        if let branch = row.branch { return worktreeColors[branch] }
+        return nil
+    }
+
     private func drawConnectors(_ rows: [Row], maxLane: Int, in context: inout GraphicsContext) {
         for lane in Set(rows.map(\.lane)) {
             let indices = rows.indices.filter { rows[$0].lane == lane }
@@ -106,7 +118,7 @@ struct HistoryGraphView: View {
                 var path = Path()
                 path.move(to: CGPoint(x: laneX(lane, maxLane: maxLane), y: y(a)))
                 path.addLine(to: CGPoint(x: laneX(lane, maxLane: maxLane), y: y(b)))
-                let color = rows[a].isIdentity ? identityColor : Color.gray.opacity(0.55)
+                let color = laneColor(rows[a]) ?? Color.gray.opacity(0.55)
                 context.stroke(path, with: .color(color), lineWidth: 2)
             }
         }
@@ -129,7 +141,8 @@ struct HistoryGraphView: View {
                 path.addLine(to: CGPoint(x: sourceX, y: y(target - 1)))   // stay in-lane…
             }
             path.addLine(to: CGPoint(x: targetX, y: y(target)))          // …then one diagonal step
-            context.stroke(path, with: .color(Color.gray.opacity(0.55)), lineWidth: 2)
+            let color = laneColor(row) ?? Color.gray.opacity(0.55)
+            context.stroke(path, with: .color(color), lineWidth: 2)
         }
     }
 
@@ -142,7 +155,7 @@ struct HistoryGraphView: View {
                                   width: (dotRadius + 4) * 2, height: (dotRadius + 4) * 2)
                 context.fill(Path(ellipseIn: halo), with: .color(identityColor.opacity(0.25)))
             }
-            let color = row.isIdentity ? identityColor : Color.gray
+            let color = laneColor(row) ?? Color.gray
             let rect = CGRect(x: center.x - dotRadius, y: center.y - dotRadius, width: dotRadius * 2, height: dotRadius * 2)
             if row.open {
                 context.fill(Path(ellipseIn: rect), with: .color(Color(nsColor: .windowBackgroundColor)))
@@ -265,6 +278,10 @@ private struct Row {
     let isDropSource: Bool
     let isCherrySource: Bool
     let rebaseBranch: String?
+    /// The branch this row's lane represents (intermediate / trunk-ahead / revealed), used to color a
+    /// lane by its worktree's identity color. `nil` for the cw spine (colored by `isIdentity`) and
+    /// the meeting.
+    var branch: String? = nil
     /// Revealed branches that point at this exact commit but have no commits of their own — shown as
     /// extra ref pills (a worktree parked at an intermediary, say).
     var extraLabels: [String] = []
@@ -402,28 +419,30 @@ private struct Row {
         if segment.isTruncatable && !expanded {
             if let tip = segment.collapsedCommits.first {
                 out.append(commitRow(tip, lane: lane, isIdentity: isIdentity, isTip: true,
-                                     dirty: dirty, cherry: cherry, label: segment.branchLabel))
+                                     dirty: dirty, cherry: cherry, label: segment.branchLabel,
+                                     branch: segment.branchLabel))
             }
             out.append(Row(content: .hidden(segment.hiddenCount), lane: lane, isIdentity: false,
                            open: false, label: nil, forkBaseSHA: nil, isDropSource: false,
-                           isCherrySource: false, rebaseBranch: nil))
+                           isCherrySource: false, rebaseBranch: nil, branch: segment.branchLabel))
         } else {
             for (i, commit) in segment.commits.enumerated() {   // newest → oldest
                 let isTip = i == 0
                 out.append(commitRow(commit, lane: lane, isIdentity: isIdentity, isTip: isTip,
                                      dirty: dirty, cherry: cherry,
-                                     label: isTip ? segment.branchLabel : nil))
+                                     label: isTip ? segment.branchLabel : nil,
+                                     branch: segment.branchLabel))
             }
         }
         return out
     }
 
     private static func commitRow(_ commit: CommitNode, lane: Int, isIdentity: Bool, isTip: Bool,
-                                  dirty: Bool, cherry: Bool, label: String?) -> Row {
+                                  dirty: Bool, cherry: Bool, label: String?, branch: String?) -> Row {
         Row(content: .commit(commit), lane: lane, isIdentity: isIdentity,
             open: isIdentity && isTip && dirty,
             label: label, forkBaseSHA: nil,
             isDropSource: isIdentity, isCherrySource: cherry,
-            rebaseBranch: isTip ? label : nil)
+            rebaseBranch: isTip ? label : nil, branch: branch)
     }
 }

@@ -11,6 +11,15 @@ struct RepositoryView: View {
     /// default): the terminal starts hidden and each tab keeps whatever the user last chose for it.
     @State private var terminalOpen: [URL: Bool] = [:]
 
+    /// Branch → identity color for every worktree that has a branch, so a worktree's branch is drawn
+    /// in its own color wherever it appears in another worktree's graph. Branch names are unique
+    /// across worktrees (git won't check out one branch in two worktrees).
+    private var worktreeColors: [String: Color] {
+        Dictionary(uniqueKeysWithValues: repo.worktrees.compactMap { worktree in
+            worktree.branch.map { ($0, Palette.identity(repo.colorIndex(for: worktree.path))) }
+        })
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if repo.worktrees.count > 1 {
@@ -67,6 +76,7 @@ struct RepositoryView: View {
             // destination worktree with fresh selection/detail state rather than the prior tab's.
             WorktreeTabView(store: repo.store(for: path),
                             identityColor: Palette.identity(repo.colorIndex(for: path)),
+                            worktreeColors: worktreeColors,
                             showTerminal: Binding(
                                 get: { terminalOpen[path] ?? false },
                                 set: { terminalOpen[path] = $0 }))

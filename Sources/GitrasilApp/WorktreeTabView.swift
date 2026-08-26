@@ -9,6 +9,9 @@ struct WorktreeTabView: View {
     /// This worktree's identity color (from `RepositoryStore.colorIndex`), shared by the header dot
     /// and the graph spine.
     var identityColor: Color = Palette.worktreeColors[0]
+    /// Identity color per branch for branches that are themselves worktrees, so a lane in this graph
+    /// that represents another worktree is drawn in that worktree's color.
+    var worktreeColors: [String: Color] = [:]
     @State private var expandTruncated = false
 
     @State private var selectedCommit: CommitNode?
@@ -261,6 +264,7 @@ struct WorktreeTabView: View {
                 HistoryGraphView(
                     graph: snapshot.graph,
                     identityColor: identityColor,
+                    worktreeColors: worktreeColors,
                     expandTruncated: expandTruncated,
                     selectedSHAs: selectedSHAs,
                     isMutable: isMutable(snapshot),
