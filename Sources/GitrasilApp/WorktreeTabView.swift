@@ -9,6 +9,8 @@ struct WorktreeTabView: View {
     @State private var expandTruncated = false
 
     @State private var selectedCommit: CommitNode?
+    @State private var selectedSHAs: Set<String> = []
+    @State private var selectionAnchor: String?
     @State private var detail: CommitDetail?
     @State private var selectedFile: FileChange?
     @State private var diff: FileDiff?
@@ -41,27 +43,64 @@ struct WorktreeTabView: View {
 
     // MARK: Selection flow
 
-    private func selectCommit(_ commit: CommitNode) {
+    /// Select a commit, or (shift-click) extend the selection to a contiguous range along the same
+    /// branch line (design brief §5).
+    private func selectCommit(_ commit: CommitNode, extend: Bool) {
+        if extend, let anchor = selectionAnchor,
+           let segment = segmentCommits(containing: anchor),
+           segment.contains(where: { $0.sha == commit.sha }) {
+            let shas = segment.map(\.sha)
+            if let a = shas.firstIndex(of: anchor), let t = shas.firstIndex(of: commit.sha) {
+                let (lo, hi) = (min(a, t), max(a, t))
+                selectedSHAs = Set(shas[lo...hi])
+                selectedCommit = commit
+                let range = Array(segment[lo...hi])   // newest-first
+                loadRangeDetail(oldest: range.last!.sha, newest: range.first!.sha)
+                return
+            }
+        }
+        selectionAnchor = commit.sha
+        selectedSHAs = [commit.sha]
         selectedCommit = commit
-        selectedFile = nil
-        diff = nil
-        detail = nil
+        selectedFile = nil; diff = nil
         Task { detail = try? await store.commitDetail(sha: commit.sha) }
+    }
+
+    private func loadRangeDetail(oldest: String, newest: String) {
+        selectedFile = nil; diff = nil
+        Task { detail = try? await store.rangeDetail(oldest: oldest, newest: newest) }
     }
 
     private func selectFile(_ file: FileChange) {
         guard let commit = selectedCommit else { return }
         selectedFile = file
         isLoadingDiff = true
+        let source: DiffSource
+        if selectedSHAs.count > 1, let segment = segmentCommits(containing: commit.sha) {
+            let ordered = segment.filter { selectedSHAs.contains($0.sha) }   // newest-first
+            source = .range(oldest: ordered.last!.sha, newest: ordered.first!.sha,
+                            newestShort: ordered.first!.shortSHA)
+        } else {
+            source = .commit(sha: commit.sha, shortSHA: commit.shortSHA)
+        }
         Task {
-            diff = try? await store.fileDiff(
-                source: .commit(sha: commit.sha, shortSHA: commit.shortSHA), path: file.path)
+            diff = try? await store.fileDiff(source: source, path: file.path)
             isLoadingDiff = false
         }
     }
 
     private func clearSelection() {
-        selectedCommit = nil; detail = nil; selectedFile = nil; diff = nil
+        selectedCommit = nil; selectedSHAs = []; selectionAnchor = nil
+        detail = nil; selectedFile = nil; diff = nil
+    }
+
+    /// The commits of the branch segment (spine, trunk-ahead, or a revealed lane) containing `sha`.
+    private func segmentCommits(containing sha: String) -> [CommitNode]? {
+        guard let graph = store.snapshot?.graph else { return nil }
+        var segments = graph.segments
+        if let trunk = graph.trunkAhead { segments.append(trunk) }
+        segments.append(contentsOf: graph.revealedLanes)
+        return segments.first { $0.commits.contains { $0.sha == sha } }?.commits
     }
 
     private func openExplorerFile(_ path: String, meetingBase: String?) {
@@ -214,8 +253,13 @@ struct WorktreeTabView: View {
                     HistoryGraphView(
                         graph: snapshot.graph,
                         expandTruncated: expandTruncated,
-                        selectedSHA: selectedCommit?.sha,
-                        onSelect: selectCommit
+                        selectedSHAs: selectedSHAs,
+                        isMutable: isMutable(snapshot),
+                        mutabilityReason: mutabilityReason,
+                        onSelect: selectCommit,
+                        onDrop: dropCommit,
+                        onCherryPick: cherryPickCommit,
+                        onRebase: rebaseOnto
                     )
                     .padding(16)
                 }
@@ -233,11 +277,7 @@ struct WorktreeTabView: View {
                 CommitDetailPanel(
                     detail: detail,
                     selectedPath: selectedFile?.path,
-                    canDrop: selectedCommit.map(canDrop) ?? false,
-                    canCherryPick: selectedCommit.map(canCherryPick) ?? false,
                     onSelectFile: selectFile,
-                    onDrop: dropSelected,
-                    onCherryPick: cherryPickSelected,
                     onClose: clearSelection
                 )
                 .frame(minHeight: 140, idealHeight: 220)
@@ -291,30 +331,39 @@ struct WorktreeTabView: View {
         !snapshot.statusFacts.dirty && !snapshot.isDetached && snapshot.inProgress == nil
     }
 
-    /// A commit is droppable when it's on the worktree's own line and the worktree is mutable.
-    private func canDrop(_ commit: CommitNode) -> Bool {
-        guard let snapshot = store.snapshot, isMutable(snapshot) else { return false }
-        let cw = snapshot.graph.segments.first { $0.kind == .currentWorktree }
-        return cw?.commits.contains { $0.sha == commit.sha } ?? false
+    private var mutabilityReason: String? {
+        guard let snapshot = store.snapshot else { return nil }
+        if snapshot.inProgress != nil { return "Finish or abort the operation in progress." }
+        if snapshot.statusFacts.dirty { return "Commit or stash your changes to enable history edits." }
+        if snapshot.isDetached { return "No branch checked out." }
+        return nil
     }
 
-    private func dropSelected() {
-        guard let commit = selectedCommit else { return }
-        Task { await store.drop(oldest: commit.sha, newest: commit.sha) }
-    }
-
-    /// A commit can be cherry-picked when it's on a revealed (other-branch) lane and the worktree
-    /// is mutable.
-    private func canCherryPick(_ commit: CommitNode) -> Bool {
-        guard let snapshot = store.snapshot, isMutable(snapshot) else { return false }
-        return snapshot.graph.revealedLanes.contains { lane in
-            lane.commits.contains { $0.sha == commit.sha }
+    /// The commit range a hover action applies to: the current multi-selection if the commit is
+    /// part of it, otherwise just the commit itself.
+    private func actionRange(_ commit: CommitNode) -> (oldest: String, newest: String) {
+        if selectedSHAs.contains(commit.sha), selectedSHAs.count > 1,
+           let segment = segmentCommits(containing: commit.sha) {
+            let ordered = segment.map(\.sha).filter { selectedSHAs.contains($0) }   // newest-first
+            if let newest = ordered.first, let oldest = ordered.last { return (oldest, newest) }
         }
+        return (commit.sha, commit.sha)
     }
 
-    private func cherryPickSelected() {
-        guard let commit = selectedCommit else { return }
-        Task { await store.cherryPick(oldest: commit.sha, newest: commit.sha) }
+    private func dropCommit(_ commit: CommitNode) {
+        let range = actionRange(commit)
+        Task { await store.drop(oldest: range.oldest, newest: range.newest) }
+    }
+
+    private func cherryPickCommit(_ commit: CommitNode) {
+        let range = actionRange(commit)
+        Task { await store.cherryPick(oldest: range.oldest, newest: range.newest) }
+    }
+
+    private func rebaseOnto(_ branch: String) {
+        // The trunk tip's label is its local name; rebase onto the resolved trunk ref.
+        let target = branch == store.snapshot?.trunkName ? (store.snapshot?.trunkRef ?? branch) : branch
+        Task { await store.rebaseOnto(target: target) }
     }
 }
 
