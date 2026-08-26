@@ -64,15 +64,16 @@ extension Derivations {
         // 8. Revealed branches (cherry-pick sources): each branch's commits ahead of its merge-base
         // with cw, as its own grey lane.
         var revealedLanes: [GraphSegment] = []
+        // Exclude anything already drawn: cw, the trunk lane, and each revealed lane processed so
+        // far — so a commit shared between lanes appears once, in the first lane that claims it.
+        var revealedExcludes = [head]
+        if let trunkTip { revealedExcludes.append(trunkTip) }
         for name in revealedBranches {
             let tipResult = try await runner.run(["rev-parse", "--verify", "-q", "\(name)^{commit}"])
             guard tipResult.status == 0 else { continue }
             let tip = tipResult.trimmedStdout
-            // Only commits unique to this branch — exclude anything already reachable from cw or the
-            // trunk lane, so main's ahead-commits don't reappear under a branch that descends from main.
-            var excludes = [head]
-            if let trunkTip { excludes.append(trunkTip) }
-            let commits = try await commits(tip: tip, excluding: excludes, runner: runner)
+            let commits = try await commits(tip: tip, excluding: revealedExcludes, runner: runner)
+            revealedExcludes.append(tip)
             if !commits.isEmpty {
                 // The lane forks from the first-parent of its oldest commit (which may sit in
                 // another lane — e.g. a branch off an advanced main rejoins at main's tip).
