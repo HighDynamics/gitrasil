@@ -388,22 +388,35 @@ private struct Row {
         if let trunk = graph.trunkAhead { addBranch(trunk) }
         for revealed in graph.revealedLanes { addBranch(revealed) }
 
-        // Order lanes by fork proximity to cw: a lane's fork point is its base (first) segment's
-        // forkBase; shallower depth → inner lane (nearer cw). A branch that forks off cw's own spine
-        // therefore sits inside main, which forks at the meeting — so main is drawn outside every
-        // spine-rooted branch. (A branch that instead forks off one of main's own ahead-commits sits
-        // further out still.) The sort is stable on the original order so equal-depth lanes keep their
-        // reveal order — a lane already on screen never swaps places when another is revealed.
-        func forkDepth(_ chain: [GraphSegment]) -> Int {
-            guard let base = chain.first?.forkBase else { return belowMeeting }
-            return spineDepth[base] ?? belowMeeting
+        // Order lanes as a forest so each branch sits next to the lane it forks from and each subtree
+        // stays contiguous — a branch off main is drawn right beside main, not sorted purely by depth
+        // (which could place it beyond an unrelated branch and cross over it). A lane whose fork point
+        // lands on another lane is that lane's child, drawn just outside it; a lane forking off the cw
+        // spine is a root. Roots (and siblings) are ordered by fork proximity to cw: shallower fork
+        // depth → nearer cw. Ties keep reveal order, so a lane on screen keeps its place.
+        var commitLane: [String: Int] = [:]
+        for (i, chain) in laneSegments.enumerated() {
+            for segment in chain { for commit in segment.commits { commitLane[commit.sha] = i } }
         }
-        laneSegments = laneSegments.enumerated()
-            .sorted { a, b in
-                let da = forkDepth(a.element), db = forkDepth(b.element)
-                return da == db ? a.offset < b.offset : da < db
+        var children = [[Int]](repeating: [], count: laneSegments.count)
+        var roots: [Int] = []
+        for i in laneSegments.indices {
+            if let base = laneSegments[i].first?.forkBase, let parent = commitLane[base], parent != i {
+                children[parent].append(i)
+            } else {
+                roots.append(i)
             }
-            .map(\.element)
+        }
+        func forkDepth(_ i: Int) -> Int {
+            (laneSegments[i].first?.forkBase).flatMap { spineDepth[$0] } ?? belowMeeting
+        }
+        func ordered(_ lanes: [Int]) -> [Int] {
+            lanes.sorted { forkDepth($0) == forkDepth($1) ? $0 < $1 : forkDepth($0) < forkDepth($1) }
+        }
+        var order: [Int] = []
+        func visit(_ i: Int) { order.append(i); ordered(children[i]).forEach(visit) }
+        ordered(roots).forEach(visit)
+        laneSegments = order.map { laneSegments[$0] }
 
         var rows: [Row] = []
 
