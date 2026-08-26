@@ -25,7 +25,9 @@ struct WorktreeTabView: View {
     @State private var explorerIgnored: Set<String> = []
     @State private var selectedExplorerPath: String?
 
-    @State private var showTerminal = true
+    /// Terminal open/closed. Owned by `RepositoryView` and keyed by worktree, so each tab remembers
+    /// its own choice across tab switches (this view is re-created per tab via `.id`).
+    @Binding var showTerminal: Bool
     @State private var availableBranches: [String] = []
 
     var body: some View {

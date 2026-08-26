@@ -7,6 +7,10 @@ import GitrasilCore
 struct RepositoryView: View {
     let repo: RepositoryStore
 
+    /// Per-worktree terminal open/closed, remembered across tab switches. Absent = closed (the
+    /// default): the terminal starts hidden and each tab keeps whatever the user last chose for it.
+    @State private var terminalOpen: [URL: Bool] = [:]
+
     var body: some View {
         VStack(spacing: 0) {
             if repo.worktrees.count > 1 {
@@ -62,7 +66,10 @@ struct RepositoryView: View {
             // `.id(path)` gives each worktree its own view identity, so switching tabs starts the
             // destination worktree with fresh selection/detail state rather than the prior tab's.
             WorktreeTabView(store: repo.store(for: path),
-                            identityColor: Palette.identity(repo.colorIndex(for: path)))
+                            identityColor: Palette.identity(repo.colorIndex(for: path)),
+                            showTerminal: Binding(
+                                get: { terminalOpen[path] ?? false },
+                                set: { terminalOpen[path] = $0 }))
                 .id(path)
         } else if let error = repo.lastError {
             CenteredMessage(text: error, isError: true)
