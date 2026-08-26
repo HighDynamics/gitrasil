@@ -50,6 +50,7 @@ struct HistoryGraphView: View {
             ScrollView([.vertical, .horizontal]) {
                 ZStack(alignment: .topLeading) {
                     Canvas { context, _ in
+                        drawOverlapSlivers(rows, maxLane: maxLane, in: &context)
                         drawConnectors(rows, maxLane: maxLane, in: &context)
                         drawForks(rows, maxLane: maxLane, in: &context)
                         drawDots(rows, maxLane: maxLane, in: &context)
@@ -64,6 +65,7 @@ struct HistoryGraphView: View {
                             CommitRowView(
                                 row: row,
                                 identityColor: identityColor,
+                                worktreeColors: worktreeColors,
                                 leadingInset: railWidth,
                                 isSelected: row.commit.map { selectedSHAs.contains($0.sha) } ?? false,
                                 isMutable: isMutable,
@@ -109,6 +111,50 @@ struct HistoryGraphView: View {
         if row.isIdentity { return identityColor }
         if let branch = row.branch { return worktreeColors[branch] }
         return nil
+    }
+
+    private let sliverOffset: CGFloat = 3
+
+    /// A branch/worktree that shares another's line (a revealed pointer — no commits of its own) is
+    /// drawn as an offset rail a few px to the left, *behind* the front lane, so it peeks out as a
+    /// coloured sliver alongside the commits it owns — left, so the cw spine stays the rightmost.
+    /// Multiple overlappers at one commit fan by the offset.
+    ///
+    /// The sliver spans only the overlapper's *owned* run (the front lane's identity commits); at the
+    /// first commit it merely shares — an intermediary branch, or the meeting — it forks back into the
+    /// front lane instead of running on as a parallel rail (which read as a phantom second branch).
+    private func drawOverlapSlivers(_ rows: [Row], maxLane: Int, in context: inout GraphicsContext) {
+        guard !graph.revealedPointers.isEmpty else { return }
+        for sha in graph.revealedPointers.keys.sorted() {
+            guard let branches = graph.revealedPointers[sha],
+                  let start = rows.firstIndex(where: { $0.commit?.sha == sha }) else { continue }
+            let lane = rows[start].lane
+            let run = (start..<rows.count).filter { rows[$0].lane == lane }
+            let owned = Array(run.prefix { rows[$0].isIdentity })   // commits it co-owns with the front lane
+            guard let firstOwned = owned.first, let lastOwned = owned.last else { continue }
+            let rejoin = run.first { $0 > lastOwned }               // where it forks back into the shared line
+
+            // Paint furthest-out first so each nearer sliver sits on top and every one peeks out —
+            // otherwise a later, further sliver covers the earlier, nearer one.
+            for (rank, branch) in branches.enumerated().reversed() {
+                let dx = sliverOffset * CGFloat(rank + 1)
+                let color = worktreeColors[branch] ?? Color.gray.opacity(0.55)
+                let x = laneX(lane, maxLane: maxLane) - dx   // left, keeping the cw spine rightmost
+                var path = Path()
+                path.move(to: CGPoint(x: x, y: y(firstOwned)))
+                path.addLine(to: CGPoint(x: x, y: y(lastOwned)))
+                if let rejoin {
+                    path.addLine(to: CGPoint(x: laneX(rows[rejoin].lane, maxLane: maxLane), y: y(rejoin)))
+                }
+                context.stroke(path, with: .color(color), lineWidth: 2)
+                for j in owned where rows[j].commit != nil {
+                    let center = CGPoint(x: x, y: y(j))
+                    let rect = CGRect(x: center.x - dotRadius, y: center.y - dotRadius,
+                                      width: dotRadius * 2, height: dotRadius * 2)
+                    context.fill(Path(ellipseIn: rect), with: .color(color))
+                }
+            }
+        }
     }
 
     private func drawConnectors(_ rows: [Row], maxLane: Int, in context: inout GraphicsContext) {
@@ -174,6 +220,9 @@ struct HistoryGraphView: View {
 private struct CommitRowView: View {
     let row: Row
     let identityColor: Color
+    /// Branch → worktree identity color, so a ref pill for a branch that is a worktree is tinted its
+    /// color instead of grey.
+    let worktreeColors: [String: Color]
     let leadingInset: CGFloat
     let isSelected: Bool
     let isMutable: Bool
@@ -234,10 +283,13 @@ private struct CommitRowView: View {
     }
 
     private func refPill(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+        // A branch that is a worktree gets its identity color; other refs stay grey.
+        let color = worktreeColors[text]
+        return Text(text)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(color ?? Color.secondary)
             .padding(.horizontal, 6).padding(.vertical, 1)
-            .background(Color.gray.opacity(0.18), in: RoundedRectangle(cornerRadius: 4))
+            .background((color ?? .gray).opacity(0.18), in: RoundedRectangle(cornerRadius: 4))
     }
 
     private func actionButton(_ title: String, systemImage: String, destructive: Bool = false,
