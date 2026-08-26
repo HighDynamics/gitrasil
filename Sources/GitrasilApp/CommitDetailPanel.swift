@@ -28,7 +28,7 @@ struct CommitDetailPanel: View {
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("\(detail.commit.author) · \(detail.commit.date)")
+            Text("\(detail.commit.author) · \(RelativeTime.string(detail.commit.date))")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
 
