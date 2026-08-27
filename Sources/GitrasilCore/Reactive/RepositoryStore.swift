@@ -22,6 +22,9 @@ public final class RepositoryStore {
     /// A human-readable message from the last failed worktree enumeration, or nil.
     public private(set) var lastError: String?
 
+    /// A message from the last failed create/remove action, shown as a dismissible banner.
+    public private(set) var actionError: String?
+
     private let anchorURL: URL
     private let runner: GitRunning
 
@@ -62,6 +65,68 @@ public final class RepositoryStore {
         selectedPath = path
         _ = store(for: path)   // pre-create so the view body only reads an existing store
     }
+
+    public func dismissActionError() { actionError = nil }
+
+    // MARK: Create / remove (design brief §5 write side)
+
+    /// Create a worktree — a new branch off `base`, or a checkout of the existing branch `base` — at
+    /// `path`, recording the selected worktree as its origin. On success re-enumerates and selects it.
+    public func createWorktree(newBranch: String?, base: String, at path: URL) async {
+        let source = worktrees.first { $0.path == selectedPath }?.branch
+        do {
+            try await Mutations.addWorktree(at: path, newBranch: newBranch, base: base, source: source, runner: runner)
+            actionError = nil
+            await refreshWorktrees()
+            if let created = worktrees.first(where: { $0.path.resolvingSymlinksInPath() == path.resolvingSymlinksInPath() }) {
+                select(created.path)
+            }
+        } catch let error as MutationError {
+            actionError = error.message
+        } catch {
+            actionError = String(describing: error)
+        }
+    }
+
+    /// Remove a worktree. If it's the selected one, selection falls back to the main worktree.
+    public func removeWorktree(_ info: WorktreeInfo, force: Bool = false) async {
+        do {
+            try await Mutations.removeWorktree(at: info.path, branch: info.branch, force: force, runner: runner)
+            actionError = nil
+            if selectedPath == info.path { selectedPath = worktrees.first { $0.isMain }?.path }
+            await refreshWorktrees()
+            if let selectedPath, worktrees.contains(where: { $0.path == selectedPath }) { _ = store(for: selectedPath) }
+        } catch let error as MutationError {
+            actionError = error.message
+        } catch {
+            actionError = String(describing: error)
+        }
+    }
+
+    /// A sensible default directory for a new worktree: a sibling of the repository named
+    /// `<repo>-<branch>` (branch slashes flattened to dashes).
+    public func defaultWorktreePath(forBranch branch: String) -> URL {
+        let mainPath = (worktrees.first { $0.isMain }?.path ?? anchorURL)
+        let repoName = mainPath.lastPathComponent
+        let slug = branch.replacingOccurrences(of: "/", with: "-")
+        return mainPath.deletingLastPathComponent().appendingPathComponent("\(repoName)-\(slug)")
+    }
+
+    /// Local branches not currently checked out in any worktree — the candidates for a new worktree
+    /// on an *existing* branch (git refuses to check a branch out twice).
+    public func branchesAvailableForCheckout() async -> [String] {
+        let all = await allLocalBranches()
+        let checkedOut = Set(worktrees.compactMap(\.branch))
+        return all.filter { !checkedOut.contains($0) }
+    }
+
+    /// All local branches (candidates for a new branch's base — you may branch off a checked-out one).
+    public func allLocalBranches() async -> [String] {
+        (try? await Derivations.localBranches(runner: runner)) ?? []
+    }
+
+    /// The selected worktree's branch (the default base / origin for a new worktree).
+    public var currentBranch: String? { worktrees.first { $0.path == selectedPath }?.branch }
 
     /// The store for a worktree, created (and started) on first request. Returns a store whose
     /// snapshot is nil until its first derive completes; the worktree view already handles that.

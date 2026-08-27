@@ -1,15 +1,16 @@
 import SwiftUI
 import GitrasilCore
 
-/// The repository window's chrome: a worktree tab strip over the selected worktree's view. One
-/// window = one repository, one tab = one worktree. The tab strip only appears once there's more
-/// than one worktree; a lone worktree fills the window as before.
+/// The repository window's chrome: a worktree tab strip (with add/remove) over the selected
+/// worktree's view. One window = one repository, one tab = one worktree.
 struct RepositoryView: View {
     let repo: RepositoryStore
 
     /// Per-worktree terminal open/closed, remembered across tab switches. Absent = closed (the
     /// default): the terminal starts hidden and each tab keeps whatever the user last chose for it.
     @State private var terminalOpen: [URL: Bool] = [:]
+    @State private var showingAddSheet = false
+    @State private var worktreeToRemove: WorktreeInfo?
 
     /// Branch → identity color for every worktree that has a branch, so a worktree's branch is drawn
     /// in its own color wherever it appears in another worktree's graph. Branch names are unique
@@ -22,22 +23,37 @@ struct RepositoryView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if repo.worktrees.count > 1 {
-                tabStrip
+            tabStrip
+            Divider()
+            if let error = repo.actionError, !showingAddSheet {
+                actionErrorBanner(error)
                 Divider()
             }
             content
         }
+        .sheet(isPresented: $showingAddSheet) {
+            AddWorktreeSheet(repo: repo) { showingAddSheet = false; repo.dismissActionError() }
+        }
+        .confirmationDialog("Remove worktree?", isPresented: removeDialog, presenting: worktreeToRemove) { worktree in
+            Button("Remove “\(label(worktree))”", role: .destructive) {
+                Task { await repo.removeWorktree(worktree) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { worktree in
+            Text("Removes the worktree at \(worktree.path.path). The branch itself is kept.")
+        }
     }
 
     private var tabStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(repo.worktrees) { worktree in
-                    tab(worktree)
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(repo.worktrees) { tab($0) }
                 }
+                .padding(.horizontal, 10).padding(.vertical, 6)
             }
-            .padding(.horizontal, 10).padding(.vertical, 6)
+            Divider().frame(height: 20)
+            addButton.padding(.horizontal, 6)   // pinned, so it stays reachable with many tabs
         }
     }
 
@@ -61,6 +77,40 @@ struct RepositoryView: View {
         }
         .buttonStyle(.plain)
         .help(worktree.path.path)
+        .contextMenu {
+            Button("Remove Worktree…", role: .destructive) { worktreeToRemove = worktree }
+                .disabled(worktree.isMain)   // git refuses to remove the repository's main worktree
+        }
+    }
+
+    private var addButton: some View {
+        Button {
+            repo.dismissActionError()
+            showingAddSheet = true
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 12, weight: .medium))
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Add a worktree")
+    }
+
+    private func actionErrorBanner(_ error: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+            Text(error).font(.system(size: 12)).lineLimit(2)
+            Spacer()
+            Button { repo.dismissActionError() } label: { Image(systemName: "xmark") }
+                .buttonStyle(.plain).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(Color.red.opacity(0.08))
+    }
+
+    private var removeDialog: Binding<Bool> {
+        Binding(get: { worktreeToRemove != nil }, set: { if !$0 { worktreeToRemove = nil } })
     }
 
     private func label(_ worktree: WorktreeInfo) -> String {
