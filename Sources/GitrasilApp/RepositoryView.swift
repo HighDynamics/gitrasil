@@ -13,12 +13,15 @@ struct RepositoryView: View {
     @State private var worktreeToRemove: WorktreeInfo?
 
     /// Branch → identity color for every worktree that has a branch, so a worktree's branch is drawn
-    /// in its own color wherever it appears in another worktree's graph. Branch names are unique
-    /// across worktrees (git won't check out one branch in two worktrees).
+    /// in its own color wherever it appears in another worktree's graph. `git worktree add --force`
+    /// can check one branch out twice, so tolerate a duplicate key (first worktree's color wins)
+    /// rather than trapping the way `uniqueKeysWithValues` would.
     private var worktreeColors: [String: Color] {
-        Dictionary(uniqueKeysWithValues: repo.worktrees.compactMap { worktree in
-            worktree.branch.map { ($0, Palette.identity(repo.colorIndex(for: worktree.path))) }
-        })
+        Dictionary(
+            repo.worktrees.compactMap { worktree in
+                worktree.branch.map { ($0, Palette.identity(repo.colorIndex(for: worktree.path))) }
+            },
+            uniquingKeysWith: { first, _ in first })
     }
 
     var body: some View {
