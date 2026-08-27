@@ -102,6 +102,11 @@ public struct HistoryGraph: Sendable, Equatable {
     /// they're shown as extra ref pills on that commit, keyed by its SHA, in reveal order.
     public let revealedPointers: [String: [String]]
 
+    /// The worktree branch each shown branch was created from (recorded lineage / reflog backfill),
+    /// so a branch forking off a commit shared by overlapping worktrees connects to the *source*
+    /// worktree's lane rather than an arbitrary one. Absent for branches with no known origin.
+    public let branchParents: [String: String]
+
     /// How many intermediate branches sit between cw and trunk (drives the "N between" pill).
     public let branchesBetween: Int
 
@@ -123,6 +128,7 @@ public struct HistoryGraph: Sendable, Equatable {
         trunkAhead: GraphSegment?,
         revealedLanes: [GraphSegment] = [],
         revealedPointers: [String: [String]] = [:],
+        branchParents: [String: String] = [:],
         branchesBetween: Int,
         isEmpty: Bool,
         isDetached: Bool,
@@ -134,6 +140,7 @@ public struct HistoryGraph: Sendable, Equatable {
         self.trunkAhead = trunkAhead
         self.revealedLanes = revealedLanes
         self.revealedPointers = revealedPointers
+        self.branchParents = branchParents
         self.branchesBetween = branchesBetween
         self.isEmpty = isEmpty
         self.isDetached = isDetached

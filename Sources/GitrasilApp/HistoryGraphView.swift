@@ -113,7 +113,13 @@ struct HistoryGraphView: View {
         return nil
     }
 
-    private let sliverOffset: CGFloat = 3
+    /// A stable identity for the spine segment a row belongs to, so a sliver knows how far its
+    /// co-owned run extends: cw's own commits share one key; each intermediate branch its own.
+    private func segmentKey(_ row: Row) -> String {
+        row.isIdentity ? "\u{0}cw" : (row.branch ?? "\u{0}none")
+    }
+
+    static let sliverOffset: CGFloat = 3
 
     /// A branch/worktree that shares another's line (a revealed pointer — no commits of its own) is
     /// drawn as an offset rail a few px to the left, *behind* the front lane, so it peeks out as a
@@ -130,14 +136,19 @@ struct HistoryGraphView: View {
                   let start = rows.firstIndex(where: { $0.commit?.sha == sha }) else { continue }
             let lane = rows[start].lane
             let run = (start..<rows.count).filter { rows[$0].lane == lane }
-            let owned = Array(run.prefix { rows[$0].isIdentity })   // commits it co-owns with the front lane
+            // The overlapper co-owns the whole spine segment its anchor sits in — cw's own commits
+            // when it's parked at cw's tip, or an intermediate branch's run when it's coincident with
+            // a fork point deeper down. Below that segment the line belongs to another branch, so the
+            // sliver forks back rather than running on as a phantom rail.
+            let anchorKey = segmentKey(rows[start])
+            let owned = Array(run.prefix { segmentKey(rows[$0]) == anchorKey })
             guard let firstOwned = owned.first, let lastOwned = owned.last else { continue }
             let rejoin = run.first { $0 > lastOwned }               // where it forks back into the shared line
 
             // Paint furthest-out first so each nearer sliver sits on top and every one peeks out —
             // otherwise a later, further sliver covers the earlier, nearer one.
             for (rank, branch) in branches.enumerated().reversed() {
-                let dx = sliverOffset * CGFloat(rank + 1)
+                let dx = Self.sliverOffset * CGFloat(rank + 1)
                 let color = worktreeColors[branch] ?? Color.gray.opacity(0.55)
                 let x = laneX(lane, maxLane: maxLane) - dx   // left, keeping the cw spine rightmost
                 var path = Path()
@@ -180,7 +191,7 @@ struct HistoryGraphView: View {
             guard let target = (rows.firstIndex { $0.commit?.sha == forkBase } ?? meeting),
                   target > index else { continue }
             let sourceX = laneX(row.lane, maxLane: maxLane)
-            let targetX = laneX(rows[target].lane, maxLane: maxLane)
+            let targetX = laneX(rows[target].lane, maxLane: maxLane) + row.forkTargetDX
             var path = Path()
             path.move(to: CGPoint(x: sourceX, y: y(index)))
             if target - 1 > index {
@@ -327,6 +338,9 @@ private struct Row {
     let open: Bool
     let label: String?
     var forkBaseSHA: String?
+    /// Horizontal nudge applied to this lane's fork *target*, so a branch created off an overlapping
+    /// worktree joins that worktree's offset sliver rather than the shared commit's main dot.
+    var forkTargetDX: CGFloat = 0
     let isDropSource: Bool
     let isCherrySource: Bool
     let rebaseBranch: String?
@@ -344,6 +358,18 @@ private struct Row {
         case .commit(let c), .meeting(let c): return c
         case .hidden: return nil
         }
+    }
+
+    /// If `branch` was created off one of the worktrees overlapping `forkBase` (a recorded/backfilled
+    /// origin), the horizontal offset of that worktree's sliver — so the fork joins the source
+    /// worktree there rather than the shared commit's main dot. `nil` when the origin is unknown or
+    /// isn't one of the overlappers.
+    static func sliverAttribution(branch: String?, forkBase: String?, graph: HistoryGraph) -> CGFloat? {
+        guard let branch, let forkBase,
+              let parent = graph.branchParents[branch],
+              let slivers = graph.revealedPointers[forkBase],
+              let rank = slivers.firstIndex(of: parent) else { return nil }
+        return -HistoryGraphView.sliverOffset * CGFloat(rank + 1)
     }
 
     /// Flatten the graph into rows, newest at the top and the meeting commit at the bottom.
@@ -392,9 +418,15 @@ private struct Row {
         // continued (cw + N commits ahead). Pull the first such lane out to render straight above the
         // cw spine in lane 0 (its own color, no fork); any further ones fork normally. The fork point
         // is the commit, so overlapping worktrees sharing that tip don't change this.
+        // The cw's line continues with an ahead-branch off its tip — but only one that belongs to the
+        // cw (unknown origin, or the cw itself). A branch created off an overlapping worktree stays a
+        // fork lane so it can join that worktree's sliver instead.
         let cwTip = graph.segments.first?.commits.first?.sha
         var cwAhead: [GraphSegment] = []
-        if let cwTip, let idx = laneSegments.firstIndex(where: { $0.first?.forkBase == cwTip }) {
+        if let cwTip, let idx = laneSegments.firstIndex(where: { chain in
+            chain.first?.forkBase == cwTip
+                && sliverAttribution(branch: chain.first?.branchLabel, forkBase: cwTip, graph: graph) == nil
+        }) {
             cwAhead = laneSegments.remove(at: idx)
         }
 
@@ -420,8 +452,19 @@ private struct Row {
         func forkDepth(_ i: Int) -> Int {
             (laneSegments[i].first?.forkBase).flatMap { spineDepth[$0] } ?? belowMeeting
         }
+        // How far left this lane's fork lands: 0 for the main dot, larger for a further-out sliver.
+        // Ordering siblings by it keeps an inner-sliver lane inside an outer-sliver one, so attributed
+        // forks don't cross regardless of reveal order.
+        func targetOffset(_ i: Int) -> CGFloat {
+            -(sliverAttribution(branch: laneSegments[i].first?.branchLabel,
+                                forkBase: laneSegments[i].first?.forkBase, graph: graph) ?? 0)
+        }
         func ordered(_ lanes: [Int]) -> [Int] {
-            lanes.sorted { forkDepth($0) == forkDepth($1) ? $0 < $1 : forkDepth($0) < forkDepth($1) }
+            lanes.sorted { a, b in
+                if forkDepth(a) != forkDepth(b) { return forkDepth(a) < forkDepth(b) }
+                if targetOffset(a) != targetOffset(b) { return targetOffset(a) < targetOffset(b) }
+                return a < b
+            }
         }
         var order: [Int] = []
         func visit(_ i: Int) { order.append(i); ordered(children[i]).forEach(visit) }
@@ -475,6 +518,16 @@ private struct Row {
                 .flatMap(\.value).sorted()
             if !orphaned.isEmpty, let meetingIndex = rows.lastIndex(where: { $0.isMeeting }) {
                 rows[meetingIndex].extraLabels += orphaned
+            }
+        }
+
+        // Route each fork's join to its source worktree's sliver when its origin is one of the
+        // worktrees overlapping the fork commit (attribution); others join the commit's main dot.
+        if !graph.branchParents.isEmpty {
+            for i in rows.indices where rows[i].forkBaseSHA != nil {
+                if let dx = sliverAttribution(branch: rows[i].branch, forkBase: rows[i].forkBaseSHA, graph: graph) {
+                    rows[i].forkTargetDX = dx
+                }
             }
         }
         return rows

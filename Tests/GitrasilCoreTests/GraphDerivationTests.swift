@@ -188,6 +188,57 @@ final class GraphDerivationTests: XCTestCase {
                        "the branch is kept as a ref pill on the commit it points at, not dropped")
     }
 
+    func testCwSpineLabelsSharedForkByItsOwnLineage() async throws {
+        // Two parallel worktrees, `feature` (lex-first) and `qa`, sit at the same fork commit; cw was
+        // created from `qa`. cw's own view must name `qa` at the fork — its true ancestor — and must
+        // not surface the coincidental sibling `feature` at all.
+        let repo = try FixtureRepo()
+        try await repo.initRepo()
+        try await repo.commitFile("a.txt", "a\n", message: "root")
+        try await repo.createBranch("feature")
+        try await repo.commitFile("f1.txt", "1\n", message: "f1")
+        try await repo.commitFile("f2.txt", "2\n", message: "f2")   // fork commit
+        // qa is a sibling worktree parked at the same commit, with no recorded lineage of its own
+        // (update-ref writes no "Created from" reflog) — exactly the real coincidental-sibling case.
+        try await repo.git(["update-ref", "refs/heads/qa", "refs/heads/feature"])
+        try await repo.createBranch("cw")                           // cw off the fork
+        try await repo.commitFile("c1.txt", "1\n", message: "cw tip")
+        try await repo.git(["symbolic-ref", "refs/gitrasil/parent/cw", "refs/heads/qa"])
+
+        let graph = try await Derivations.historyGraph(runner: repo.runner)
+
+        XCTAssertEqual(graph.segments.map(\.kind),
+                       [.currentWorktree, .intermediate(branch: "qa")],
+                       "the fork is labeled by cw's own origin, not the lex-first sibling")
+        XCTAssertFalse(graph.segments.contains { $0.kind == .intermediate(branch: "feature") },
+                       "a coincidental sibling worktree must not appear")
+        XCTAssertTrue(graph.revealedPointers.isEmpty,
+                      "cw's own origin is the spine label, not a sliver on its own view")
+    }
+
+    func testRevealedBranchSurfacesItsRecordedParent() async throws {
+        // cw is `feature`; `qa` (a sibling worktree) sits at feature's tip; `child` was created from
+        // qa. Revealing `child` should surface `qa` as a pointer on the shared commit and record it
+        // as child's parent, so child's fork joins qa rather than the bare commit.
+        let repo = try FixtureRepo()
+        try await repo.initRepo()
+        try await repo.commitFile("a.txt", "a\n", message: "root")
+        try await repo.createBranch("feature")
+        try await repo.commitFile("f1.txt", "1\n", message: "f1")
+        let fork = try await repo.commitFile("f2.txt", "2\n", message: "f2")
+        try await repo.git(["update-ref", "refs/heads/qa", "refs/heads/feature"])  // sibling, no lineage
+        try await repo.git(["checkout", "-q", "-b", "child", "qa"])
+        try await repo.commitFile("ch1.txt", "1\n", message: "ch1")
+        try await repo.git(["symbolic-ref", "refs/gitrasil/parent/child", "refs/heads/qa"])
+        try await repo.git(["checkout", "-q", "feature"])
+
+        let graph = try await Derivations.historyGraph(runner: repo.runner, revealedBranches: ["child"])
+
+        XCTAssertEqual(graph.branchParents["child"], "qa")
+        XCTAssertEqual(graph.revealedPointers[fork], ["qa"],
+                       "child's recorded origin is surfaced so its fork can join it")
+    }
+
     func testUncommittedChangesFlag() async throws {
         let repo = try await Topology.caseA()
         try repo.writeFile("cw1.txt", "dirty")
