@@ -42,6 +42,19 @@ extension Derivations {
         // 5. cw's own commits (first-parent, meeting..head), never truncated.
         let cwCommits = try await commits(range: "\(meeting)..\(head)", runner: runner)
 
+        // Resolve each branch's recorded origin at most once per derive. historyGraph runs on every
+        // FSEvents refresh, and a branch's parent is needed by the spine chain, the revealed-parent
+        // pass, the attribution map, and each lane chain — so without this a branch is re-resolved
+        // ~3× per refresh, each a `git symbolic-ref`/`reflog` spawn. `.some(nil)` = "resolved to no
+        // parent"; `.none` = "not yet resolved".
+        var lineageCache: [String: String?] = [:]
+        func recordedParent(of branch: String) async -> String? {
+            if case let .some(cached) = lineageCache[branch] { return cached }
+            let parent = try? await Mutations.backfillLineage(for: branch, runner: runner)
+            lineageCache[branch] = parent
+            return parent
+        }
+
         // 6. Partition the cw-to-meeting chain into per-branch segments at intermediate branch tips.
         // Where parallel worktrees share a commit, the spine must name *cw's own* ancestor there —
         // not a lex-first sibling that merely sits at the same commit — so cw's view tells its true
@@ -50,7 +63,7 @@ extension Derivations {
         let branchTips = try await localBranchTips(
             runner: runner, excluding: [cwBranch, trunkLocalName].compactMap { $0 })
         var cwChain: [String] = []
-        if let cwBranch { cwChain = try await lineageChain(of: cwBranch, runner: runner) }
+        if let cwBranch { cwChain = await lineageChain(of: cwBranch, resolveParent: recordedParent) }
         let spineTips = try await lineageOverlay(branchTips, chain: cwChain, runner: runner)
         let segments = partitionIntoSegments(cwCommits, branchTips: spineTips)
         let branchesBetween = segments.filter {
@@ -89,7 +102,7 @@ extension Derivations {
         // each child claims its own commits first and the parent is left with just its pointer.
         var revealedEffective = revealedBranches
         for name in revealedBranches {
-            if let parent = try? await Mutations.backfillLineage(for: name, runner: runner),
+            if let parent = await recordedParent(of: name),
                parent != trunkLocalName, parent != cwBranch, !revealedEffective.contains(parent) {
                 revealedEffective.append(parent)
             }
@@ -98,7 +111,7 @@ extension Derivations {
             let tipResult = try await runner.run(["rev-parse", "--verify", "-q", "\(name)^{commit}"])
             guard tipResult.status == 0 else { continue }
             let tip = tipResult.trimmedStdout
-            if let parent = try? await Mutations.backfillLineage(for: name, runner: runner) {
+            if let parent = await recordedParent(of: name) {
                 branchParents[name] = parent
             }
             let commits = try await commits(tip: tip, excluding: revealedExcludes, runner: runner)
@@ -112,7 +125,7 @@ extension Derivations {
                 // Partition at intermediary branch tips, mirroring the cw spine — and, like the spine,
                 // label a shared commit by *this* branch's own lineage, so its intermediaries name the
                 // worktrees it actually descends through, not a coincidental sibling.
-                let laneChain = try await lineageChain(of: name, runner: runner)
+                let laneChain = await lineageChain(of: name, resolveParent: recordedParent)
                 let laneTips = try await lineageOverlay(branchTips, chain: laneChain, runner: runner)
                 revealedLanes.append(contentsOf: partitionRevealedLane(
                     commits, branch: name, branchTips: laneTips, baseForkBase: forkBase))
@@ -145,12 +158,13 @@ extension Derivations {
     /// origin, … following `refs/gitrasil/parent` (with one-time reflog backfill). Stops at the first
     /// unknown/ambiguous origin (a SHA/HEAD reflog source backfill won't adopt) or a cycle. Lets a
     /// lane name *its own* ancestor at a commit shared by parallel worktrees.
-    static func lineageChain(of branch: String, runner: GitRunning) async throws -> [String] {
+    static func lineageChain(
+        of branch: String, resolveParent: (String) async -> String?
+    ) async -> [String] {
         var chain = [branch]
         var seen: Set<String> = [branch]
         var current = branch
-        while let parent = try? await Mutations.backfillLineage(for: current, runner: runner),
-              !seen.contains(parent) {
+        while let parent = await resolveParent(current), !seen.contains(parent) {
             chain.append(parent)
             seen.insert(parent)
             current = parent
