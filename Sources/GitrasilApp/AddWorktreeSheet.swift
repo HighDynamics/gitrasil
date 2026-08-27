@@ -65,8 +65,9 @@ struct AddWorktreeSheet: View {
         .padding(20)
         .frame(width: 460)
         .task {
-            allBranches = await repo.allLocalBranches()
-            availableBranches = await repo.branchesAvailableForCheckout()
+            let all = await repo.allLocalBranches()
+            allBranches = all
+            availableBranches = repo.notCheckedOut(all)   // reuse the one fetch, no second for-each-ref
             base = repo.currentBranch ?? allBranches.first ?? ""
             existingBranch = availableBranches.first ?? ""
             syncPath()

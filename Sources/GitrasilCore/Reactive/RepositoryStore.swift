@@ -115,9 +115,14 @@ public final class RepositoryStore {
     /// Local branches not currently checked out in any worktree — the candidates for a new worktree
     /// on an *existing* branch (git refuses to check a branch out twice).
     public func branchesAvailableForCheckout() async -> [String] {
-        let all = await allLocalBranches()
+        notCheckedOut(await allLocalBranches())
+    }
+
+    /// Filter a branch list to those not checked out in any worktree. Lets a caller that already
+    /// fetched `allLocalBranches()` derive the available set without a second `for-each-ref`.
+    public func notCheckedOut(_ branches: [String]) -> [String] {
         let checkedOut = Set(worktrees.compactMap(\.branch))
-        return all.filter { !checkedOut.contains($0) }
+        return branches.filter { !checkedOut.contains($0) }
     }
 
     /// All local branches (candidates for a new branch's base — you may branch off a checked-out one).
