@@ -6,6 +6,12 @@ import GitrasilCore
 /// live, reactive snapshot.
 struct WorktreeTabView: View {
     let store: WorktreeStore
+    /// This worktree's identity color (from `RepositoryStore.colorIndex`), shared by the header dot
+    /// and the graph spine.
+    var identityColor: Color = Palette.identity(0)
+    /// Identity color per branch for branches that are themselves worktrees, so a lane in this graph
+    /// that represents another worktree is drawn in that worktree's color.
+    var worktreeColors: [String: Color] = [:]
     @State private var expandTruncated = false
 
     @State private var selectedCommit: CommitNode?
@@ -22,7 +28,9 @@ struct WorktreeTabView: View {
     @State private var explorerIgnored: Set<String> = []
     @State private var selectedExplorerPath: String?
 
-    @State private var showTerminal = true
+    /// Terminal open/closed. Owned by `RepositoryView` and keyed by worktree, so each tab remembers
+    /// its own choice across tab switches (this view is re-created per tab via `.id`).
+    @Binding var showTerminal: Bool
     @State private var availableBranches: [String] = []
 
     var body: some View {
@@ -124,7 +132,7 @@ struct WorktreeTabView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Circle().fill(Palette.identity).frame(width: 12, height: 12)
+            Circle().fill(identityColor).frame(width: 12, height: 12)
 
             Text(branchLabel).font(.system(size: 15, weight: .semibold))
 
@@ -255,6 +263,8 @@ struct WorktreeTabView: View {
                 // HEAD sits), so it isn't wrapped in an outer ScrollView here.
                 HistoryGraphView(
                     graph: snapshot.graph,
+                    identityColor: identityColor,
+                    worktreeColors: worktreeColors,
                     expandTruncated: expandTruncated,
                     selectedSHAs: selectedSHAs,
                     isMutable: isMutable(snapshot),
@@ -371,8 +381,30 @@ struct WorktreeTabView: View {
 // MARK: - Small components
 
 enum Palette {
-    /// The single worktree's identity color for v1 (per-worktree assignment is later work).
-    static let identity = Color(red: 0.80, green: 0.40, blue: 0.20)
+    /// Distinct per-worktree identity colors, chosen by `RepositoryStore`'s stable color index so a
+    /// worktree keeps its color across the tab strip, header, and graph spine.
+    static let worktreeColors: [Color] = [
+        Color(red: 0.80, green: 0.40, blue: 0.20),   // terracotta (the original v1 color)
+        Color(red: 0.20, green: 0.50, blue: 0.70),   // blue
+        Color(red: 0.35, green: 0.55, blue: 0.30),   // green
+        Color(red: 0.55, green: 0.35, blue: 0.65),   // purple
+        Color(red: 0.78, green: 0.58, blue: 0.15),   // amber
+        Color(red: 0.70, green: 0.30, blue: 0.45),   // magenta
+        Color(red: 0.20, green: 0.60, blue: 0.58),   // teal
+        Color(red: 0.55, green: 0.55, blue: 0.25),   // olive
+        Color(red: 0.40, green: 0.45, blue: 0.72),   // indigo
+        Color(red: 0.80, green: 0.45, blue: 0.50),   // rose
+    ]
+
+    /// The identity color for a worktree's stable color index. Beyond the hand-picked set it rotates
+    /// the hue by the golden angle so any number of worktrees stay visually separable — no two share
+    /// a color. (The theme pass can revisit the exact palette.)
+    static func identity(_ index: Int) -> Color {
+        if index < worktreeColors.count { return worktreeColors[index] }
+        let hue = (0.07 + Double(index) * 0.61803398875).truncatingRemainder(dividingBy: 1.0)
+        return Color(hue: hue, saturation: 0.52, brightness: 0.68)
+    }
+
     static let grey = Color.secondary
 }
 

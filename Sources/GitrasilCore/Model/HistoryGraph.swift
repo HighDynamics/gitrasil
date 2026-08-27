@@ -97,6 +97,16 @@ public struct HistoryGraph: Sendable, Equatable {
     /// are cherry-pick sources (design brief §5).
     public let revealedLanes: [GraphSegment]
 
+    /// Revealed branches that have no commits of their own beyond the graph — their tip already sits
+    /// on a drawn commit (e.g. a worktree parked at an intermediary). With no commits to fill a lane,
+    /// they're shown as extra ref pills on that commit, keyed by its SHA, in reveal order.
+    public let revealedPointers: [String: [String]]
+
+    /// The worktree branch each shown branch was created from (recorded lineage / reflog backfill),
+    /// so a branch forking off a commit shared by overlapping worktrees connects to the *source*
+    /// worktree's lane rather than an arbitrary one. Absent for branches with no known origin.
+    public let branchParents: [String: String]
+
     /// How many intermediate branches sit between cw and trunk (drives the "N between" pill).
     public let branchesBetween: Int
 
@@ -117,6 +127,8 @@ public struct HistoryGraph: Sendable, Equatable {
         segments: [GraphSegment],
         trunkAhead: GraphSegment?,
         revealedLanes: [GraphSegment] = [],
+        revealedPointers: [String: [String]] = [:],
+        branchParents: [String: String] = [:],
         branchesBetween: Int,
         isEmpty: Bool,
         isDetached: Bool,
@@ -127,6 +139,8 @@ public struct HistoryGraph: Sendable, Equatable {
         self.segments = segments
         self.trunkAhead = trunkAhead
         self.revealedLanes = revealedLanes
+        self.revealedPointers = revealedPointers
+        self.branchParents = branchParents
         self.branchesBetween = branchesBetween
         self.isEmpty = isEmpty
         self.isDetached = isDetached

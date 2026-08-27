@@ -42,10 +42,30 @@ extension Derivations {
         // 5. cw's own commits (first-parent, meeting..head), never truncated.
         let cwCommits = try await commits(range: "\(meeting)..\(head)", runner: runner)
 
+        // Resolve each branch's recorded origin at most once per derive. historyGraph runs on every
+        // FSEvents refresh, and a branch's parent is needed by the spine chain, the revealed-parent
+        // pass, the attribution map, and each lane chain — so without this a branch is re-resolved
+        // ~3× per refresh, each a `git symbolic-ref`/`reflog` spawn. `.some(nil)` = "resolved to no
+        // parent"; `.none` = "not yet resolved".
+        var lineageCache: [String: String?] = [:]
+        func recordedParent(of branch: String) async -> String? {
+            if case let .some(cached) = lineageCache[branch] { return cached }
+            let parent = try? await Mutations.backfillLineage(for: branch, runner: runner)
+            lineageCache[branch] = parent
+            return parent
+        }
+
         // 6. Partition the cw-to-meeting chain into per-branch segments at intermediate branch tips.
+        // Where parallel worktrees share a commit, the spine must name *cw's own* ancestor there —
+        // not a lex-first sibling that merely sits at the same commit — so cw's view tells its true
+        // lineage and coincidental siblings stay hidden. Overlaying cw's recorded parent chain onto
+        // the tip map does that.
         let branchTips = try await localBranchTips(
             runner: runner, excluding: [cwBranch, trunkLocalName].compactMap { $0 })
-        let segments = partitionIntoSegments(cwCommits, branchTips: branchTips)
+        var cwChain: [String] = []
+        if let cwBranch { cwChain = await lineageChain(of: cwBranch, resolveParent: recordedParent) }
+        let spineTips = try await lineageOverlay(branchTips, chain: cwChain, runner: runner)
+        let segments = partitionIntoSegments(cwCommits, branchTips: spineTips)
         let branchesBetween = segments.filter {
             if case .intermediate = $0.kind { return true } else { return false }
         }.count
@@ -64,14 +84,36 @@ extension Derivations {
         // 8. Revealed branches (cherry-pick sources): each branch's commits ahead of its merge-base
         // with cw, as its own grey lane.
         var revealedLanes: [GraphSegment] = []
+        // A revealed branch whose tip already sits on the graph has no commits of its own; it's kept
+        // as a ref pill on that commit (revealedPointers) rather than dropped.
+        var revealedPointers: [String: [String]] = [:]
         // Exclude anything already drawn: cw, the trunk lane, and each revealed lane processed so
         // far — so a commit shared between lanes appears once, in the first lane that claims it.
         var revealedExcludes = [head]
         if let trunkTip { revealedExcludes.append(trunkTip) }
+        // Recorded/backfilled origin worktree per shown branch, so a fork off a shared commit can be
+        // routed to its source lane (attribution). Backfill is one-time and idempotent.
+        var branchParents: [String: String] = [:]
+        // A revealed branch's *recorded* origin worktree is surfaced alongside it: coincident with
+        // the graph it has no unique commits, so it lands as a pointer (an overlap sliver) that the
+        // branch's fork then joins — connecting the branch to the worktree it was created from rather
+        // than the bare shared commit. Unknown/ambiguous origins (a SHA in the reflog) are skipped;
+        // such a branch forks off the shared commit. Parents are appended *after* their children so
+        // each child claims its own commits first and the parent is left with just its pointer.
+        var revealedEffective = revealedBranches
         for name in revealedBranches {
+            if let parent = await recordedParent(of: name),
+               parent != trunkLocalName, parent != cwBranch, !revealedEffective.contains(parent) {
+                revealedEffective.append(parent)
+            }
+        }
+        for name in revealedEffective {
             let tipResult = try await runner.run(["rev-parse", "--verify", "-q", "\(name)^{commit}"])
             guard tipResult.status == 0 else { continue }
             let tip = tipResult.trimmedStdout
+            if let parent = await recordedParent(of: name) {
+                branchParents[name] = parent
+            }
             let commits = try await commits(tip: tip, excluding: revealedExcludes, runner: runner)
             revealedExcludes.append(tip)
             if !commits.isEmpty {
@@ -80,8 +122,16 @@ extension Derivations {
                 let oldest = commits[commits.count - 1].sha
                 let parentResult = try await runner.run(["rev-parse", "--verify", "-q", "\(oldest)^"])
                 let forkBase = parentResult.status == 0 ? parentResult.trimmedStdout : nil
-                revealedLanes.append(GraphSegment(kind: .revealed(branch: name),
-                                                  commits: commits, forkBase: forkBase))
+                // Partition at intermediary branch tips, mirroring the cw spine — and, like the spine,
+                // label a shared commit by *this* branch's own lineage, so its intermediaries name the
+                // worktrees it actually descends through, not a coincidental sibling.
+                let laneChain = await lineageChain(of: name, resolveParent: recordedParent)
+                let laneTips = try await lineageOverlay(branchTips, chain: laneChain, runner: runner)
+                revealedLanes.append(contentsOf: partitionRevealedLane(
+                    commits, branch: name, branchTips: laneTips, baseForkBase: forkBase))
+            } else {
+                // No unique commits — the branch points at a commit already drawn (its own tip).
+                revealedPointers[tip, default: []].append(name)
             }
         }
 
@@ -93,6 +143,8 @@ extension Derivations {
             segments: segments,
             trunkAhead: trunkAhead,
             revealedLanes: revealedLanes,
+            revealedPointers: revealedPointers,
+            branchParents: branchParents,
             branchesBetween: branchesBetween,
             isEmpty: false,
             isDetached: isDetached,
@@ -101,6 +153,41 @@ extension Derivations {
     }
 
     // MARK: - Helpers
+
+    /// The recorded parent-worktree chain for a branch: itself, then its origin, its origin's
+    /// origin, … following `refs/gitrasil/parent` (with one-time reflog backfill). Stops at the first
+    /// unknown/ambiguous origin (a SHA/HEAD reflog source backfill won't adopt) or a cycle. Lets a
+    /// lane name *its own* ancestor at a commit shared by parallel worktrees.
+    static func lineageChain(
+        of branch: String, resolveParent: (String) async -> String?
+    ) async -> [String] {
+        var chain = [branch]
+        var seen: Set<String> = [branch]
+        var current = branch
+        while let parent = await resolveParent(current), !seen.contains(parent) {
+            chain.append(parent)
+            seen.insert(parent)
+            current = parent
+        }
+        return chain
+    }
+
+    /// A branch-tip map with a lineage chain overlaid: each chain member wins the label at its own
+    /// tip, overriding the lex-first sibling `localBranchTips` picked. So a lane labels a shared
+    /// commit with the worktree *it* descends through, not an unrelated one that sits at the commit.
+    static func lineageOverlay(
+        _ base: [String: String], chain: [String], runner: GitRunning
+    ) async throws -> [String: String] {
+        var tips = base
+        // Nearest-to-cw last: when two chain members sit at the same commit (a parent and child
+        // worktree with nothing between them), the nearer, more specific ancestor wins the label.
+        for branch in chain.reversed() {
+            let r = try await runner.run(["rev-parse", "--verify", "-q", "\(branch)^{commit}"])
+            guard r.status == 0 else { continue }
+            tips[r.trimmedStdout] = branch
+        }
+        return tips
+    }
 
     /// Split cw's first-parent commit list (newest→oldest) into contiguous segments. The run above
     /// the first intermediate branch tip is cw's; each branch tip begins a new labeled segment that
@@ -123,6 +210,37 @@ extension Derivations {
         }
         if !current.isEmpty { result.append(GraphSegment(kind: currentKind, commits: current)) }
         return result
+    }
+
+    /// Partition a revealed branch's unique commits (newest→oldest) at intermediary branch tips,
+    /// mirroring `partitionIntoSegments` for the cw spine. The top run is the branch's own commits
+    /// (`.revealed`); each branch tip below (skipping the branch's own tip at index 0) starts an
+    /// `.intermediate` segment. Segments are returned bottom→top with `forkBase` set — the bottom
+    /// forks from `baseForkBase`, each upper segment from the tip of the segment below it — so the
+    /// lane builder chains them into a single lane.
+    static func partitionRevealedLane(
+        _ commits: [CommitNode], branch: String, branchTips: [String: String], baseForkBase: String?
+    ) -> [GraphSegment] {
+        var runs: [(kind: GraphSegment.Kind, commits: [CommitNode])] = []
+        var kind: GraphSegment.Kind = .revealed(branch: branch)
+        var current: [CommitNode] = []
+        for (index, commit) in commits.enumerated() {
+            if index > 0, let tipBranch = branchTips[commit.sha] {
+                if !current.isEmpty { runs.append((kind, current)) }
+                kind = .intermediate(branch: tipBranch)
+                current = [commit]
+            } else {
+                current.append(commit)
+            }
+        }
+        if !current.isEmpty { runs.append((kind, current)) }
+
+        var out: [GraphSegment] = []
+        for (i, run) in runs.enumerated() {
+            let forkBase = i + 1 < runs.count ? runs[i + 1].commits.first?.sha : baseForkBase
+            out.append(GraphSegment(kind: run.kind, commits: run.commits, forkBase: forkBase))
+        }
+        return out.reversed()   // bottom→top, so the bottom creates the lane and upper runs continue it
     }
 
     /// Map of full-SHA → local branch short-name for branch tips, excluding the given names
