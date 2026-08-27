@@ -388,6 +388,16 @@ private struct Row {
         if let trunk = graph.trunkAhead { addBranch(trunk) }
         for revealed in graph.revealedLanes { addBranch(revealed) }
 
+        // A revealed branch that forks off the cw's tip is not a divergence — it's the cw's line
+        // continued (cw + N commits ahead). Pull the first such lane out to render straight above the
+        // cw spine in lane 0 (its own color, no fork); any further ones fork normally. The fork point
+        // is the commit, so overlapping worktrees sharing that tip don't change this.
+        let cwTip = graph.segments.first?.commits.first?.sha
+        var cwAhead: [GraphSegment] = []
+        if let cwTip, let idx = laneSegments.firstIndex(where: { $0.first?.forkBase == cwTip }) {
+            cwAhead = laneSegments.remove(at: idx)
+        }
+
         // Order lanes as a forest so each branch sits next to the lane it forks from and each subtree
         // stays contiguous — a branch off main is drawn right beside main, not sorted purely by depth
         // (which could place it beyond an unrelated branch and cross over it). A lane whose fork point
@@ -424,6 +434,14 @@ private struct Row {
         for (index, segments) in laneSegments.enumerated().reversed() {
             let lane = index + 1
             rows.append(contentsOf: forkLaneRows(segments, lane: lane, expanded: expanded))
+        }
+
+        // The cw's ahead-continuation, straight above the spine in lane 0 (no fork). Rendered in its
+        // own color (a .revealed segment), so it reads as that branch's commits ahead of the cw's tip.
+        for segment in cwAhead.reversed() {
+            let cherry: Bool = { if case .revealed = segment.kind { return true } else { return false } }()
+            rows.append(contentsOf: laneRows(segment, lane: 0, isIdentity: false,
+                                             dirty: false, cherry: cherry, expanded: expanded))
         }
 
         // cw spine (lane 0), lowest branch: cw's commits, then its intermediates, newest→oldest.
