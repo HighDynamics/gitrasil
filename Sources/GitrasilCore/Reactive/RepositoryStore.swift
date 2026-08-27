@@ -44,8 +44,11 @@ public final class RepositoryStore {
     public func start() async {
         await refreshWorktrees()
         if selectedPath == nil {
-            // Prefer the worktree the user actually opened; otherwise the main worktree.
-            let opened = worktrees.first { $0.path == anchorURL }
+            // Prefer the worktree the user actually opened; otherwise the main worktree. git reports
+            // symlink-resolved paths, so resolve both sides — else opening via a symlinked path (e.g.
+            // /tmp → /private/tmp on macOS) never matches and selection falls back to main.
+            let anchor = anchorURL.resolvingSymlinksInPath()
+            let opened = worktrees.first { $0.path.resolvingSymlinksInPath() == anchor }
             selectedPath = (opened ?? worktrees.first)?.path
         }
         if let selectedPath { _ = store(for: selectedPath) }   // pre-create, not during view body
