@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import GitrasilCore
 
@@ -58,6 +59,10 @@ private struct DirectoryContents: View {
                          isSelected: entry.relativePath == selectedPath)
                     .contentShape(Rectangle())
                     .onTapGesture { onOpen(entry.relativePath) }
+                    .contextMenu {
+                        Button("Open in default app") { NSWorkspace.shared.open(entry.url) }
+                            .disabled(!FileManager.default.fileExists(atPath: entry.url.path))
+                    }
             }
         }
         // Enumerate off the main actor so a filter that force-expands many directories doesn't

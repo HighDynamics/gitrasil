@@ -2,11 +2,15 @@ import SwiftUI
 import GitrasilCore
 
 /// The file viewer / diff panel (design brief §6). View-only: renders git's unified-diff text with
-/// add/delete shading. Binary and empty cases show a placeholder; heavy external diffing is a
-/// later "Open in external tool" handoff.
+/// add/delete shading. Binary and empty cases show a placeholder. Heavy/binary cases (and any file)
+/// hand off to an external tool via the optional actions: `onOpenInApp` opens the on-disk
+/// working-tree file in the macOS default app (nil when the file isn't on disk); `onOpenDiffTool`
+/// launches `git difftool` for the current diff source.
 struct FileViewer: View {
     let diff: FileDiff?
     let isLoading: Bool
+    var onOpenInApp: (() -> Void)? = nil
+    var onOpenDiffTool: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -28,6 +32,20 @@ struct FileViewer: View {
             Text(diff.path).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle)
             Text(diff.label).font(.system(size: 11)).foregroundStyle(.secondary)
             Spacer()
+            if let onOpenInApp {
+                Button(action: onOpenInApp) {
+                    Label("Open in default app", systemImage: "arrow.up.forward.app")
+                }
+                .buttonStyle(.borderless)
+                .help("Open the working-tree file in the macOS default app")
+            }
+            if let onOpenDiffTool {
+                Button(action: onOpenDiffTool) {
+                    Label("Open in external diff tool", systemImage: "rectangle.split.2x1")
+                }
+                .buttonStyle(.borderless)
+                .help("Open this diff in your configured git difftool")
+            }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
     }
@@ -35,7 +53,7 @@ struct FileViewer: View {
     @ViewBuilder
     private func body(for diff: FileDiff) -> some View {
         if diff.isBinary {
-            CenteredMessage(text: "Binary file — no textual diff.")
+            binaryPlaceholder
         } else if diff.isEmpty {
             CenteredMessage(text: "No changes for this file in this diff.")
         } else {
@@ -52,6 +70,25 @@ struct FileViewer: View {
                 .padding(.vertical, 4)
             }
         }
+    }
+
+    /// Binary files have no textual hunks to render — offer the external diff tool instead of a
+    /// dead-end message (the tool can show binary/heavy diffs the in-app view can't).
+    @ViewBuilder
+    private var binaryPlaceholder: some View {
+        VStack(spacing: 12) {
+            Text("Binary file — no textual diff.")
+                .font(.system(size: 15)).foregroundStyle(.secondary)
+            if let onOpenDiffTool {
+                Button(action: onOpenDiffTool) {
+                    Label("Open in external diff tool", systemImage: "rectangle.split.2x1")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .multilineTextAlignment(.center)
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private struct DiffLine { let text: String; let kind: Kind

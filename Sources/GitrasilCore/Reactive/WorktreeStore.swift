@@ -123,6 +123,17 @@ public final class WorktreeStore {
         return try await task.value
     }
 
+    /// Hand the selected file off to the user's external diff tool (`git difftool`), launched
+    /// detached so a GUI tool that blocks until closed never stalls the serial executor. A launch
+    /// failure (e.g. git not on PATH) surfaces as a dismissible banner, like a blocked mutation.
+    public func openInDiffTool(source: DiffSource, path: String) {
+        do {
+            try DiffTool.launchDiffTool(source: source, path: path, worktreeURL: worktreeURL)
+        } catch {
+            mutationError = "Couldn't open the external diff tool: \(error)"
+        }
+    }
+
     // MARK: Revealed branches (design brief §5, "show other branches")
 
     /// Reveal a branch in the graph (appended in reveal order) and re-derive.

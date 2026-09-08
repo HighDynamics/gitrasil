@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import GitrasilCore
 
@@ -21,6 +22,9 @@ struct WorktreeTabView: View {
     @State private var selectedFile: FileChange?
     @State private var diff: FileDiff?
     @State private var isLoadingDiff = false
+    /// The diff source behind the currently displayed diff, kept so the external-tool buttons know
+    /// which endpoints to hand `git difftool` for the selected file.
+    @State private var activeSource: DiffSource?
 
     enum NavMode: String, CaseIterable { case history = "History", files = "Files" }
     @State private var navMode: NavMode = .history
@@ -70,12 +74,12 @@ struct WorktreeTabView: View {
         selectionAnchor = commit.sha
         selectedSHAs = [commit.sha]
         selectedCommit = commit
-        selectedFile = nil; diff = nil
+        selectedFile = nil; diff = nil; activeSource = nil
         Task { detail = try? await store.commitDetail(sha: commit.sha) }
     }
 
     private func loadRangeDetail(oldest: String, newest: String) {
-        selectedFile = nil; diff = nil
+        selectedFile = nil; diff = nil; activeSource = nil
         Task { detail = try? await store.rangeDetail(oldest: oldest, newest: newest) }
     }
 
@@ -91,6 +95,7 @@ struct WorktreeTabView: View {
         } else {
             source = .commit(sha: commit.sha, shortSHA: commit.shortSHA)
         }
+        activeSource = source
         Task {
             diff = try? await store.fileDiff(source: source, path: file.path)
             isLoadingDiff = false
@@ -99,7 +104,7 @@ struct WorktreeTabView: View {
 
     private func clearSelection() {
         selectedCommit = nil; selectedSHAs = []; selectionAnchor = nil
-        detail = nil; selectedFile = nil; diff = nil
+        detail = nil; selectedFile = nil; diff = nil; activeSource = nil
     }
 
     /// The commits of the branch segment (spine, trunk-ahead, or a revealed lane) containing `sha`.
@@ -115,10 +120,30 @@ struct WorktreeTabView: View {
         guard let meetingBase else { return }
         selectedExplorerPath = path
         isLoadingDiff = true
+        let source = DiffSource.explorer(meetingBase: meetingBase)
+        activeSource = source
         Task {
-            diff = try? await store.fileDiff(source: .explorer(meetingBase: meetingBase), path: path)
+            diff = try? await store.fileDiff(source: source, path: path)
             isLoadingDiff = false
         }
+    }
+
+    // MARK: External file / diff handoff (roadmap item #2)
+
+    /// Open the on-disk working-tree file in the macOS default app. `nil` when there is no diff or
+    /// the file isn't on disk (e.g. a historical-only or deleted path), so the button is omitted.
+    /// `NSWorkspace` lives here in the App layer — Core stays UI-free.
+    private var onOpenInApp: (() -> Void)? {
+        guard let path = diff?.path else { return nil }
+        let fileURL = store.worktreeURL.appendingPathComponent(path)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+        return { NSWorkspace.shared.open(fileURL) }
+    }
+
+    /// Hand the current diff off to `git difftool`. `nil` until a file/source is selected.
+    private var onOpenDiffTool: (() -> Void)? {
+        guard let source = activeSource, let path = diff?.path else { return nil }
+        return { store.openInDiffTool(source: source, path: path) }
     }
 
     private func loadExplorerData() async {
@@ -213,7 +238,8 @@ struct WorktreeTabView: View {
                 HSplitView {
                     navigationColumn(snapshot)
                         .frame(minWidth: 320, idealWidth: 380)
-                    FileViewer(diff: diff, isLoading: isLoadingDiff)
+                    FileViewer(diff: diff, isLoading: isLoadingDiff,
+                               onOpenInApp: onOpenInApp, onOpenDiffTool: onOpenDiffTool)
                         .frame(minWidth: 360)
                 }
             }
