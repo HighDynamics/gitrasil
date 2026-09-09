@@ -1,16 +1,34 @@
 import SwiftUI
 import GitrasilCore
 
+/// State and actions for the external-diff-tool control. When a tool is configured, the control is
+/// a plain button; otherwise it's a menu of installed GUI tools with an "always use this
+/// application" toggle that persists the pick. When no GUI tool is installed, it's disabled and
+/// says so.
+struct DiffToolControlModel {
+    /// At least one GUI diff tool is installed.
+    let isAvailable: Bool
+    /// The configured default tool id, or nil to ask which to use.
+    let configured: String?
+    /// Installed GUI tools to choose from (used only when `configured` is nil).
+    let tools: [DiffToolOption]
+    /// Whether picking a tool should persist it as the default (else launch it once).
+    let alwaysUse: Binding<Bool>
+    /// Launch the diff tool; `tool` nil uses the configured default.
+    let launch: (_ tool: String?) -> Void
+    /// Persist `tool` as the default, then launch it.
+    let setDefaultAndLaunch: (_ tool: String) -> Void
+}
+
 /// The file viewer / diff panel (design brief §6). View-only: renders git's unified-diff text with
-/// add/delete shading. Binary and empty cases show a placeholder. Heavy/binary cases (and any file)
-/// hand off to an external tool via the optional actions: `onOpenInApp` opens the on-disk
-/// working-tree file in the macOS default app (nil when the file isn't on disk); `onOpenDiffTool`
-/// launches `git difftool` for the current diff source.
+/// add/delete shading. Empty cases show a placeholder. Heavy/binary cases (and any file) hand off
+/// to an external tool: `onOpenInApp` opens the on-disk working-tree file in the macOS default app
+/// (nil when the file isn't on disk); `diffTool` drives the `git difftool` handoff control.
 struct FileViewer: View {
     let diff: FileDiff?
     let isLoading: Bool
     var onOpenInApp: (() -> Void)? = nil
-    var onOpenDiffTool: (() -> Void)? = nil
+    var diffTool: DiffToolControlModel? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -39,15 +57,42 @@ struct FileViewer: View {
                 .buttonStyle(.borderless)
                 .help("Open the working-tree file in the macOS default app")
             }
-            if let onOpenDiffTool {
-                Button(action: onOpenDiffTool) {
-                    Label("Open in external diff tool", systemImage: "rectangle.split.2x1")
-                }
-                .buttonStyle(.borderless)
-                .help("Open this diff in your configured git difftool")
+            if let diffTool {
+                diffToolControl(diffTool, prominent: false)
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    /// The external-diff-tool affordance: a plain button when a tool is configured, a picker menu
+    /// (with the "always use this application" toggle) when one must be chosen, or a disabled
+    /// "No diff tool available" when none is installed.
+    @ViewBuilder
+    private func diffToolControl(_ model: DiffToolControlModel, prominent: Bool) -> some View {
+        let label = Label("Open in external diff tool", systemImage: "rectangle.split.2x1")
+        if model.configured != nil {
+            Button { model.launch(nil) } label: { label }
+                .modifier(DiffToolButtonStyle(prominent: prominent))
+        } else if model.isAvailable {
+            Menu {
+                Toggle("Always use this application", isOn: model.alwaysUse)
+                Divider()
+                ForEach(model.tools) { tool in
+                    Button(tool.name) {
+                        if model.alwaysUse.wrappedValue { model.setDefaultAndLaunch(tool.id) }
+                        else { model.launch(tool.id) }
+                    }
+                }
+            } label: { label }
+            .menuStyle(.button)
+            .modifier(DiffToolButtonStyle(prominent: prominent))
+            .fixedSize()
+        } else {
+            Button { } label: { Label("No diff tool available", systemImage: "rectangle.split.2x1") }
+                .buttonStyle(.borderless)
+                .disabled(true)
+                .help("Install a supported GUI diff tool (e.g. FileMerge) to enable this.")
+        }
     }
 
     @ViewBuilder
@@ -79,16 +124,22 @@ struct FileViewer: View {
         VStack(spacing: 12) {
             Text("Binary file — no textual diff.")
                 .font(.system(size: 15)).foregroundStyle(.secondary)
-            if let onOpenDiffTool {
-                Button(action: onOpenDiffTool) {
-                    Label("Open in external diff tool", systemImage: "rectangle.split.2x1")
-                }
-                .buttonStyle(.borderedProminent)
+            if let diffTool {
+                diffToolControl(diffTool, prominent: true)
             }
         }
         .multilineTextAlignment(.center)
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Borderless in the header, prominent on the binary placeholder — one control, two contexts.
+    private struct DiffToolButtonStyle: ViewModifier {
+        let prominent: Bool
+        @ViewBuilder func body(content: Content) -> some View {
+            if prominent { content.buttonStyle(.borderedProminent) }
+            else { content.buttonStyle(.borderless) }
+        }
     }
 
     private struct DiffLine { let text: String; let kind: Kind

@@ -25,6 +25,11 @@ struct WorktreeTabView: View {
     /// The diff source behind the currently displayed diff, kept so the external-tool buttons know
     /// which endpoints to hand `git difftool` for the selected file.
     @State private var activeSource: DiffSource?
+    /// External diff-tool state: the installed GUI tools, the configured default (nil = ask), and
+    /// whether picking one should persist it. Loaded once per tab; `configured` updates on a pick.
+    @State private var diffTools: [DiffToolOption] = []
+    @State private var configuredDiffTool: String?
+    @State private var alwaysUseDiffTool = true
 
     enum NavMode: String, CaseIterable { case history = "History", files = "Files" }
     @State private var navMode: NavMode = .history
@@ -140,10 +145,30 @@ struct WorktreeTabView: View {
         return { NSWorkspace.shared.open(fileURL) }
     }
 
-    /// Hand the current diff off to `git difftool`. `nil` until a file/source is selected.
-    private var onOpenDiffTool: (() -> Void)? {
+    /// The external-diff-tool control for the current selection. `nil` until a file/source is
+    /// selected.
+    private var diffToolModel: DiffToolControlModel? {
         guard let source = activeSource, let path = diff?.path else { return nil }
-        return { store.openInDiffTool(source: source, path: path) }
+        return DiffToolControlModel(
+            isAvailable: !diffTools.isEmpty,
+            configured: configuredDiffTool,
+            tools: diffTools,
+            alwaysUse: Binding(get: { alwaysUseDiffTool }, set: { alwaysUseDiffTool = $0 }),
+            launch: { tool in store.openInDiffTool(source: source, path: path, tool: tool) },
+            setDefaultAndLaunch: { id in
+                Task {
+                    await store.setDefaultDiffTool(id)
+                    configuredDiffTool = id
+                    store.openInDiffTool(source: source, path: path)
+                }
+            }
+        )
+    }
+
+    /// Load the installed GUI diff tools and the configured default once for this tab.
+    private func loadDiffToolSettings() async {
+        diffTools = await store.availableDiffTools()
+        configuredDiffTool = await store.configuredDiffTool()
     }
 
     private func loadExplorerData() async {
@@ -239,9 +264,10 @@ struct WorktreeTabView: View {
                     navigationColumn(snapshot)
                         .frame(minWidth: 320, idealWidth: 380)
                     FileViewer(diff: diff, isLoading: isLoadingDiff,
-                               onOpenInApp: onOpenInApp, onOpenDiffTool: onOpenDiffTool)
+                               onOpenInApp: onOpenInApp, diffTool: diffToolModel)
                         .frame(minWidth: 360)
                 }
+                .task { await loadDiffToolSettings() }
             }
         } else if let error = store.lastError {
             CenteredMessage(text: error, isError: true)
