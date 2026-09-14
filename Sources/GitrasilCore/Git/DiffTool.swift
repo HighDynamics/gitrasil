@@ -42,10 +42,38 @@ public enum DiffTool {
         return ["difftool"] + selector + ["-y"] + endpoints + ["--", path]
     }
 
-    /// Parse `git difftool --tool-help` into the GUI diff tools that are actually installed. Only
-    /// tools git marks "(requires a graphical session)" are kept — terminal tools (vimdiff, …)
-    /// can't run from our detached, terminal-less GUI launch. Pure, so unit-tested against captured
-    /// output. Order follows git's own (which lists the platform's preferred tools first).
+    /// Recognized GUI diff tools mapped to the macOS app bundle identifiers they belong to. This
+    /// serves two purposes: it's the allowlist of tools whose git detection we trust (keys), and it
+    /// tells the App layer which app to verify is actually installed (values, checked via
+    /// LaunchServices). git's own availability check is only a loose heuristic — it flags a tool
+    /// installed whenever its backend *command name* is on PATH. Araxis is the cautionary case: it
+    /// resolves to the generic `compare`, which collides with ImageMagick's `compare`, so git lists
+    /// Araxis as available on any machine with ImageMagick, then silently launches ImageMagick (git
+    /// even exits 0, so the failure is undetectable at launch). Araxis is deliberately absent here.
+    /// A user who genuinely has an excluded tool can still set `diff.guitool` by hand; we honor it
+    /// via `-g`. Extend as needed.
+    public static let appBundleIDs: [String: [String]] = [
+        "opendiff": ["com.apple.FileMerge"],
+        "vscode": ["com.microsoft.VSCode"],
+        "vscodium": ["com.vscodium", "com.visualstudio.code.oss"],
+        "kaleidoscope": ["app.kaleidoscope", "com.blackpixel.kaleidoscope"],
+        "gvimdiff": ["org.vim.MacVim"],
+        "meld": ["org.gnome.meld"],
+        "kdiff3": ["net.sourceforge.kdiff3", "org.kde.kdiff3"],
+        "p4merge": ["com.perforce.p4merge"],
+        "bc": ["com.ScooterSoftware.BeyondCompare"],
+        "bc3": ["com.ScooterSoftware.BeyondCompare"],
+        "bc4": ["com.ScooterSoftware.BeyondCompare"],
+        "smerge": ["com.sublimemerge"],
+        "diffmerge": ["com.sourcegear.diffmerge"],
+    ]
+
+    /// Parse `git difftool --tool-help` into the diff tools we consider: those git reports installed,
+    /// marked "(requires a graphical session)" (terminal tools like vimdiff can't run from our
+    /// detached, terminal-less launch), and present in `appBundleIDs` (a known GUI tool with a real
+    /// app to verify — so git's unreliable availability heuristic can't surface a false positive).
+    /// Pure, so unit-tested against captured output. The App layer then filters these to the ones
+    /// whose app is actually installed (LaunchServices). Order follows git's own.
     public static func availableGUITools(fromToolHelp text: String) -> [DiffToolOption] {
         let guiMarker = "(requires a graphical session)"
         // git prints installed tools first, then a "valid, but not currently available" section.
@@ -57,6 +85,7 @@ public enum DiffTool {
             // "<id>    Use <Name> (requires a graphical session)"
             guard let idEnd = line.firstIndex(where: { $0 == " " || $0 == "\t" }) else { continue }
             let id = String(line[..<idEnd])
+            guard appBundleIDs[id] != nil else { continue }   // known tool with an app to verify
             var name = String(line[idEnd...]).trimmingCharacters(in: .whitespaces)
             if name.hasPrefix("Use ") { name.removeFirst(4) }
             if let markerRange = name.range(of: guiMarker) { name.removeSubrange(markerRange.lowerBound..<name.endIndex) }
@@ -66,8 +95,9 @@ public enum DiffTool {
         return options
     }
 
-    /// The GUI diff tools installed on this machine (via `git difftool --tool-help`).
-    public static func installedGUITools(runner: GitRunning) async throws -> [DiffToolOption] {
+    /// The GUI diff tools git reports available (and that we recognize). The App layer narrows these
+    /// to the ones whose app is actually installed.
+    public static func candidateGUITools(runner: GitRunning) async throws -> [DiffToolOption] {
         let out = try await runner.run(["difftool", "--tool-help"])
         return availableGUITools(fromToolHelp: out.stdoutString ?? "")
     }

@@ -60,8 +60,14 @@ private struct DirectoryContents: View {
                     .contentShape(Rectangle())
                     .onTapGesture { onOpen(entry.relativePath) }
                     .contextMenu {
-                        Button("Open in default app") { NSWorkspace.shared.open(entry.url) }
-                            .disabled(!FileManager.default.fileExists(atPath: entry.url.path))
+                        if FileManager.default.fileExists(atPath: entry.url.path) {
+                            Button("Open") { NSWorkspace.shared.open(entry.url) }
+                            Menu("Open With") {
+                                ForEach(OpenWithSettings.apps(forFile: entry.url)) { app in
+                                    Button(app.name) { OpenWithSettings.open(entry.url, in: app) }
+                                }
+                            }
+                        }
                     }
             }
         }

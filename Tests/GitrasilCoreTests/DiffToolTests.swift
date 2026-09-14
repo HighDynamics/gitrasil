@@ -36,7 +36,7 @@ final class DiffToolTests: XCTestCase {
             ["difftool", "--tool=opendiff", "-y", "abc^", "abc", "--", "a.txt"])
     }
 
-    func testToolHelpParsesInstalledGUIToolsOnly() {
+    func testToolHelpParsesRecognizedInstalledGUIToolsOnly() {
         let help = """
         'git difftool --tool=<tool>' may be set to one of the following:
         \t\taraxis           Use Araxis Merge (requires a graphical session)
@@ -49,12 +49,28 @@ final class DiffToolTests: XCTestCase {
         \t\tkdiff3           Use KDiff3 (requires a graphical session)
         """
         let tools = DiffTool.availableGUITools(fromToolHelp: help)
-        // Installed GUI tools only: vimdiff (terminal) dropped; meld/kdiff3 (not available) dropped.
+        // vimdiff (terminal) dropped; meld/kdiff3 (not available) dropped; araxis dropped as an
+        // unreliable-detection false positive (its `compare` command collides with ImageMagick).
         XCTAssertEqual(tools, [
-            DiffToolOption(id: "araxis", name: "Araxis Merge"),
             DiffToolOption(id: "opendiff", name: "FileMerge"),
             DiffToolOption(id: "vscode", name: "Visual Studio Code"),
         ])
+    }
+
+    func testToolHelpExcludesUnrecognizedTools() {
+        // Even if git reports araxis available, it's not offered (undetectable silent failure).
+        let help = """
+        'git difftool --tool=<tool>' may be set to one of the following:
+        \t\taraxis           Use Araxis Merge (requires a graphical session)
+        """
+        XCTAssertEqual(DiffTool.availableGUITools(fromToolHelp: help), [])
+    }
+
+    func testBundleIDMapCoversRecognizedToolsAndExcludesAraxis() {
+        // Araxis is deliberately unmapped: its git detection collides with ImageMagick's `compare`.
+        XCTAssertNil(DiffTool.appBundleIDs["araxis"])
+        XCTAssertEqual(DiffTool.appBundleIDs["opendiff"], ["com.apple.FileMerge"])
+        XCTAssertEqual(DiffTool.appBundleIDs["vscode"], ["com.microsoft.VSCode"])
     }
 
     func testToolHelpParsesEmptyWhenNoneInstalled() {

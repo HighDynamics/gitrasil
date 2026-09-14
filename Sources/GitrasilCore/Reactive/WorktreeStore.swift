@@ -135,31 +135,6 @@ public final class WorktreeStore {
         }
     }
 
-    /// The GUI diff tools installed on this machine (drives the tool picker when none is
-    /// configured). Empty when no supported GUI tool is available.
-    public func availableDiffTools() async -> [DiffToolOption] {
-        let task = await executor.read(.custom("difftool-list")) { runner in
-            try await DiffTool.installedGUITools(runner: runner)
-        }
-        return (try? await task.value) ?? []
-    }
-
-    /// The user's configured default diff tool, or nil if they should be asked which to use.
-    public func configuredDiffTool() async -> String? {
-        let task = await executor.read(.custom("difftool-config")) { runner in
-            await DiffTool.configuredTool(runner: runner)
-        }
-        return (try? await task.value).flatMap { $0 }
-    }
-
-    /// Persist the default GUI diff tool in global git config, so later launches use it silently.
-    public func setDefaultDiffTool(_ id: String) async {
-        let task = await executor.mutate { runner in
-            try await DiffTool.setDefaultTool(id, runner: runner)
-        }
-        do { try await task.value } catch { mutationError = "Couldn't set the diff tool: \(error)" }
-    }
-
     // MARK: Revealed branches (design brief §5, "show other branches")
 
     /// Reveal a branch in the graph (appended in reveal order) and re-derive.

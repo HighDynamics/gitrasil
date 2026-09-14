@@ -2,9 +2,9 @@ import SwiftUI
 import GitrasilCore
 
 /// State and actions for the external-diff-tool control. When a tool is configured, the control is
-/// a plain button; otherwise it's a menu of installed GUI tools with an "always use this
-/// application" toggle that persists the pick. When no GUI tool is installed, it's disabled and
-/// says so.
+/// a plain button that launches it; otherwise it's a menu of installed GUI tools (each a one-time
+/// launch) plus a "Set a default…" action that opens Settings — the single place a default is set.
+/// When no GUI tool is installed, it's disabled and says so.
 struct DiffToolControlModel {
     /// At least one GUI diff tool is installed.
     let isAvailable: Bool
@@ -12,22 +12,34 @@ struct DiffToolControlModel {
     let configured: String?
     /// Installed GUI tools to choose from (used only when `configured` is nil).
     let tools: [DiffToolOption]
-    /// Whether picking a tool should persist it as the default (else launch it once).
-    let alwaysUse: Binding<Bool>
     /// Launch the diff tool; `tool` nil uses the configured default.
     let launch: (_ tool: String?) -> Void
-    /// Persist `tool` as the default, then launch it.
-    let setDefaultAndLaunch: (_ tool: String) -> Void
+    /// Open Settings so the user can set a persistent default diff tool.
+    let openSettings: () -> Void
+}
+
+/// State and actions for the "Open With" control (opening the working-tree file in an app). Mirrors
+/// `DiffToolControlModel`: a configured default app makes it a plain button; otherwise it's a menu
+/// of the apps that can open this file (LaunchServices) plus "Set a default…" that opens Settings.
+struct OpenWithControlModel {
+    /// The configured default app (installed), or nil to ask which to use.
+    let defaultApp: AppOption?
+    /// Apps that can open this specific file (used only when `defaultApp` is nil).
+    let apps: [AppOption]
+    /// Open the file; `app` nil uses the configured default.
+    let open: (_ app: AppOption?) -> Void
+    /// Open Settings so the user can set a persistent default app.
+    let openSettings: () -> Void
 }
 
 /// The file viewer / diff panel (design brief §6). View-only: renders git's unified-diff text with
 /// add/delete shading. Empty cases show a placeholder. Heavy/binary cases (and any file) hand off
-/// to an external tool: `onOpenInApp` opens the on-disk working-tree file in the macOS default app
-/// (nil when the file isn't on disk); `diffTool` drives the `git difftool` handoff control.
+/// to an external tool: `openWith` opens the on-disk working-tree file in an app (nil when the file
+/// isn't on disk); `diffTool` drives the `git difftool` handoff control.
 struct FileViewer: View {
     let diff: FileDiff?
     let isLoading: Bool
-    var onOpenInApp: (() -> Void)? = nil
+    var openWith: OpenWithControlModel? = nil
     var diffTool: DiffToolControlModel? = nil
 
     var body: some View {
@@ -50,18 +62,40 @@ struct FileViewer: View {
             Text(diff.path).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.middle)
             Text(diff.label).font(.system(size: 11)).foregroundStyle(.secondary)
             Spacer()
-            if let onOpenInApp {
-                Button(action: onOpenInApp) {
-                    Label("Open in default app", systemImage: "arrow.up.forward.app")
-                }
-                .buttonStyle(.borderless)
-                .help("Open the working-tree file in the macOS default app")
+            if let openWith {
+                openWithControl(openWith)
             }
             if let diffTool {
                 diffToolControl(diffTool, prominent: false)
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    /// The "Open With" affordance: a plain button when a default app is configured, otherwise a menu
+    /// of the apps that can open this file (LaunchServices) plus "Set a default…".
+    @ViewBuilder
+    private func openWithControl(_ model: OpenWithControlModel) -> some View {
+        if let app = model.defaultApp {
+            Button { model.open(nil) } label: {
+                Label("Open in \(app.name)", systemImage: "arrow.up.forward.app")
+            }
+            .buttonStyle(.borderless)
+            .help("Open the working-tree file in \(app.name)")
+        } else {
+            Menu {
+                ForEach(model.apps) { app in
+                    Button(app.name) { model.open(app) }
+                }
+                Divider()
+                Button("Set a default…") { model.openSettings() }
+            } label: {
+                Label("Open with", systemImage: "arrow.up.forward.app")
+            }
+            .menuStyle(.button)
+            .buttonStyle(.borderless)
+            .fixedSize()
+        }
     }
 
     /// The external-diff-tool affordance: a plain button when a tool is configured, a picker menu
@@ -75,14 +109,11 @@ struct FileViewer: View {
                 .modifier(DiffToolButtonStyle(prominent: prominent))
         } else if model.isAvailable {
             Menu {
-                Toggle("Always use this application", isOn: model.alwaysUse)
-                Divider()
                 ForEach(model.tools) { tool in
-                    Button(tool.name) {
-                        if model.alwaysUse.wrappedValue { model.setDefaultAndLaunch(tool.id) }
-                        else { model.launch(tool.id) }
-                    }
+                    Button(tool.name) { model.launch(tool.id) }
                 }
+                Divider()
+                Button("Set a default…") { model.openSettings() }
             } label: { label }
             .menuStyle(.button)
             .modifier(DiffToolButtonStyle(prominent: prominent))

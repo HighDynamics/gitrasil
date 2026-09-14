@@ -25,11 +25,10 @@ struct WorktreeTabView: View {
     /// The diff source behind the currently displayed diff, kept so the external-tool buttons know
     /// which endpoints to hand `git difftool` for the selected file.
     @State private var activeSource: DiffSource?
-    /// External diff-tool state: the installed GUI tools, the configured default (nil = ask), and
-    /// whether picking one should persist it. Loaded once per tab; `configured` updates on a pick.
-    @State private var diffTools: [DiffToolOption] = []
-    @State private var configuredDiffTool: String?
-    @State private var alwaysUseDiffTool = true
+    /// App-wide diff-tool preference (installed tools + configured default), shared with Settings.
+    @Environment(DiffToolSettings.self) private var diffToolSettings
+    /// App-wide "open the file in an app" preference, shared with Settings.
+    @Environment(OpenWithSettings.self) private var openWithSettings
 
     enum NavMode: String, CaseIterable { case history = "History", files = "Files" }
     @State private var navMode: NavMode = .history
@@ -135,14 +134,19 @@ struct WorktreeTabView: View {
 
     // MARK: External file / diff handoff (roadmap item #2)
 
-    /// Open the on-disk working-tree file in the macOS default app. `nil` when there is no diff or
-    /// the file isn't on disk (e.g. a historical-only or deleted path), so the button is omitted.
+    /// The "Open With" control for the current on-disk working-tree file. `nil` when there is no
+    /// diff or the file isn't on disk (e.g. a historical-only or deleted path), so it's omitted.
     /// `NSWorkspace` lives here in the App layer — Core stays UI-free.
-    private var onOpenInApp: (() -> Void)? {
+    private var openWithModel: OpenWithControlModel? {
         guard let path = diff?.path else { return nil }
         let fileURL = store.worktreeURL.appendingPathComponent(path)
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
-        return { NSWorkspace.shared.open(fileURL) }
+        return OpenWithControlModel(
+            defaultApp: openWithSettings.defaultApp,
+            apps: OpenWithSettings.apps(forFile: fileURL),
+            open: { app in OpenWithSettings.open(fileURL, in: app ?? openWithSettings.defaultApp) },
+            openSettings: { NSApp.sendAction(#selector(AppDelegate.openSettings), to: nil, from: nil) }
+        )
     }
 
     /// The external-diff-tool control for the current selection. `nil` until a file/source is
@@ -150,25 +154,12 @@ struct WorktreeTabView: View {
     private var diffToolModel: DiffToolControlModel? {
         guard let source = activeSource, let path = diff?.path else { return nil }
         return DiffToolControlModel(
-            isAvailable: !diffTools.isEmpty,
-            configured: configuredDiffTool,
-            tools: diffTools,
-            alwaysUse: Binding(get: { alwaysUseDiffTool }, set: { alwaysUseDiffTool = $0 }),
+            isAvailable: !diffToolSettings.available.isEmpty,
+            configured: diffToolSettings.configured,
+            tools: diffToolSettings.available,
             launch: { tool in store.openInDiffTool(source: source, path: path, tool: tool) },
-            setDefaultAndLaunch: { id in
-                Task {
-                    await store.setDefaultDiffTool(id)
-                    configuredDiffTool = id
-                    store.openInDiffTool(source: source, path: path)
-                }
-            }
+            openSettings: { NSApp.sendAction(#selector(AppDelegate.openSettings), to: nil, from: nil) }
         )
-    }
-
-    /// Load the installed GUI diff tools and the configured default once for this tab.
-    private func loadDiffToolSettings() async {
-        diffTools = await store.availableDiffTools()
-        configuredDiffTool = await store.configuredDiffTool()
     }
 
     private func loadExplorerData() async {
@@ -264,10 +255,13 @@ struct WorktreeTabView: View {
                     navigationColumn(snapshot)
                         .frame(minWidth: 320, idealWidth: 380)
                     FileViewer(diff: diff, isLoading: isLoadingDiff,
-                               onOpenInApp: onOpenInApp, diffTool: diffToolModel)
+                               openWith: openWithModel, diffTool: diffToolModel)
                         .frame(minWidth: 360)
                 }
-                .task { await loadDiffToolSettings() }
+                .task {
+                    await diffToolSettings.loadIfNeeded()
+                    await openWithSettings.loadIfNeeded()
+                }
             }
         } else if let error = store.lastError {
             CenteredMessage(text: error, isError: true)

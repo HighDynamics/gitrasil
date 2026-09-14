@@ -5,9 +5,14 @@ import GitrasilCore
 // Manual AppKit bootstrap. A SwiftUI `App`/`WindowGroup` built as a plain SwiftPM executable does
 // not reliably create a window under LaunchServices; hosting the SwiftUI root in an NSWindow via
 // NSHostingView does. (The app is still launched as a .app bundle via scripts/run.sh.)
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow!
     private var settingsWindow: NSWindow?
+    /// Shared preferences, injected into both the main and Settings windows so a change in Settings
+    /// is seen immediately by every tab's controls.
+    private let diffToolSettings = DiffToolSettings()
+    private let openWithSettings = OpenWithSettings()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -18,7 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false)
         window.title = "gitrasil"
-        window.contentView = NSHostingView(rootView: RootView())
+        window.contentView = NSHostingView(rootView: RootView()
+            .environment(diffToolSettings)
+            .environment(openWithSettings))
         // Center on the primary display (the one with the menu bar, at origin 0,0) so it's
         // predictably visible regardless of multi-monitor layout.
         let primary = NSScreen.screens.first { $0.frame.origin == .zero } ?? NSScreen.main
@@ -55,13 +62,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = mainMenu
     }
 
-    @objc private func openSettings() {
+    @objc func openSettings() {
         if settingsWindow == nil {
             let settings = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 400, height: 160),
+                contentRect: NSRect(x: 0, y: 0, width: 400, height: 220),
                 styleMask: [.titled, .closable], backing: .buffered, defer: false)
             settings.title = "Settings"
-            settings.contentView = NSHostingView(rootView: SettingsView())
+            settings.contentView = NSHostingView(rootView: SettingsView()
+                .environment(diffToolSettings)
+                .environment(openWithSettings))
             settings.isReleasedWhenClosed = false
             settings.center()
             settingsWindow = settings
@@ -71,7 +80,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-let application = NSApplication.shared
-let delegate = AppDelegate()
-application.delegate = delegate
-application.run()
+// The process starts on the main thread, which is the main actor's executor; the delegate (now
+// main-actor isolated) and NSApplication are created here. `run()` never returns, so everything
+// stays alive for the process lifetime.
+MainActor.assumeIsolated {
+    let application = NSApplication.shared
+    let delegate = AppDelegate()
+    application.delegate = delegate
+    application.run()
+}
