@@ -48,7 +48,7 @@ Branch `spike/live-background`, cut from `origin/main` (a35509c). Local `main` i
        CGWindowList check of level/onscreen; screenshot if permitted). Measure idle CPU. Kill it.
 6. [x] Write `docs/live-background/DESIGN.md` (display options, visuals, live updates, energy, reuse).
 7. [x] `swift build` + `swift test` on final commit. Commit spike + docs.
-8. [ ] SendMessage to Arbor with summary.
+8. [x] SendMessage to Arbor with summary (sent 2026-10-05).
 
 ## Status log
 
@@ -58,3 +58,68 @@ Branch `spike/live-background`, cut from `origin/main` (a35509c). Local `main` i
   dirty tree each redrew live; idle cost 0.0% CPU and 2 wakeups in 20 s. DESIGN.md written. Plain
   `swift build` fails on the missing Metal Toolchain (SwiftTerm); with `--build-system native`,
   build and tests pass.
+
+## Phase 2: from spike to a usable background (Arbor, 2026-10-05)
+
+Daniel's decisions:
+
+- Remove the worktree GUI; it stays in git history. Drop SwiftTerm.
+- Repos are a list the user pins from a menu-bar UI, saved between launches.
+- The look is still undecided. Night transit stays as a placeholder, and the drawing must be easy
+  to restyle.
+- Don't build launch at login or setting a still image as the wallpaper.
+
+Reply to Arbor at `uds:/tmp/cc-socks/18016.sock` with SendMessage. Same constraints as phase 1: no
+push or PR, no login item, no changes to the wallpaper or system settings.
+
+### Steps
+
+1. [x] Update this plan.
+2. [ ] **Remove the GUI** (its own commit). This covers:
+       - the `GitrasilApp` target and its sources;
+       - SwiftTerm and `Package.resolved`;
+       - `scripts/run.sh` and the README's GUI sections;
+       - Core code only the GUI used, with its tests: `RepositoryStore`, worktree add/remove,
+         rebase/drop/cherry-pick/undo, commit detail, diffs, working-tree status and the explorer,
+         `WorktreeStore`'s GUI-only methods, and `GraphRow`'s interaction fields.
+
+       Lineage is still used by the worktree-relative graph, so it moves out of `Mutations` into
+       `Derive/Lineage.swift`. With SwiftTerm gone there are no Metal shaders, so plain
+       `swift build` and `swift test` should pass.
+3. [ ] **Repo-wide graph** (`Derivations.repoGraph`):
+       - The spine is the trunk, preferring the local branch over `origin/…`, with its last N
+         first-parent commits.
+       - Lanes are recently active local branches (`for-each-ref --sort=-committerdate`, with a max
+         age and a cap). Process them oldest tip first, so a branch off a branch stacks onto it.
+       - A branch with no unique commits becomes a ref pill, but only if its tip is drawn.
+       - Branches checked out in any worktree are flagged (`%(worktreepath)`).
+       - It emits `HistoryGraph` (a new `.trunk` segment kind plus `checkedOutBranches`), so
+         `GraphLayout` still applies.
+       - It is read-only: no lineage backfill, because that writes refs.
+       - Tests run on fixture repos.
+4. [ ] **`RepoGraphStore`**:
+       - Watch only the repo's common git dir, filtered to ref paths (`HEAD`, `packed-refs`,
+         `refs/…`, `worktrees/*/HEAD`).
+       - Wait for changes to settle (default 1 s of quiet) before deriving.
+       - Skip the derive when a cheap ref fingerprint hasn't changed.
+       - Publish only when the graph changed, and allow pausing.
+       - Test that a checkout/commit/checkout burst produces one derive.
+
+       Switch the background to the new store. Then, in their own commit, drop the worktree-relative
+       code that is no longer used: `WorktreeStore`, the snapshot, `historyGraph` and lineage.
+5. [ ] **Pinned repos**:
+       - `PinnedRepositories` lives in Core. It validates with `git rev-parse --show-toplevel`,
+         removes duplicates, and persists to `UserDefaults`. Tests use a throwaway suite.
+       - A menu-bar status item lists the pinned repos (each with Reveal in Finder and Remove), plus
+         "Add Repository…" (an open panel) and Quit.
+       - The background shows the pinned repos side by side (up to 4) and reconciles its stores as
+         the list changes. It shows a hint when nothing is pinned.
+       - The repo path argument goes away.
+       - Colours, strokes and fonts live in a `WallpaperStyle` value, so restyling is easy.
+6. [ ] **Checks**:
+       - Plain `swift build` and `swift test` on the final commit.
+       - Run against a throwaway repo, using a throwaway defaults suite (an env override). Check the
+         window level, the status item, that a burst gives one redraw, and the idle cost. Delete
+         the throwaway suite afterwards.
+       - Update DESIGN.md and the README. Commit.
+7. [ ] SendMessage results to Arbor.
