@@ -21,6 +21,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         item.menu = menu
     }
 
+    /// Where the item landed, for the launch log.
+    var placement: String {
+        guard let window = item.button?.window else { return "no button window" }
+        return "status item window \(window.windowNumber) frame \(window.frame) visible \(item.isVisible) "
+            + "occlusion-visible \(window.occlusionState.contains(.visible))"
+    }
+
     // Rebuilt each time it opens, so it always matches the pins.
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()

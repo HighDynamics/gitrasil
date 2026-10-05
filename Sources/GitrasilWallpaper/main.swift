@@ -72,6 +72,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         background.start()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            MainActor.assumeIsolated {
+                if let menu = self?.menu { background.log(menu.placement) }
+            }
+        }
 
         if let quitAfter {
             DispatchQueue.main.asyncAfter(deadline: .now() + quitAfter) { NSApp.terminate(nil) }
