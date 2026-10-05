@@ -1,7 +1,8 @@
 # Gitrasil as a live desktop background — design note
 
-Status: spike (`spike/live-background`). The spike is the `GitrasilWallpaper` target, run with
-`scripts/run-wallpaper.sh /path/to/repo`.
+Status: phase 2 on `spike/live-background`. The background is the `GitrasilWallpaper` target, run
+with `scripts/run-wallpaper.sh`; repos are pinned from its menu-bar item. Sections 1–5 are the
+phase 1 research; "Phase 2" near the end records what was decided and built since.
 
 ## Recommendation in brief
 
@@ -267,22 +268,102 @@ Known gaps in the spike:
 - There's no settle debounce, so transient states redraw.
 - It still watches the working tree.
 
-## Build note
+## Phase 2
 
-Plain `swift build` / `swift test` fail on this machine (Xcode 27) for a reason unrelated to this
-branch, which doesn't touch SwiftTerm or `Package.resolved`. SwiftTerm 1.20's `Shaders.metal` needs
-the Metal Toolchain, which isn't installed (`xcodebuild
--downloadComponent MetalToolchain` would fix it, but that's a system-wide install). The old build
-system skips Metal: `swift build --build-system native` and `swift test --build-system native`
-both pass. The wallpaper product doesn't depend on SwiftTerm, so `swift build --product
-GitrasilWallpaper` works with the default build system.
+### Decisions (Daniel, via Arbor)
+
+- The worktree GUI is removed from the repo, along with SwiftTerm; it stays in git history.
+- Repos are a list the user pins from a menu-bar item, saved between launches. There's no automatic
+  ranking.
+- The look is **ink on cream**, keeping a distinct colour per branch rather than all-sepia.
+- Launch at login and setting a still image as the real wallpaper are still undecided. Neither is
+  built.
+
+### What was built
+
+- **Repo-wide graph** (`Derivations.repoGraph`). The spine is the trunk's last 24 first-parent
+  commits, using the local branch rather than `origin/…`. Lanes are up to 6 local branches: those
+  checked out in a worktree first, then those committed in the last 30 days, newest first.
+  - Lanes claim commits fewest-first, so a branch off a branch stacks onto it instead of drawing a
+    second copy of the shared commits.
+  - A branch with no commits of its own is a pill on its tip, if the tip is drawn.
+  - It emits `HistoryGraph` (a `.trunk` spine segment and `checkedOutBranches`), so `GraphLayout` is
+    unchanged apart from not treating a trunk spine as the current worktree.
+  - It's read-only: unlike `historyGraph`, it never backfills lineage refs.
+- **`RepoGraphStore`.**
+  - It watches only the repo's common git dir, and only ref paths in it: `HEAD`, `packed-refs`,
+    `refs/…` and worktree `HEAD`s (a path filter on `FSEventsWatcher`). Edits, builds, index writes
+    and objects never wake it.
+  - Every ref event restarts a 1 s settle timer, so a checkout, commit, checkout burst is one derive.
+  - A one-spawn ref fingerprint (`for-each-ref`) skips the derive when nothing moved, and the graph
+    only publishes when it changed.
+  - It pauses while the window is covered and catches up once on resume.
+- **Pinned repositories** (`PinnedRepositories`, in Core).
+  - Adding a folder validates it with git and pins the top of its working tree.
+  - A second folder of an already-pinned repository is refused: a subfolder, a symlinked path, or
+    another worktree all count, matched by the common git dir.
+  - The list is saved in the `com.gitrasil.background` defaults. `GITRASIL_BACKGROUND_DEFAULTS_SUITE`
+    names another suite for test runs.
+- **Menu-bar item** (`arrow.triangle.branch`).
+  - It lists the pins, each with Reveal in Finder and Remove. A pin is badged *missing* if its
+    folder is gone, and *not shown* past the fourth.
+  - "Add Repository…" opens a panel and alerts when a folder can't be pinned. Quit is the last item.
+- **Side-by-side panes.** The first four pins share the screen, and their stores start and stop as
+  pins change. With nothing pinned, the background shows a one-line hint.
+- **The look is a value** (`WallpaperStyle`). The drawing code reads only the style: paper, inks,
+  stroke widths, wobble, dot size, fade and fonts. Ink on cream is the style in use:
+  - Thin pen lines that wander slightly. The wander is seeded from position, so a redraw draws the
+    same line.
+  - Warm paper with faint fibres, which turns to charcoal in dark mode.
+  - The trunk is in plain ink, and each branch has its own ink, distinct within a repo.
+  - Commits fade with age, halving every 14 days down to a floor.
+  - Branch names are in a hand (Bradley Hand), subjects in Baskerville italic, and the repo name is
+    a Snell Roundhand watermark.
+  - A checked-out branch's tip gets a ring.
+  - The tips that moved get a pulse ring after a change.
+
+  Night transit is kept as a second `WallpaperStyle`, to show that a look is one value.
+  `GITRASIL_BACKGROUND_APPEARANCE=light|dark` previews either mode without touching the system
+  setting.
+- **Removed.** The worktree-relative store layer is gone: `WorktreeStore`, the worktree snapshot,
+  `StatusBadge` and `isBehind`. `historyGraph` and lineage stay, because `GraphLayout` still lays out
+  worktree-relative graphs and its tests derive them.
+
+### What the phase 2 run showed
+
+The test setup:
+- Two throwaway repos in the job's tmp dir: the phase 1 demo repo, and `atlas`, whose commits span
+  60 days.
+- They were pinned in a throwaway defaults suite, which was deleted afterwards.
+- Screenshots were of the background's own window only.
+
+Results:
+- **Stacking.** The window is at the desktop level, above the Dock's wallpaper window and below
+  Finder's icon window.
+- **Status item.** It exists and is visible: AppKit put it on the external display's menu bar. On
+  this macOS its window isn't in `CGWindowList`.
+- **Idle.** Over 60 s with no changes: 0.0% CPU in `top`, 0.01 s of CPU time in total, about 57 MB
+  RSS.
+- **Working tree.** An untracked file and a `git add` caused no derive and no redraw.
+- **Burst.** A checkout, commit, checkout burst gave exactly one derive and one redraw, about 1 s
+  after the burst ended. The moved tip pulsed.
+- **The look.** Branch inks were distinct in both repos, atlas's older commits faded toward the
+  floor, and checked-out tips were ringed. Dark mode was previewed with the env override.
+
+Not covered:
+- **Menu.** It hasn't been click-tested (no UI automation here). Adding, removing and saving pins
+  are covered by unit tests, and the panes follow `pins.urls`.
+- **Displays.** The background covers the main display only.
+- **Occlusion.** The pause is unit-tested in the store but wasn't observed with a real full-screen
+  app.
+- **Ink colours.** With more than 8 branches in one repo, inks repeat. Across repos the same branch
+  name can get a different ink, because inks are assigned per pane.
 
 ## Open questions for Daniel
 
-- Which visual direction: night transit, ink on cream, or constellation?
-- Which repos: automatic (the most active in `~/repos`) or a pinned list?
 - Is it OK to also set a still image as the real wallpaper, for Mission Control and the lock
   screen? That one changes his wallpaper setting.
-- Should it launch at login (`SMAppService`) once it's real?
-- Should the worktree GUI code (SwiftTerm, mutations, explorer) be stripped from this repo, or
-  should the wallpaper live alongside it?
+- Should it launch at login (`SMAppService`) once it's real? That also needs a bundled `.app`.
+- Should every display get a window (one per `NSScreen`), and should each show the same pins?
+- Should the worktree-relative `historyGraph` and the layout cases only it uses go too? Dropping
+  them means reworking `GraphLayout` and its tests.

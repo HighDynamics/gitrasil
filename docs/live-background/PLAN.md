@@ -66,7 +66,8 @@ Daniel's decisions:
 - Remove the worktree GUI; it stays in git history. Drop SwiftTerm.
 - Repos are a list the user pins from a menu-bar UI, saved between launches.
 - The look is still undecided. Night transit stays as a placeholder, and the drawing must be easy
-  to restyle.
+  to restyle. *Later the same day:* Daniel picked **ink on cream**, keeping a distinct colour per
+  branch/worktree, so that replaced night transit within this phase.
 - Don't build launch at login or setting a still image as the wallpaper.
 
 Reply to Arbor at `uds:/tmp/cc-socks/18016.sock` with SendMessage. Same constraints as phase 1: no
@@ -75,7 +76,7 @@ push or PR, no login item, no changes to the wallpaper or system settings.
 ### Steps
 
 1. [x] Update this plan.
-2. [ ] **Remove the GUI** (its own commit). This covers:
+2. [x] **Remove the GUI** (its own commit). This covers:
        - the `GitrasilApp` target and its sources;
        - SwiftTerm and `Package.resolved`;
        - `scripts/run.sh` and the README's GUI sections;
@@ -86,18 +87,20 @@ push or PR, no login item, no changes to the wallpaper or system settings.
        Lineage is still used by the worktree-relative graph, so it moves out of `Mutations` into
        `Derive/Lineage.swift`. With SwiftTerm gone there are no Metal shaders, so plain
        `swift build` and `swift test` should pass.
-3. [ ] **Repo-wide graph** (`Derivations.repoGraph`):
+3. [x] **Repo-wide graph** (`Derivations.repoGraph`):
        - The spine is the trunk, preferring the local branch over `origin/…`, with its last N
          first-parent commits.
        - Lanes are recently active local branches (`for-each-ref --sort=-committerdate`, with a max
-         age and a cap). Process them oldest tip first, so a branch off a branch stacks onto it.
+         age and a cap). Lanes claim commits fewest-first, so a branch off a branch stacks onto
+         it. (Built that way rather than oldest tip first, which misorders a base that got a later
+         commit.)
        - A branch with no unique commits becomes a ref pill, but only if its tip is drawn.
        - Branches checked out in any worktree are flagged (`%(worktreepath)`).
        - It emits `HistoryGraph` (a new `.trunk` segment kind plus `checkedOutBranches`), so
          `GraphLayout` still applies.
        - It is read-only: no lineage backfill, because that writes refs.
        - Tests run on fixture repos.
-4. [ ] **`RepoGraphStore`**:
+4. [x] **`RepoGraphStore`**:
        - Watch only the repo's common git dir, filtered to ref paths (`HEAD`, `packed-refs`,
          `refs/…`, `worktrees/*/HEAD`).
        - Wait for changes to settle (default 1 s of quiet) before deriving.
@@ -107,7 +110,10 @@ push or PR, no login item, no changes to the wallpaper or system settings.
 
        Switch the background to the new store. Then, in their own commit, drop the worktree-relative
        code that is no longer used: `WorktreeStore`, the snapshot, `historyGraph` and lineage.
-5. [ ] **Pinned repos**:
+       (Built: `WorktreeStore`, the snapshot, `StatusBadge` and `isBehind` were dropped.
+       `historyGraph` and lineage stay, because `GraphLayout`'s worktree-relative cases and its
+       tests still use them. That's an open question for Daniel in DESIGN.md.)
+5. [x] **Pinned repos**:
        - `PinnedRepositories` lives in Core. It validates with `git rev-parse --show-toplevel`,
          removes duplicates, and persists to `UserDefaults`. Tests use a throwaway suite.
        - A menu-bar status item lists the pinned repos (each with Reveal in Finder and Remove), plus
@@ -116,7 +122,11 @@ push or PR, no login item, no changes to the wallpaper or system settings.
          the list changes. It shows a hint when nothing is pinned.
        - The repo path argument goes away.
        - Colours, strokes and fonts live in a `WallpaperStyle` value, so restyling is easy.
-6. [ ] **Checks**:
+
+       (Built. The tests use an in-memory `PinStorage` rather than a throwaway suite, because real
+       suites left empty plists in `~/Library/Preferences`. The style in use is ink on cream, and
+       night transit is kept as a second value.)
+6. [x] **Checks**:
        - Plain `swift build` and `swift test` on the final commit.
        - Run against a throwaway repo, using a throwaway defaults suite (an env override). Check the
          window level, the status item, that a burst gives one redraw, and the idle cost. Delete

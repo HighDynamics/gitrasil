@@ -23,8 +23,15 @@ layer on top.
 - **`Derive/`** — pure, git-backed derivations (trunk detection, graph topology), tested directly
   against real fixture repos.
 - **`Layout/GraphLayout`** — turns a graph into lanes and rows, independent of any renderer.
-- **`Reactive/`** — FSEvents watching and the observable stores the background renders from.
+- **`Reactive/`** — FSEvents watching and `RepoGraphStore`, which keeps one repository's graph live
+  (ref changes only, settled, fingerprint-gated).
+- **`Settings/`** — `PinnedRepositories`, the saved list of repositories the background draws.
 - **`Model/`** — immutable domain values.
+
+### `GitrasilWallpaper`
+
+The desktop-level window, the menu-bar item, and the drawing. The look is a `WallpaperStyle` value
+(currently ink on cream); the drawing code reads only that, so restyling is a new value.
 
 ## Build & test
 
@@ -39,11 +46,15 @@ derived values — no mocking of git.
 ## Run the background
 
 ```bash
-scripts/run-wallpaper.sh /path/to/a/git/repo [--quit-after <seconds>]
+scripts/run-wallpaper.sh [--quit-after <seconds>]
 ```
 
-Draws the repo's branch graph in a desktop-level window behind the icons on the primary display, and
-redraws as the repo changes. Ctrl-C removes it; nothing is installed.
+Pin repositories from the menu-bar item (the branch icon). The background draws the first four side
+by side, in a desktop-level window behind the icons on the primary display, and redraws as they
+change. Pins are saved between launches in the `com.gitrasil.background` defaults
+(`GITRASIL_BACKGROUND_DEFAULTS_SUITE` names another suite, e.g. for a test run).
+`GITRASIL_BACKGROUND_APPEARANCE=light|dark` previews a mode without changing the system's. Ctrl-C or
+the menu's Quit removes it; nothing is installed and the system wallpaper is never changed.
 
 ## Toolchain floors
 
