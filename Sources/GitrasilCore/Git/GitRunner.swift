@@ -63,11 +63,10 @@ private final class DataBox: @unchecked Sendable {
 }
 
 public extension GitRunner {
-    /// Environment shared by the app's git runners, so the two stores can't drift:
-    /// - `GIT_EDITOR`/`GIT_SEQUENCE_EDITOR=true` never open an interactive editor (e.g. during
-    ///   `rebase --continue`); the user resolves conflicts in their own editor/terminal.
-    /// - `GIT_OPTIONAL_LOCKS=0` keeps our frequent reads truly read-only (see `WorktreeStore` for
-    ///   the FSEvents lock-loop this prevents).
+    /// Environment shared by the app's git runners:
+    /// - `GIT_EDITOR`/`GIT_SEQUENCE_EDITOR=true` never open an interactive editor.
+    /// - `GIT_OPTIONAL_LOCKS=0` keeps our frequent reads truly read-only, so a watcher on the git
+    ///   dir isn't woken by our own `git status` refreshing the index (an FSEvents lock-loop).
     static let appEnvironment: [String: String] = [
         "GIT_EDITOR": "true", "GIT_SEQUENCE_EDITOR": "true", "GIT_OPTIONAL_LOCKS": "0",
     ]

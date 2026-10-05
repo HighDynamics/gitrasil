@@ -49,18 +49,4 @@ final class DerivationsTests: XCTestCase {
         dirty = try await Derivations.isDirty(runner: repo.runner)
         XCTAssertTrue(dirty, "uncommitted change should be dirty")
     }
-
-    func testIsBehindWhenTrunkAdvances() async throws {
-        let repo = try FixtureRepo()
-        try await repo.initRepo()
-        try await repo.commitFile("a.txt", "1", message: "root")
-        try await repo.git(["checkout", "-q", "-b", "feature"])
-        // main advances past the fork point.
-        try await repo.git(["checkout", "-q", "main"])
-        try await repo.commitFile("c.txt", "3", message: "main ahead")
-
-        let base = try await Derivations.mergeBase("main", "feature", runner: repo.runner)
-        let behind = try await Derivations.isBehind(meeting: base, trunk: "main", runner: repo.runner)
-        XCTAssertTrue(behind)
-    }
 }

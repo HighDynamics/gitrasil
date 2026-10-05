@@ -50,17 +50,9 @@ public enum Derivations {
         return out.trimmedStdout
     }
 
-    // MARK: Status facts (tab badges)
-
     /// Does the working tree have uncommitted changes? (`status --porcelain=v2 -z` non-empty)
     public static func isDirty(runner: GitRunning) async throws -> Bool {
         let out = try await runner.runChecked(["status", "--porcelain=v2", "-z"])
         return !out.trimmedStdout.isEmpty
-    }
-
-    /// Is trunk ahead of the meeting commit? A purely local count: `rev-list --count <meeting>..<trunk>`.
-    public static func isBehind(meeting: String, trunk: String, runner: GitRunning) async throws -> Bool {
-        let out = try await runner.runChecked(["rev-list", "--count", "\(meeting)..\(trunk)"])
-        return (Int(out.trimmedStdout) ?? 0) > 0
     }
 }

@@ -81,8 +81,9 @@ public struct GraphSegment: Sendable, Equatable {
     }
 }
 
-/// The derived, immutable structure of a worktree's simplified history graph. Part of the
-/// larger `WorktreeSnapshot`; produced by `Derivations.historyGraph` and rendered as-is.
+/// The derived, immutable structure of a simplified history graph: either one worktree's view
+/// (`Derivations.historyGraph`) or the whole repository's (`Derivations.repoGraph`), laid out by
+/// `GraphLayout` as-is.
 public struct HistoryGraph: Sendable, Equatable {
     /// The anchor — where cw, trunk, and any intermediate branches converge (`merge-base`).
     /// Always shown, never truncated. `nil` only for an empty repo.
