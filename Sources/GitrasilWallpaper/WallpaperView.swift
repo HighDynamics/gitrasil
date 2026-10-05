@@ -1,125 +1,214 @@
 import SwiftUI
 import GitrasilCore
 
-/// The wallpaper: the repository's branch graph drawn from the shared `GraphLayout` rows — glowing
-/// lanes on a deep night gradient, each branch in its own hue, commit subjects as quiet captions. A
-/// Canvas inside a TimelineView whose clock is paused unless a tip pulse is running, so an idle
-/// desktop costs no frames.
+/// The wallpaper: the pinned repositories' branch graphs side by side on one sheet of paper, drawn
+/// from the shared `GraphLayout` rows in a `WallpaperStyle`. Each repository is a Canvas inside a
+/// TimelineView whose clock is paused unless a tip pulse is running, so an idle desktop costs no
+/// frames.
 struct WallpaperView: View {
-    let model: WallpaperModel
+    let background: BackgroundModel
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        // Read the graph here so Observation re-renders only when the model publishes a new one.
-        let graph = model.graph
-        let rows = graph.map { GraphLayout.rows(for: $0, expanded: false) } ?? []
-        let pulseStart = model.pulseStart
-
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: pulseStart == nil)) { timeline in
-            Canvas { context, size in
-                drawBackground(size: size, in: &context)
-                drawRepoName(size: size, in: &context)
-                guard !rows.isEmpty else { return }
-                let geometry = Geometry(size: size, rowCount: rows.count)
-                drawLanes(rows, geometry: geometry, in: &context)
-                drawForks(rows, geometry: geometry, in: &context)
-                drawDots(rows, geometry: geometry, in: &context)
-                drawCaptions(rows, geometry: geometry, in: &context)
-                if let pulseStart {
-                    let t = timeline.date.timeIntervalSince(pulseStart) / WallpaperModel.pulseDuration
-                    drawPulse(rows, geometry: geometry, progress: min(max(t, 0), 1), in: &context)
+        let style = WallpaperStyle.inkOnCream(dark: colorScheme == .dark)
+        let panes = background.panes
+        ZStack {
+            Canvas { context, size in drawPaper(size: size, style: style, in: &context) }
+            if panes.isEmpty {
+                Text("Pin a repository from the menu bar to draw its branches here.")
+                    .font(style.captionFont.weight(.regular))
+                    .foregroundStyle(style.captionInk)
+            } else {
+                HStack(spacing: 0) {
+                    ForEach(panes, id: \.repoURL) { pane in
+                        RepoPane(model: pane, style: style, now: background.now)
+                    }
                 }
+                // Keep clear of the menu bar and the Dock's usual reach.
+                .padding(.vertical, 48)
             }
         }
         .ignoresSafeArea()
     }
 
-    // MARK: Geometry
-
-    /// Where rows and lanes land: the graph is centered vertically, its spine a little right of
-    /// center so the lanes fan left and the captions have room on the right.
-    private struct Geometry {
-        let rowHeight: CGFloat
-        let top: CGFloat
-        let spineX: CGFloat
-        let laneGap: CGFloat = 38
-
-        init(size: CGSize, rowCount: Int) {
-            rowHeight = min(64, max(18, size.height * 0.7 / CGFloat(rowCount)))
-            top = (size.height - rowHeight * CGFloat(rowCount)) / 2
-            spineX = size.width * 0.6
-        }
-
-        func y(_ index: Int) -> CGFloat { top + CGFloat(index) * rowHeight + rowHeight / 2 }
-        func x(_ lane: Int) -> CGFloat { spineX - CGFloat(lane) * laneGap }
-        func point(_ index: Int, lane: Int) -> CGPoint { CGPoint(x: x(lane), y: y(index)) }
-    }
-
-    // MARK: Colors
-
-    private static let amber = Color(red: 1.00, green: 0.74, blue: 0.42)
-    private static let quiet = Color(red: 0.55, green: 0.60, blue: 0.75)
-    private static let lanePalette: [Color] = [
-        Color(red: 0.40, green: 0.85, blue: 0.85),   // teal
-        Color(red: 0.66, green: 0.56, blue: 1.00),   // violet
-        Color(red: 1.00, green: 0.50, blue: 0.62),   // rose
-        Color(red: 0.45, green: 0.70, blue: 1.00),   // sky
-        Color(red: 0.62, green: 0.90, blue: 0.48),   // lime
-        Color(red: 1.00, green: 0.62, blue: 0.40),   // coral
-    ]
-
-    /// A branch keeps its hue for life: derived from its name (a stable hash, not Swift's seeded one),
-    /// so lanes don't recolor across redraws or launches.
-    private func color(for row: GraphRow) -> Color {
-        if row.isIdentity { return Self.amber }
-        guard let branch = row.branch else { return Self.quiet }
-        let hash = branch.utf8.reduce(UInt32(2166136261)) { ($0 ^ UInt32($1)) &* 16777619 }
-        return Self.lanePalette[Int(hash % UInt32(Self.lanePalette.count))]
-    }
-
-    // MARK: Drawing
-
-    private func drawBackground(size: CGSize, in context: inout GraphicsContext) {
+    private func drawPaper(size: CGSize, style: WallpaperStyle, in context: inout GraphicsContext) {
         let rect = CGRect(origin: .zero, size: size)
         context.fill(Path(rect), with: .linearGradient(
-            Gradient(colors: [Color(red: 0.03, green: 0.04, blue: 0.10),
-                              Color(red: 0.07, green: 0.06, blue: 0.18),
-                              Color(red: 0.12, green: 0.07, blue: 0.20)]),
-            startPoint: .zero, endPoint: CGPoint(x: size.width, y: size.height)))
-        // A soft bloom behind the graph.
-        let bloom = CGRect(x: size.width * 0.35, y: size.height * 0.1, width: size.width * 0.5, height: size.height * 0.8)
-        context.fill(Path(ellipseIn: bloom), with: .radialGradient(
-            Gradient(colors: [Color(red: 0.25, green: 0.20, blue: 0.45).opacity(0.35), .clear]),
-            center: CGPoint(x: bloom.midX, y: bloom.midY), startRadius: 0, endRadius: bloom.width / 2))
+            Gradient(colors: style.paper), startPoint: .zero, endPoint: CGPoint(x: size.width, y: size.height)))
+        let wash = rect.insetBy(dx: size.width * 0.1, dy: size.height * 0.08)
+        context.fill(Path(ellipseIn: wash), with: .radialGradient(
+            Gradient(colors: [style.wash, .clear]),
+            center: CGPoint(x: wash.midX, y: wash.midY), startRadius: 0, endRadius: wash.width / 2))
+        // Fibres: short faint strokes at fixed, seeded places, so the paper never shimmers.
+        var rng = SeededRandom(seed: 0x9E3779B9)
+        var fibres = Path()
+        for _ in 0..<Int(size.width * size.height / 9000) {
+            let x = rng.next() * size.width, y = rng.next() * size.height
+            let angle = rng.next() * .pi, length = 4 + rng.next() * 10
+            fibres.move(to: CGPoint(x: x, y: y))
+            fibres.addLine(to: CGPoint(x: x + cos(angle) * length, y: y + sin(angle) * length))
+        }
+        context.stroke(fibres, with: .color(style.fibre), lineWidth: 0.6)
+    }
+}
+
+/// One repository's graph.
+private struct RepoPane: View {
+    let model: WallpaperModel
+    let style: WallpaperStyle
+    let now: Date
+
+    var body: some View {
+        // Read the graph here so Observation re-renders only when the model publishes a new one.
+        let rows = model.graph.map { GraphLayout.rows(for: $0, expanded: false) } ?? []
+        let pulseStart = model.pulseStart
+        let pulseTips = model.pulseTips
+        let ages = Self.ages(rows, now: now)
+        let checkedOut = model.graph?.checkedOutBranches ?? []
+        // Trunk (lane 0) is drawn in plain ink, so it doesn't take a branch ink.
+        let inks = style.inks(for: rows.flatMap {
+            ($0.lane > 0 ? [$0.branch, $0.label].compactMap { $0 } : []) + $0.extraLabels
+        })
+
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: pulseStart == nil)) { timeline in
+            Canvas { context, size in
+                let drawing = Drawing(style: style, rows: rows, ages: ages, inks: inks, checkedOut: checkedOut,
+                                      geometry: Geometry(size: size, rowCount: rows.count))
+                drawing.watermark(model.repoName, problem: model.problem, size: size, in: &context)
+                guard !rows.isEmpty else { return }
+                drawing.lanes(in: &context)
+                drawing.forks(in: &context)
+                drawing.dots(in: &context)
+                drawing.captions(in: &context)
+                if let pulseStart {
+                    let t = timeline.date.timeIntervalSince(pulseStart) / WallpaperModel.pulseDuration
+                    drawing.pulse(tips: pulseTips, progress: min(max(t, 0), 1), in: &context)
+                }
+            }
+        }
+        .clipped()
     }
 
-    private func drawRepoName(size: CGSize, in context: inout GraphicsContext) {
-        let name = Text(model.repoName)
-            .font(.system(size: 96, weight: .ultraLight, design: .rounded))
-            .foregroundColor(.white.opacity(0.10))
-        context.draw(name, at: CGPoint(x: 64, y: size.height - 72), anchor: .bottomLeading)
+    /// Each row's age in days, from its commit date (rows without a commit take the row above's).
+    private static func ages(_ rows: [GraphRow], now: Date) -> [Double] {
+        let iso = ISO8601DateFormatter()
+        var last = 0.0
+        return rows.map { row in
+            if let date = row.commit.flatMap({ iso.date(from: $0.date) }) {
+                last = now.timeIntervalSince(date) / 86_400
+            }
+            return last
+        }
+    }
+}
+
+// MARK: - Geometry
+
+/// Where rows and lanes land in a pane: the graph is centered vertically, its spine right of center
+/// so the lanes fan left and the captions have room on the right.
+private struct Geometry {
+    let size: CGSize
+    let rowHeight: CGFloat
+    let top: CGFloat
+    let spineX: CGFloat
+    let laneGap: CGFloat
+
+    init(size: CGSize, rowCount: Int) {
+        self.size = size
+        rowHeight = min(52, max(16, size.height * 0.82 / CGFloat(max(rowCount, 1))))
+        top = (size.height - rowHeight * CGFloat(rowCount)) / 2
+        spineX = size.width * (size.width < 700 ? 0.42 : 0.5)
+        laneGap = min(34, size.width * 0.06)
     }
 
-    /// A glowing stroke: a wide faint halo under a thin bright line.
-    private func glow(_ path: Path, _ color: Color, in context: inout GraphicsContext) {
-        context.stroke(path, with: .color(color.opacity(0.14)), style: StrokeStyle(lineWidth: 10, lineCap: .round))
-        context.stroke(path, with: .color(color.opacity(0.9)), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+    /// Room for a caption on the right of the spine.
+    var captionWidth: CGFloat { size.width - spineX - 40 }
+
+    func y(_ index: Int) -> CGFloat { top + CGFloat(index) * rowHeight + rowHeight / 2 }
+    func x(_ lane: Int) -> CGFloat { spineX - CGFloat(lane) * laneGap }
+    func point(_ index: Int, lane: Int) -> CGPoint { CGPoint(x: x(lane), y: y(index)) }
+}
+
+// MARK: - Drawing
+
+/// The pane's strokes, all styled from `style`. Hand-drawn wobble is seeded from what's drawn
+/// (positions, never time), so a redraw draws the same line.
+private struct Drawing {
+    let style: WallpaperStyle
+    let rows: [GraphRow]
+    let ages: [Double]
+    /// Each drawn branch's ink, distinct within the pane.
+    let inks: [String: Color]
+    /// Branches checked out in some worktree: their tips get a second ring.
+    let checkedOut: Set<String>
+    let geometry: Geometry
+
+    private var g: Geometry { geometry }
+
+    /// Lane 0 is the trunk spine (and its anchor) in the repo-wide graph, drawn in plain ink; every
+    /// other lane is a branch in its own ink.
+    private func ink(_ row: GraphRow) -> Color {
+        row.lane == 0 ? style.ink : ink(branch: row.branch)
     }
 
-    private func drawLanes(_ rows: [GraphRow], geometry g: Geometry, in context: inout GraphicsContext) {
+    private func ink(branch: String?) -> Color {
+        branch.flatMap { inks[$0] } ?? style.ink
+    }
+
+    private func opacity(_ index: Int) -> Double { style.opacity(ageDays: ages[index]) }
+
+    func watermark(_ name: String, problem: String?, size: CGSize, in context: inout GraphicsContext) {
+        let text = Text(name).font(style.watermarkFont).foregroundColor(style.ink.opacity(style.watermarkOpacity))
+        context.draw(text, at: CGPoint(x: 32, y: size.height - 8), anchor: .bottomLeading)
+        if let problem {
+            context.draw(Text(problem).font(style.captionFont).foregroundColor(style.captionInk),
+                         at: CGPoint(x: size.width / 2, y: size.height / 2), anchor: .center)
+        }
+    }
+
+    /// A pen line from `a` to `b`: a gentle seeded wander about the straight line, with a faint bleed
+    /// under it.
+    private func penPath(_ a: CGPoint, _ b: CGPoint) -> Path {
+        var path = Path()
+        path.move(to: a)
+        guard style.wobble > 0 else { path.addLine(to: b); return path }
+        let dx = b.x - a.x, dy = b.y - a.y
+        let length = max(hypot(dx, dy), 1)
+        let normal = CGPoint(x: -dy / length, y: dx / length)
+        var rng = SeededRandom(seed: UInt64(abs(Int(a.x * 31 + a.y * 17 + b.x * 7 + b.y * 3))) &+ 1)
+        let steps = max(2, Int(length / 24))
+        let phase = rng.next() * .pi * 2, waves = 0.6 + rng.next() * 0.8
+        for step in 1...steps {
+            let t = CGFloat(step) / CGFloat(steps)
+            // Pinned at both ends, wandering most in the middle.
+            let offset = sin(t * .pi * waves * 2 + phase) * sin(t * .pi) * style.wobble
+            let point = CGPoint(x: a.x + dx * t + normal.x * offset, y: a.y + dy * t + normal.y * offset)
+            if step == steps { path.addLine(to: b) } else { path.addLine(to: point) }
+        }
+        return path
+    }
+
+    private func stroke(_ path: Path, _ color: Color, opacity: Double, in context: inout GraphicsContext) {
+        if style.bleedWidth > 0 {
+            context.stroke(path, with: .color(color.opacity(style.bleedOpacity * opacity)),
+                           style: StrokeStyle(lineWidth: style.bleedWidth, lineCap: .round, lineJoin: .round))
+        }
+        context.stroke(path, with: .color(color.opacity(0.92 * opacity)),
+                       style: StrokeStyle(lineWidth: style.lineWidth, lineCap: .round, lineJoin: .round))
+    }
+
+    func lanes(in context: inout GraphicsContext) {
         for lane in Set(rows.map(\.lane)) {
             let indices = rows.indices.filter { rows[$0].lane == lane }
             for (a, b) in zip(indices, indices.dropFirst()) {
-                var path = Path()
-                path.move(to: g.point(a, lane: lane))
-                path.addLine(to: g.point(b, lane: lane))
-                glow(path, color(for: rows[a]), in: &context)
+                stroke(penPath(g.point(a, lane: lane), g.point(b, lane: lane)), ink(rows[a]),
+                       opacity: opacity(a), in: &context)
             }
         }
     }
 
-    /// A fork lane runs straight down its lane, then eases into the commit it branches from on a
-    /// smooth curve (the app's view uses a hard diagonal; a wallpaper wants it softer).
-    private func drawForks(_ rows: [GraphRow], geometry g: Geometry, in context: inout GraphicsContext) {
+    /// A fork lane runs straight down its lane, then eases into the commit it branches from.
+    func forks(in context: inout GraphicsContext) {
         let meeting = rows.lastIndex { $0.isMeeting }
         for (index, row) in rows.enumerated() {
             guard let forkBase = row.forkBaseSHA,
@@ -128,75 +217,103 @@ struct WallpaperView: View {
             let source = g.point(index, lane: row.lane)
             let end = g.point(target, lane: rows[target].lane)
             let bend = CGPoint(x: source.x, y: g.y(target - 1))
-            var path = Path()
-            path.move(to: source)
-            path.addLine(to: bend)
+            var path = penPath(source, bend)
             path.addCurve(to: end,
                           control1: CGPoint(x: bend.x, y: bend.y + g.rowHeight * 0.6),
                           control2: CGPoint(x: end.x, y: end.y - g.rowHeight * 0.6))
-            glow(path, color(for: row), in: &context)
+            stroke(path, ink(row), opacity: opacity(index), in: &context)
         }
     }
 
-    private func drawDots(_ rows: [GraphRow], geometry g: Geometry, in context: inout GraphicsContext) {
+    func dots(in context: inout GraphicsContext) {
         for (index, row) in rows.enumerated() {
             let center = g.point(index, lane: row.lane)
-            let color = color(for: row)
+            let color = ink(row)
+            let alpha = opacity(index)
             if case .hidden = row.content {
                 // A collapsed run: three small beads along the lane.
                 for k in -1...1 {
-                    let c = CGPoint(x: center.x, y: center.y + CGFloat(k) * 5)
-                    context.fill(Path(ellipseIn: CGRect(x: c.x - 1.5, y: c.y - 1.5, width: 3, height: 3)),
-                                 with: .color(color.opacity(0.7)))
+                    let c = CGPoint(x: center.x, y: center.y + CGFloat(k) * 4.5)
+                    context.fill(Path(ellipseIn: CGRect(x: c.x - 1.3, y: c.y - 1.3, width: 2.6, height: 2.6)),
+                                 with: .color(color.opacity(0.8 * alpha)))
                 }
                 continue
             }
-            let r: CGFloat = row.isMeeting ? 7 : 5
-            context.fill(Path(ellipseIn: CGRect(x: center.x - r * 2.6, y: center.y - r * 2.6, width: r * 5.2, height: r * 5.2)),
-                         with: .radialGradient(Gradient(colors: [color.opacity(0.35), .clear]),
-                                               center: center, startRadius: 0, endRadius: r * 2.6))
-            let dot = Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2))
-            if row.open || row.isMeeting {
-                context.fill(dot, with: .color(Color(red: 0.05, green: 0.05, blue: 0.12)))
-                context.stroke(dot, with: .color(color), lineWidth: 2)
+            let r = style.dotRadius * (row.isMeeting ? 1.3 : 1)
+            // A pen dot: slightly out of round, turned by its position so each is its own.
+            var rng = SeededRandom(seed: UInt64(abs(Int(center.x * 13 + center.y * 29))) &+ 7)
+            let dot = Path(ellipseIn: CGRect(x: -r * 1.06, y: -r * 0.94, width: r * 2.12, height: r * 1.88))
+                .applying(CGAffineTransform(rotationAngle: rng.next() * .pi)
+                    .concatenating(CGAffineTransform(translationX: center.x, y: center.y)))
+            let names = [row.label].compactMap { $0 } + row.extraLabels
+            if row.isMeeting || names.isEmpty {
+                context.fill(dot, with: .color(style.paper[1]))
+                context.stroke(dot, with: .color(color.opacity(alpha)), lineWidth: style.lineWidth)
             } else {
-                context.fill(dot, with: .color(color))
+                context.fill(dot, with: .color(color.opacity(alpha)))
+            }
+            // A checked-out branch's tip: an open ring around the dot, like a worktree's mark.
+            if let name = names.first(where: checkedOut.contains) {
+                let ringInk = row.lane == 0 && name == row.label ? style.ink : ink(branch: name)
+                let ring = Path(ellipseIn: CGRect(x: center.x - r * 2, y: center.y - r * 2, width: r * 4, height: r * 4))
+                context.stroke(ring, with: .color(ringInk.opacity(0.8 * max(alpha, 0.75))), lineWidth: style.lineWidth * 0.8)
             }
         }
     }
 
-    /// Branch names at lane tips and commit subjects on the right, faint enough to read as texture.
-    private func drawCaptions(_ rows: [GraphRow], geometry g: Geometry, in context: inout GraphicsContext) {
-        let showSubjects = g.rowHeight >= 24
-        let textX = g.spineX + 28
+    /// Branch names (in each branch's ink, trunk's in plain ink) and commit subjects in a column
+    /// right of the spine, one line per row, the subject cut short to fit the pane.
+    func captions(in context: inout GraphicsContext) {
+        let showSubjects = g.rowHeight >= 20 && g.captionWidth > 120
+        let textX = g.spineX + 22
         for (index, row) in rows.enumerated() {
             guard let commit = row.commit else { continue }
-            let y = g.y(index)
-            let labels = [row.label].compactMap { $0 } + row.extraLabels
-            var caption = Text("")
-            for label in labels {
-                caption = caption + Text(label + "  ")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(color(for: row).opacity(0.85))
+            let alpha = opacity(index)
+            var labels = Text("")
+            for label in [row.label].compactMap({ $0 }) + row.extraLabels {
+                let color = row.lane == 0 && label == row.label ? style.ink : ink(branch: label)
+                labels = labels + Text(label + "  ").font(style.labelFont).foregroundColor(color.opacity(max(alpha, 0.75)))
             }
-            if showSubjects {
-                caption = caption + Text(commit.subject)
-                    .font(.system(size: 12, weight: .light))
-                    .foregroundColor(.white.opacity(row.isIdentity ? 0.55 : 0.32))
+            func line(_ subject: String) -> Text {
+                showSubjects ? labels + Text(subject).font(style.captionFont).foregroundColor(style.captionInk.opacity(alpha)) : labels
             }
-            context.draw(caption, at: CGPoint(x: textX, y: y), anchor: .leading)
+            var subject = commit.subject
+            var resolved = context.resolve(line(subject))
+            let width = resolved.measure(in: CGSize(width: CGFloat.infinity, height: g.rowHeight)).width
+            if showSubjects, width > g.captionWidth, !subject.isEmpty {
+                let keep = Int(Double(subject.count) * Double(g.captionWidth / width)) - 2
+                subject = keep > 3 ? String(subject.prefix(keep)) + "…" : ""
+                resolved = context.resolve(line(subject))
+            }
+            context.draw(resolved, at: CGPoint(x: textX, y: g.y(index)), anchor: .leading)
         }
     }
 
     /// An expanding, fading ring around each branch tip that just moved.
-    private func drawPulse(_ rows: [GraphRow], geometry g: Geometry, progress: Double, in context: inout GraphicsContext) {
+    func pulse(tips: Set<String>, progress: Double, in context: inout GraphicsContext) {
         let eased = 1 - pow(1 - progress, 3)
-        let radius = 6 + 54 * eased
+        let radius = 4 + 40 * eased
         for (index, row) in rows.enumerated() {
-            guard let sha = row.commit?.sha, model.pulseTips.contains(sha) else { continue }
+            guard let sha = row.commit?.sha, tips.contains(sha) else { continue }
             let center = g.point(index, lane: row.lane)
             let ring = Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
-            context.stroke(ring, with: .color(color(for: row).opacity(0.8 * (1 - progress))), lineWidth: 2)
+            context.stroke(ring, with: .color(ink(row).opacity(0.7 * (1 - progress))), lineWidth: style.lineWidth)
         }
+    }
+}
+
+/// A tiny deterministic generator (SplitMix64) for fixed textures and pen wobble.
+struct SeededRandom {
+    private var state: UInt64
+    init(seed: UInt64) { state = seed }
+
+    /// The next value in 0..<1.
+    mutating func next() -> CGFloat {
+        state &+= 0x9E3779B97F4A7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
+        z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
+        z ^= z >> 31
+        return CGFloat(z >> 11) / CGFloat(1 << 53)
     }
 }

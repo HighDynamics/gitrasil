@@ -1,12 +1,13 @@
 #!/bin/bash
-# Spike: draw a repository's branch graph as a live desktop background on the primary display.
+# Draw the pinned repositories' branch graphs as a live desktop background on the primary display.
 #
-# Runs in the foreground and logs each redraw; Ctrl-C (or --quit-after <seconds>) removes it.
-# Nothing is installed and the system wallpaper setting is never changed. Unlike the main app, this
-# runs fine as a bare executable: an accessory app with a borderless desktop-level window doesn't
-# need a .app bundle to be shown.
+# Runs in the foreground and logs each redraw; Ctrl-C, the menu-bar item's Quit, or
+# --quit-after <seconds> removes it. Pin repositories from the menu-bar item (they're saved in the
+# com.gitrasil.background defaults; set GITRASIL_BACKGROUND_DEFAULTS_SUITE to use another suite).
+# Nothing is installed and the system wallpaper setting is never changed. An accessory app with a
+# borderless desktop-level window doesn't need a .app bundle, so the bare executable runs as is.
 #
-# Usage: scripts/run-wallpaper.sh /path/to/repo [--quit-after <seconds>]
+# Usage: scripts/run-wallpaper.sh [--quit-after <seconds>]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

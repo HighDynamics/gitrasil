@@ -18,8 +18,15 @@ final class WallpaperModel {
     /// The commits the running pulse rings: the tips of branches that moved or appeared.
     private(set) var pulseTips: Set<String> = []
 
-    /// The repository's display name.
+    /// The repository's folder and display name.
+    let repoURL: URL
     let repoName: String
+
+    /// Why there's nothing to draw (the folder is gone, or git can't read it), or nil.
+    var problem: String? {
+        if !FileManager.default.fileExists(atPath: repoURL.path) { return "This folder is missing." }
+        return graph == nil && store.lastError != nil ? "Git can’t read this repository." : nil
+    }
 
     static let pulseDuration: TimeInterval = 1.6
 
@@ -36,6 +43,7 @@ final class WallpaperModel {
     private var redraws = 0
 
     init(repoURL: URL) {
+        self.repoURL = repoURL
         self.repoName = repoURL.lastPathComponent
         self.store = RepoGraphStore(repositoryURL: repoURL)
     }
