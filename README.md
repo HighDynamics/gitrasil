@@ -53,6 +53,16 @@ its detail panel and file diffs), a directory explorer (History / Files toggle),
 an embedded terminal scoped to the worktree — all refreshing live as the repo changes on disk. The
 diff viewer is view-only. History mutations (rebase/drop/cherry-pick) are still to come.
 
+## Live background spike
+
+```bash
+scripts/run-wallpaper.sh /path/to/a/git/repo [--quit-after <seconds>]
+```
+
+Draws the repo's branch graph in a desktop-level window behind the icons on the primary display, and
+redraws as the repo changes. Ctrl-C removes it; nothing is installed. See
+`docs/live-background/DESIGN.md`.
+
 ## Toolchain floors
 
 - **git ≥ 2.30** (modern security baseline; all needed plumbing predates it).

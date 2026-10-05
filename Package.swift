@@ -10,6 +10,7 @@ let package = Package(
     products: [
         .library(name: "GitrasilCore", targets: ["GitrasilCore"]),
         .executable(name: "GitrasilApp", targets: ["GitrasilApp"]),
+        .executable(name: "GitrasilWallpaper", targets: ["GitrasilWallpaper"]),
     ],
     dependencies: [
         // Embedded PTY terminal (engineering notes → Embedded terminal). MIT, proven in shipping
@@ -22,6 +23,9 @@ let package = Package(
             name: "GitrasilApp",
             dependencies: ["GitrasilCore", .product(name: "SwiftTerm", package: "SwiftTerm")]
         ),
+        // Spike: the history graph drawn as a live desktop background (docs/live-background).
+        // Core only — no SwiftTerm.
+        .executableTarget(name: "GitrasilWallpaper", dependencies: ["GitrasilCore"]),
         // Fixture-repo harness and topology scenario builders that stand up real git repos in
         // temp dirs, so derivations are asserted against actual git output (architecture
         // decision #13).
