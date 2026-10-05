@@ -2,9 +2,9 @@ import SwiftUI
 import GitrasilCore
 
 /// The wallpaper: the repository's branch graph drawn from the shared `GraphLayout` rows — glowing
-/// lanes on a deep night gradient, the current worktree in warm amber, other branches in cool tones,
-/// commit subjects as quiet captions. A Canvas inside a TimelineView whose clock is paused unless a
-/// HEAD pulse is running, so an idle desktop costs no frames.
+/// lanes on a deep night gradient, each branch in its own hue, commit subjects as quiet captions. A
+/// Canvas inside a TimelineView whose clock is paused unless a tip pulse is running, so an idle
+/// desktop costs no frames.
 struct WallpaperView: View {
     let model: WallpaperModel
 
@@ -188,13 +188,15 @@ struct WallpaperView: View {
         }
     }
 
-    /// An expanding, fading ring around HEAD after it moves.
+    /// An expanding, fading ring around each branch tip that just moved.
     private func drawPulse(_ rows: [GraphRow], geometry g: Geometry, progress: Double, in context: inout GraphicsContext) {
-        guard let headIndex = rows.firstIndex(where: { $0.isIdentity }) ?? rows.firstIndex(where: \.isMeeting) else { return }
-        let center = g.point(headIndex, lane: rows[headIndex].lane)
         let eased = 1 - pow(1 - progress, 3)
         let radius = 6 + 54 * eased
-        let ring = Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
-        context.stroke(ring, with: .color(Self.amber.opacity(0.8 * (1 - progress))), lineWidth: 2)
+        for (index, row) in rows.enumerated() {
+            guard let sha = row.commit?.sha, model.pulseTips.contains(sha) else { continue }
+            let center = g.point(index, lane: row.lane)
+            let ring = Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
+            context.stroke(ring, with: .color(color(for: row).opacity(0.8 * (1 - progress))), lineWidth: 2)
+        }
     }
 }

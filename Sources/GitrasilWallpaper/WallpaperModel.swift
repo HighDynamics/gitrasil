@@ -2,10 +2,9 @@ import Foundation
 import Observation
 import GitrasilCore
 
-/// Bridges the app's reactive `WorktreeStore` to the wallpaper. The store republishes a snapshot on
-/// every FSEvents tick; the wallpaper only cares about the graph, so this republishes — and the view
-/// only redraws — when the graph actually changed. A moved HEAD also starts a short pulse animation;
-/// otherwise nothing ticks.
+/// One repository on the wallpaper: bridges its `RepoGraphStore` to the view. The store already
+/// settles bursts and publishes only real graph changes; this adds the pulse — the branch tips that
+/// moved in a change ring briefly; otherwise nothing ticks.
 @MainActor
 @Observable
 final class WallpaperModel {
@@ -13,28 +12,32 @@ final class WallpaperModel {
     /// The graph being drawn, or nil before the first derive.
     private(set) var graph: HistoryGraph?
 
-    /// When the HEAD pulse began, while it's running; nil when idle (the animation clock is paused).
+    /// When the pulse began, while it's running; nil when idle (the animation clock is paused).
     private(set) var pulseStart: Date?
+
+    /// The commits the running pulse rings: the tips of branches that moved or appeared.
+    private(set) var pulseTips: Set<String> = []
 
     /// The repository's display name.
     let repoName: String
 
     static let pulseDuration: TimeInterval = 1.6
-    /// Revealing every branch of a big repo would be unreadable; cap the lanes for the spike.
-    static let maxRevealed = 6
 
     /// False while the window is fully covered (a full-screen app, another Space's windows on top):
-    /// updates are still taken, but no animation runs.
+    /// the store stops deriving until it's visible again, and no animation runs.
     var isVisible = true {
-        didSet { if !isVisible { pulseStart = nil } }
+        didSet {
+            store.isPaused = !isVisible
+            if !isVisible { pulseStart = nil }
+        }
     }
 
-    private let store: WorktreeStore
+    private let store: RepoGraphStore
     private var redraws = 0
 
     init(repoURL: URL) {
         self.repoName = repoURL.lastPathComponent
-        self.store = WorktreeStore(worktreeURL: repoURL)
+        self.store = RepoGraphStore(repositoryURL: repoURL)
     }
 
     func start() async {
@@ -42,50 +45,48 @@ final class WallpaperModel {
         await store.start()
     }
 
-    /// Re-arm Observation tracking on the store's snapshot (one-shot, so re-armed on every change).
+    func stop() {
+        store.stop()
+    }
+
+    /// Re-arm Observation tracking on the store's graph (one-shot, so re-armed on every change).
     private func observe() {
         withObservationTracking {
-            _ = store.snapshot
+            _ = store.graph
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                self.snapshotDidChange()
+                self.graphDidChange()
                 self.observe()
             }
         }
     }
 
-    private func snapshotDidChange() {
-        guard let fresh = store.snapshot?.graph else { return }
-        guard fresh != graph else {
-            log("snapshot republished, graph unchanged — no redraw")
-            return
-        }
-        let oldHead = graph?.segments.first?.commits.first?.sha ?? graph?.meetingCommit?.sha
-        let newHead = fresh.segments.first?.commits.first?.sha ?? fresh.meetingCommit?.sha
+    private func graphDidChange() {
+        guard let fresh = store.graph, fresh != graph else { return }
+        let moved = Self.tips(of: fresh).filter { name, sha in graph.map { Self.tips(of: $0)[name] != sha } ?? false }
         graph = fresh
         redraws += 1
         let rows = GraphLayout.rows(for: fresh, expanded: false)
-        log("redraw #\(redraws): \(rows.count) rows, \(Set(rows.map(\.lane)).count) lanes, "
-            + "head \(newHead.map { String($0.prefix(7)) } ?? "-"), revealed \(store.revealedBranches)")
-        if oldHead != nil, oldHead != newHead, isVisible { pulse() }
-        Task { await revealNewBranches() }
+        log("\(repoName): redraw #\(redraws) (derive #\(store.deriveCount)): \(rows.count) rows, "
+            + "\(Set(rows.map(\.lane)).count) lanes, moved \(moved.keys.sorted())")
+        if !moved.isEmpty, isVisible { pulse(Set(moved.values)) }
     }
 
-    /// The derivation is worktree-relative: a repo sitting on trunk draws only its meeting commit.
-    /// Reveal the repo's other local branches (up to the cap) so they fan out as lanes, and pick up
-    /// branches created later on the next change.
-    private func revealNewBranches() async {
-        guard let available = try? await store.availableBranches() else { return }
-        for branch in available where !store.revealedBranches.contains(branch) {
-            guard store.revealedBranches.count < Self.maxRevealed else { break }
-            await store.reveal(branch)
+    /// Each drawn branch's tip commit, by branch name: the spine's tip, each lane's, and each pill's.
+    static func tips(of graph: HistoryGraph) -> [String: String] {
+        var tips: [String: String] = [:]
+        for segment in graph.segments + graph.revealedLanes {
+            if let name = segment.branchLabel, let tip = segment.commits.first?.sha { tips[name] = tip }
         }
+        for (sha, names) in graph.revealedPointers { for name in names { tips[name] = sha } }
+        return tips
     }
 
-    private func pulse() {
+    private func pulse(_ shas: Set<String>) {
         let start = Date()
         pulseStart = start
+        pulseTips = shas
         Task {
             try? await Task.sleep(for: .seconds(Self.pulseDuration))
             if pulseStart == start { pulseStart = nil }
