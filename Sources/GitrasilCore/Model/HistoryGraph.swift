@@ -34,6 +34,9 @@ public struct GraphSegment: Sendable, Equatable {
         /// A branch the user revealed via "show other branches" — a cherry-pick source. Grey,
         /// labeled, truncatable.
         case revealed(branch: String)
+        /// The trunk as the spine of a repo-wide graph (`Derivations.repoGraph`): its recent
+        /// first-parent history, which every other lane forks from. Labeled; never truncated.
+        case trunk(branch: String)
     }
 
     /// Segments longer than this collapse to their tip by default (cw is exempt).
@@ -57,7 +60,7 @@ public struct GraphSegment: Sendable, Equatable {
     /// cw is never truncated; other segments truncate when longer than the threshold.
     public var isTruncatable: Bool {
         switch kind {
-        case .currentWorktree: return false
+        case .currentWorktree, .trunk: return false
         case .intermediate, .trunkAhead, .revealed: return commits.count > Self.truncationThreshold
         }
     }
@@ -73,7 +76,7 @@ public struct GraphSegment: Sendable, Equatable {
     public var branchLabel: String? {
         switch kind {
         case .currentWorktree: return nil
-        case .intermediate(let b), .trunkAhead(let b), .revealed(let b): return b
+        case .intermediate(let b), .trunkAhead(let b), .revealed(let b), .trunk(let b): return b
         }
     }
 }
@@ -122,6 +125,10 @@ public struct HistoryGraph: Sendable, Equatable {
     /// Working tree has uncommitted changes → the tip renders as an open circle.
     public let hasUncommittedChanges: Bool
 
+    /// Branches checked out in some worktree of the repository (repo-wide graph), so a renderer can
+    /// mark the lines someone is working on. Empty for the worktree-relative graph.
+    public let checkedOutBranches: Set<String>
+
     public init(
         meetingCommit: CommitNode?,
         segments: [GraphSegment],
@@ -133,7 +140,8 @@ public struct HistoryGraph: Sendable, Equatable {
         isEmpty: Bool,
         isDetached: Bool,
         isOnTrunk: Bool,
-        hasUncommittedChanges: Bool
+        hasUncommittedChanges: Bool,
+        checkedOutBranches: Set<String> = []
     ) {
         self.meetingCommit = meetingCommit
         self.segments = segments
@@ -146,6 +154,7 @@ public struct HistoryGraph: Sendable, Equatable {
         self.isDetached = isDetached
         self.isOnTrunk = isOnTrunk
         self.hasUncommittedChanges = hasUncommittedChanges
+        self.checkedOutBranches = checkedOutBranches
     }
 
     /// The empty-repository graph.

@@ -101,7 +101,10 @@ public enum GraphLayout {
         // The cw's line continues with an ahead-branch off its tip — but only one that belongs to the
         // cw (unknown origin, or the cw itself). A branch created off an overlapping worktree stays a
         // fork lane so it can join that worktree's sliver instead.
-        let cwTip = graph.segments.first?.commits.first?.sha
+        // A trunk spine (repo-wide graph) never continues into a branch: every branch off trunk's tip
+        // is a divergence, drawn as its own fork lane.
+        let spineIsTrunk: Bool = { if case .trunk = graph.segments.first?.kind { return true } else { return false } }()
+        let cwTip = spineIsTrunk ? nil : graph.segments.first?.commits.first?.sha
         var cwAhead: [GraphSegment] = []
         if let cwTip, let idx = laneSegments.firstIndex(where: { chain in
             chain.first?.forkBase == cwTip
