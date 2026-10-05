@@ -126,7 +126,8 @@ public final class RepoGraphStore {
               let common = try? await runner.runChecked(["rev-parse", "--git-common-dir"]).trimmedStdout,
               !common.isEmpty else { return }
         let commonURL = URL(fileURLWithPath: common, relativeTo: repositoryURL).standardizedFileURL
-        let watcher = FSEventsWatcher(paths: [commonURL.path], latency: 0.3, filter: Self.isRefPath) { [weak self] in
+        let watcher = FSEventsWatcher(paths: [commonURL.path], latency: 0.3,
+                                      filter: { RepoGraphStore.isRefPath($0) }) { [weak self] in
             Task { @MainActor in self?.refsChanged() }
         }
         self.watcher = watcher
