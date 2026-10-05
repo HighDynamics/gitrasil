@@ -14,13 +14,18 @@ public protocol DirectoryWatching: AnyObject, Sendable {
 public final class FSEventsWatcher: DirectoryWatching, @unchecked Sendable {
     private let paths: [String]
     private let latency: TimeInterval
+    private let filter: (@Sendable (String) -> Bool)?
     private let onChange: @Sendable () -> Void
     private let queue = DispatchQueue(label: "gitrasil.fsevents")
     private var stream: FSEventStreamRef?
 
-    public init(paths: [String], latency: TimeInterval = 0.15, onChange: @escaping @Sendable () -> Void) {
+    /// - Parameter filter: when set, a batch of events fires `onChange` only if at least one event's
+    ///   path passes — so a watcher on a git dir can ignore index and object churn.
+    public init(paths: [String], latency: TimeInterval = 0.15,
+                filter: (@Sendable (String) -> Bool)? = nil, onChange: @escaping @Sendable () -> Void) {
         self.paths = paths
         self.latency = latency
+        self.filter = filter
         self.onChange = onChange
     }
 
@@ -31,9 +36,14 @@ public final class FSEventsWatcher: DirectoryWatching, @unchecked Sendable {
             info: Unmanaged.passUnretained(self).toOpaque(),
             retain: nil, release: nil, copyDescription: nil)
 
-        let callback: FSEventStreamCallback = { _, info, _, _, _, _ in
+        let callback: FSEventStreamCallback = { _, info, count, eventPaths, _, _ in
             guard let info else { return }
             let watcher = Unmanaged<FSEventsWatcher>.fromOpaque(info).takeUnretainedValue()
+            if let filter = watcher.filter {
+                // Without kFSEventStreamCreateFlagUseCFTypes, eventPaths is a C array of C strings.
+                let paths = eventPaths.assumingMemoryBound(to: UnsafePointer<CChar>.self)
+                guard (0..<count).contains(where: { filter(String(cString: paths[$0])) }) else { return }
+            }
             watcher.onChange()
         }
 
