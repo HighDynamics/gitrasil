@@ -50,7 +50,7 @@ extension Derivations {
         var lineageCache: [String: String?] = [:]
         func recordedParent(of branch: String) async -> String? {
             if case let .some(cached) = lineageCache[branch] { return cached }
-            let parent = try? await Mutations.backfillLineage(for: branch, runner: runner)
+            let parent = try? await backfillLineage(for: branch, runner: runner)
             lineageCache[branch] = parent
             return parent
         }

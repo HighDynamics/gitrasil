@@ -1,8 +1,8 @@
 import Foundation
 
 /// One row of the laid-out history graph: a commit (or the meeting commit, or a "N hidden" marker)
-/// placed in a lane. The layout is pure — lanes and fork joins, no pixels — so the app's history view
-/// and any other renderer (the live desktop background) draw the same topology.
+/// placed in a lane. The layout is pure — lanes and fork joins, no pixels — so a renderer (the live
+/// desktop background) only decides how it looks.
 public struct GraphRow: Sendable, Equatable {
     public enum Content: Sendable, Equatable {
         case commit(CommitNode)
@@ -21,9 +21,6 @@ public struct GraphRow: Sendable, Equatable {
     /// n-th sliver out — so a branch created off an overlapping worktree joins that worktree's offset
     /// sliver rather than the shared commit's main dot. Renderers scale it by their sliver offset.
     public var forkTargetSliver: Int = 0
-    public let isDropSource: Bool
-    public let isCherrySource: Bool
-    public let rebaseBranch: String?
     /// The branch this row's lane represents (intermediate / trunk-ahead / revealed), used to color a
     /// lane by its worktree's identity color. `nil` for the cw spine (colored by `isIdentity`) and
     /// the meeting.
@@ -165,9 +162,8 @@ public enum GraphLayout {
         // The cw's ahead-continuation, straight above the spine in lane 0 (no fork). Rendered in its
         // own color (a .revealed segment), so it reads as that branch's commits ahead of the cw's tip.
         for segment in cwAhead.reversed() {
-            let cherry: Bool = { if case .revealed = segment.kind { return true } else { return false } }()
             rows.append(contentsOf: laneRows(segment, lane: 0, isIdentity: false,
-                                             dirty: false, cherry: cherry, expanded: expanded))
+                                             dirty: false, expanded: expanded))
         }
 
         // cw spine (lane 0), lowest branch: cw's commits, then its intermediates, newest→oldest.
@@ -175,14 +171,13 @@ public enum GraphLayout {
             rows.append(contentsOf: laneRows(segment, lane: 0,
                                              isIdentity: segment.kind == .currentWorktree,
                                              dirty: graph.hasUncommittedChanges,
-                                             cherry: false, expanded: expanded))
+                                             expanded: expanded))
         }
 
         // The diverging point, bottom-most.
         if let meeting = graph.meetingCommit {
             rows.append(GraphRow(content: .meeting(meeting), lane: 0, isIdentity: false, open: false,
-                                 label: nil, forkBaseSHA: nil, isDropSource: false,
-                                 isCherrySource: false, rebaseBranch: nil))
+                                 label: nil, forkBaseSHA: nil))
         }
 
         // Attach ref pills for revealed branches that point at a drawn commit but add no commits.
@@ -222,9 +217,8 @@ public enum GraphLayout {
     private static func forkLaneRows(_ segments: [GraphSegment], lane: Int, expanded: Bool) -> [GraphRow] {
         var out: [GraphRow] = []
         for segment in segments.reversed() {   // top (newest continuation) → bottom (base)
-            let cherry: Bool = { if case .revealed = segment.kind { return true } else { return false } }()
             out.append(contentsOf: laneRows(segment, lane: lane, isIdentity: false,
-                                            dirty: false, cherry: cherry, expanded: expanded))
+                                            dirty: false, expanded: expanded))
         }
         if let base = segments.first, !out.isEmpty { out[out.count - 1].forkBaseSHA = base.forkBase }
         return out
@@ -233,22 +227,21 @@ public enum GraphLayout {
     /// A segment's rows, newest→oldest, with truncation shown as a hidden marker below the tip and
     /// the branch label on the newest (tip) commit.
     private static func laneRows(_ segment: GraphSegment, lane: Int, isIdentity: Bool,
-                                 dirty: Bool, cherry: Bool, expanded: Bool) -> [GraphRow] {
+                                 dirty: Bool, expanded: Bool) -> [GraphRow] {
         var out: [GraphRow] = []
         if segment.isTruncatable && !expanded {
             if let tip = segment.collapsedCommits.first {
                 out.append(commitRow(tip, lane: lane, isIdentity: isIdentity, isTip: true,
-                                     dirty: dirty, cherry: cherry, label: segment.branchLabel,
+                                     dirty: dirty, label: segment.branchLabel,
                                      branch: segment.branchLabel))
             }
             out.append(GraphRow(content: .hidden(segment.hiddenCount), lane: lane, isIdentity: false,
-                                open: false, label: nil, forkBaseSHA: nil, isDropSource: false,
-                                isCherrySource: false, rebaseBranch: nil, branch: segment.branchLabel))
+                                open: false, label: nil, forkBaseSHA: nil, branch: segment.branchLabel))
         } else {
             for (i, commit) in segment.commits.enumerated() {   // newest → oldest
                 let isTip = i == 0
                 out.append(commitRow(commit, lane: lane, isIdentity: isIdentity, isTip: isTip,
-                                     dirty: dirty, cherry: cherry,
+                                     dirty: dirty,
                                      label: isTip ? segment.branchLabel : nil,
                                      branch: segment.branchLabel))
             }
@@ -257,11 +250,9 @@ public enum GraphLayout {
     }
 
     private static func commitRow(_ commit: CommitNode, lane: Int, isIdentity: Bool, isTip: Bool,
-                                  dirty: Bool, cherry: Bool, label: String?, branch: String?) -> GraphRow {
+                                  dirty: Bool, label: String?, branch: String?) -> GraphRow {
         GraphRow(content: .commit(commit), lane: lane, isIdentity: isIdentity,
                  open: isIdentity && isTip && dirty,
-                 label: label, forkBaseSHA: nil,
-                 isDropSource: isIdentity, isCherrySource: cherry,
-                 rebaseBranch: isTip ? label : nil, branch: branch)
+                 label: label, forkBaseSHA: nil, branch: branch)
     }
 }

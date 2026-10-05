@@ -1,31 +1,30 @@
 # Gitrasil
 
-A macOS-native app that treats git worktrees as first-class citizens. One window = one
-repository; one tab = one worktree.
+A live macOS desktop background drawn from your git branch graph. It sits behind the desktop icons
+and redraws as your repositories change. See `docs/live-background/DESIGN.md`.
 
-See the handoff docs (design brief, history-view topology, engineering notes, architecture
-decisions) for the full specification.
+Gitrasil started as a worktree GUI (one window per repository, one tab per worktree). That app was
+removed; it remains in git history up to the `Drop the worktree GUI` commit.
 
 ## Architecture
 
-The guiding principle: **all logic lives below the SwiftUI layer.** Parsing, topology, status
-derivation, git-command building, and command sequencing are plain, platform-agnostic Swift
-(`GitrasilCore`) with no UI dependency — so ~90% of the app is unit-testable from the CLI. The
-SwiftUI app shell (macOS 14+, Observation, SwiftTerm embedded terminal) is a thin render layer
-added on top later.
+The guiding principle: **all logic lives below the UI layer.** Parsing, topology, and command
+sequencing are plain, platform-agnostic Swift (`GitrasilCore`) with no UI dependency, so most of it
+is unit-testable from the CLI. The background (`GitrasilWallpaper`) is a thin AppKit/SwiftUI render
+layer on top.
 
-### `GitrasilCore` (this package)
+### `GitrasilCore`
 
 - **`Git/GitRunner`** — the only thing that shells out to `git` (via `/usr/bin/env`, honoring the
   user's PATH). A `GitRunning` protocol so tests inject a fake. Never uses libgit2; never runs a
   network command.
-- **`Execution/WorktreeExecutor`** — per-worktree serial command executor (architecture decision
-  #1). Mutations are exclusive; reads coalesce by kind (newest wins). This is the primitive that
-  makes the "derive-and-publish" state model race-free.
-- **`Derive/Derivations`** — pure, git-backed derivations (trunk detection, meeting commit, status
-  facts). The highest-risk logic, tested directly against real fixture repos. Graph topology, the
-  file-status overlay, and diff parsing land here next.
-- **`Model/`** — immutable domain values (e.g. `StatusBadge`, `WorktreeStatusFacts`).
+- **`Execution/WorktreeExecutor`** — a serial command executor whose reads coalesce by kind (newest
+  wins), so a burst of filesystem events collapses to one re-derive.
+- **`Derive/`** — pure, git-backed derivations (trunk detection, graph topology), tested directly
+  against real fixture repos.
+- **`Layout/GraphLayout`** — turns a graph into lanes and rows, independent of any renderer.
+- **`Reactive/`** — FSEvents watching and the observable stores the background renders from.
+- **`Model/`** — immutable domain values.
 
 ## Build & test
 
@@ -35,35 +34,18 @@ swift test
 ```
 
 Tests stand up real git repositories in temp dirs (`GitrasilTestSupport`) and assert on the
-derived values — no mocking of git. The topology and status derivations, the highest-risk logic,
-are covered case-by-case there.
+derived values — no mocking of git.
 
-## Run the app
-
-```bash
-scripts/run.sh /path/to/a/git/repo
-```
-
-This builds the app, wraps it in a minimal `.app` bundle, and launches it — necessary because a
-bare SwiftPM executable is not reliably shown a window by macOS. Pass a repository path to open it
-directly, or omit it and use **Open Repository…** in the window.
-
-The window shows the worktree's status header, an interactive history graph (select a commit for
-its detail panel and file diffs), a directory explorer (History / Files toggle), a file viewer, and
-an embedded terminal scoped to the worktree — all refreshing live as the repo changes on disk. The
-diff viewer is view-only. History mutations (rebase/drop/cherry-pick) are still to come.
-
-## Live background spike
+## Run the background
 
 ```bash
 scripts/run-wallpaper.sh /path/to/a/git/repo [--quit-after <seconds>]
 ```
 
 Draws the repo's branch graph in a desktop-level window behind the icons on the primary display, and
-redraws as the repo changes. Ctrl-C removes it; nothing is installed. See
-`docs/live-background/DESIGN.md`.
+redraws as the repo changes. Ctrl-C removes it; nothing is installed.
 
 ## Toolchain floors
 
 - **git ≥ 2.30** (modern security baseline; all needed plumbing predates it).
-- **macOS 14 (Sonoma)** for the app shell (mature SwiftUI + Observation).
+- **macOS 14 (Sonoma)** (SwiftUI + Observation).
