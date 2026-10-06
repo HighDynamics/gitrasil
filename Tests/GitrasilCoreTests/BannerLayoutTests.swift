@@ -70,4 +70,59 @@ final class BannerLayoutTests: XCTestCase {
         let moved = BannerLayout.place([request], obstacles: [], taken: [first.rect], bounds: bounds)[0]
         XCTAssertFalse(moved.rect.intersects(first.rect))
     }
+
+    // MARK: Ribbons
+
+    /// Three boughs fanning out of a crotch at (700, 500), each with anchors along its underside.
+    private func ribbonRequests(size: CGSize = CGSize(width: 220, height: 44)) -> [BannerLayout.RibbonRequest] {
+        [(-1.0, "left"), (0.0, "middle"), (1.0, "right")].map { lean, name in
+            let anchors = (1...6).map { k -> CGPoint in
+                let step = CGFloat(k)
+                return CGPoint(x: 700 + CGFloat(lean) * step * 45, y: 500 - step * (lean == 0 ? 40 : 18))
+            }
+            return .init(id: name, anchors: anchors, size: size)
+        }
+    }
+
+    func testRibbonsNeverOverlapEachOtherOrTheirCords() {
+        let ribbons = BannerLayout.hang(ribbonRequests(), obstacles: crown, bounds: bounds)
+        XCTAssertEqual(ribbons.count, 3)
+        for (i, a) in ribbons.enumerated() {
+            XCTAssertTrue(bounds.contains(a.rect))
+            XCTAssertGreaterThan(a.rect.minY, a.anchor.y, "\(a.id) hangs below its anchor")
+            for b in ribbons[(i + 1)...] {
+                XCTAssertFalse(a.rect.insetBy(dx: -BannerLayout.margin, dy: -BannerLayout.margin).intersects(b.rect),
+                               "\(a.id) and \(b.id)")
+                XCTAssertFalse(BannerLayout.crosses(b.anchor, b.cordEnds.0, a.rect))
+                XCTAssertFalse(BannerLayout.crosses(b.anchor, b.cordEnds.1, a.rect))
+            }
+        }
+    }
+
+    func testRibbonsHangClearOfTheCrownWhenThereIsRoom() {
+        let wood = [CGRect(x: 690, y: 300, width: 20, height: 200)]
+        let ribbon = BannerLayout.hang([ribbonRequests()[1]], obstacles: wood, bounds: bounds)[0]
+        XCTAssertFalse(ribbon.rect.intersects(wood[0]), "an upright bough's ribbon hangs beside it")
+    }
+
+    func testPennantsKeepOffTheRibbons() {
+        let ribbons = BannerLayout.hang(ribbonRequests(), obstacles: [], bounds: bounds)
+        let tips = (0..<20).map { i -> BannerLayout.Request in
+            let tip = CGPoint(x: 560 + CGFloat(i % 5) * 70, y: 420 + CGFloat(i / 5) * 40)
+            return BannerLayout.Request(id: "b\(i)", tip: tip, outward: i % 2 == 0 ? 1 : -1,
+                                        size: CGSize(width: 110, height: 22))
+        }
+        let banners = BannerLayout.place(tips, obstacles: [], taken: ribbons.map(\.footprint), bounds: bounds)
+        XCTAssertFalse(banners.isEmpty)
+        for banner in banners {
+            for ribbon in ribbons {
+                XCTAssertFalse(banner.rect.intersects(ribbon.footprint), "\(banner.id) on \(ribbon.id)")
+            }
+        }
+    }
+
+    func testTheSameBoughsGetTheSameRibbons() {
+        XCTAssertEqual(BannerLayout.hang(ribbonRequests(), obstacles: crown, bounds: bounds),
+                       BannerLayout.hang(ribbonRequests(), obstacles: crown, bounds: bounds))
+    }
 }

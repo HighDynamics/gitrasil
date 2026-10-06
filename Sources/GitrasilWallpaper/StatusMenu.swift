@@ -5,13 +5,15 @@ import GitrasilCore
 /// checklist (unticking one unpins it and the menu stays open, so several go in one visit; it stays
 /// listed, unticked, until the menu closes, so ticking it again puts it back in its place), each with
 /// a button to reveal it in Finder; a pinned folder lists its repositories under it, ticked where
-/// they're shown. Adds repositories or folders through an open panel, picks how several are arranged
-/// (an orchard or a single tree), and quits.
+/// they're shown. Adds repositories or folders through an open panel, holds the settings (how several
+/// are arranged, whether names hang on banners and sway in gusts), and quits.
 @MainActor
-final class StatusMenu: NSObject, NSMenuDelegate {
+final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
 
     private let pins: PinnedRepositories
-    private let arrangement: ArrangementSetting
+    private let settings: BackgroundSettings
+    /// GITRASIL_BACKGROUND_BREEZE=off: the gusts setting is shown off and can't be turned on.
+    private let gustsOverridden: Bool
     private let item: NSStatusItem
     /// While the menu is open: the pins as listed when it opened (unticked ones too), their rows, and
     /// each listed repository of a pinned folder.
@@ -19,23 +21,19 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var rows: [PinRow] = []
     private var folderEntries: [(entry: NSMenuItem, repo: URL)] = []
 
-    init(pins: PinnedRepositories, arrangement: ArrangementSetting) {
+    init(pins: PinnedRepositories, settings: BackgroundSettings, gustsOverridden: Bool) {
         self.pins = pins
-        self.arrangement = arrangement
+        self.settings = settings
+        self.gustsOverridden = gustsOverridden
         self.item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
         item.button?.image = MenuBarIcon.image()
         item.button?.toolTip = "Gitrasil Background"
         let menu = NSMenu()
         menu.delegate = self
+        // A previewed light or dark mode (GITRASIL_BACKGROUND_APPEARANCE) reaches the menu too.
+        menu.appearance = NSApp.appearance
         item.menu = menu
-    }
-
-    /// Where the item landed, for the launch log.
-    var placement: String {
-        guard let window = item.button?.window else { return "no button window" }
-        return "status item window \(window.windowNumber) frame \(window.frame) visible \(item.isVisible) "
-            + "occlusion-visible \(window.occlusionState.contains(.visible))"
     }
 
     // Rebuilt each time it opens, so it always matches the pins.
@@ -89,9 +87,21 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             entry.target = self
             entry.representedObject = choice.rawValue
             entry.toolTip = tip
-            entry.state = arrangement.value == choice ? .on : .off
+            entry.state = settings.arrangement == choice ? .on : .off
             menu.addItem(entry)
         }
+        menu.addItem(.separator())
+        menu.addItem(.sectionHeader(title: "Banners"))
+        let banners = action("Show Banners", #selector(toggleBanners), nil)
+        banners.state = settings.showsBanners ? .on : .off
+        banners.toolTip = "Branch names hang on banners from their tips; in a single tree, each repository’s name hangs from its bough"
+        menu.addItem(banners)
+        let gusts = action("Sway in Gusts", #selector(toggleGusts), nil)
+        gusts.state = settings.gusts && !gustsOverridden ? .on : .off
+        gusts.toolTip = gustsOverridden
+            ? "Kept still by GITRASIL_BACKGROUND_BREEZE=off"
+            : "Now and then a gust sways the banners for a few seconds (on mains power only); off, they hang still"
+        menu.addItem(gusts)
         menu.addItem(.separator())
         menu.addItem(action("Quit Gitrasil Background", #selector(quit), nil, key: "q"))
     }
@@ -105,7 +115,20 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     @objc private func arrange(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let choice = Arrangement(rawValue: raw) else { return }
-        arrangement.value = choice
+        settings.arrangement = choice
+    }
+
+    @objc private func toggleBanners() {
+        settings.showsBanners.toggle()
+    }
+
+    @objc private func toggleGusts() {
+        settings.gusts.toggle()
+    }
+
+    /// Gusts sway banners, so with none shown (or the breeze turned off from outside) there's nothing to set.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        menuItem.action != #selector(toggleGusts) || (settings.showsBanners && !gustsOverridden)
     }
 
     func menuDidClose(_ menu: NSMenu) {

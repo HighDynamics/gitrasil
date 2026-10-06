@@ -57,6 +57,10 @@ struct WallpaperStyle {
     /// The same face for measuring a name before it's drawn (to size its banner).
     var labelMetricsFont: (CGFloat) -> NSFont
     var labelSize: CGFloat
+    /// A repository's name on its ribbon in the single tree: larger and more formal than a branch's.
+    var ribbonFont: (CGFloat) -> Font
+    var ribbonMetricsFont: (CGFloat) -> NSFont
+    var ribbonSize: CGFloat
     var captionFont: Font
     /// The repository's name under its tree.
     var plateFont: Font
@@ -112,36 +116,11 @@ extension WallpaperStyle {
             labelFont: { .custom("Bradley Hand", size: $0) },
             labelMetricsFont: { NSFont(name: "Bradley Hand", size: $0) ?? .systemFont(ofSize: $0) },
             labelSize: 15,
+            ribbonFont: { .custom("SnellRoundhand-Bold", size: $0) },
+            ribbonMetricsFont: { NSFont(name: "SnellRoundhand-Bold", size: $0) ?? .systemFont(ofSize: $0) },
+            ribbonSize: 27,
             captionFont: .custom("Baskerville", size: 12).italic(),
             plateFont: .custom("Snell Roundhand", size: 34),
             plateOpacity: dark ? 0.35 : 0.42)
     }
-
-    /// The first placeholder look, a glowing tree on a night gradient. Kept to show a look is one value.
-    static let nightTransit = WallpaperStyle(
-        paper: [Color(red: 0.03, green: 0.04, blue: 0.10), Color(red: 0.07, green: 0.06, blue: 0.18),
-                Color(red: 0.12, green: 0.07, blue: 0.20)],
-        wash: Color(red: 0.25, green: 0.20, blue: 0.45).opacity(0.35),
-        fibre: .clear,
-        ink: Color(red: 0.55, green: 0.60, blue: 0.75),
-        branchInks: [Color(red: 0.40, green: 0.85, blue: 0.85), Color(red: 0.66, green: 0.56, blue: 1.00),
-                     Color(red: 1.00, green: 0.50, blue: 0.62), Color(red: 0.45, green: 0.70, blue: 1.00),
-                     Color(red: 0.62, green: 0.90, blue: 0.48), Color(red: 1.00, green: 0.62, blue: 0.40)],
-        leafInk: Color(red: 0.45, green: 0.80, blue: 0.60),
-        captionInk: .white.opacity(0.32),
-        lineWidth: 1.5,
-        wobble: 0,
-        woodOpacity: 0.8,
-        barkOpacity: 0,
-        leafOpacity: 0.7,
-        leafSize: 11,
-        canopyOpacity: 0.16,
-        fadeHalfLife: 0,
-        fadeFloor: 1,
-        labelFont: { .system(size: $0, weight: .semibold, design: .rounded) },
-        labelMetricsFont: { .systemFont(ofSize: $0, weight: .semibold) },
-        labelSize: 12,
-        captionFont: .system(size: 12, weight: .light),
-        plateFont: .system(size: 40, weight: .ultraLight, design: .rounded),
-        plateOpacity: 0.25)
 }

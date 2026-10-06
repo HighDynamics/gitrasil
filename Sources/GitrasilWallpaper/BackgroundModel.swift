@@ -3,7 +3,8 @@ import Observation
 import GitrasilCore
 
 /// The whole background: one pane per repository the pins show (`PinnedRepositories.shown`, at most
-/// `maxPanes`), kept in step with them as pins and pinned folders change, and how to arrange them (an orchard or a single tree).
+/// `maxPanes`), kept in step with them as pins and pinned folders change, and the settings for how
+/// they're shown (an orchard or a single tree, banners, gusts).
 @MainActor
 @Observable
 final class BackgroundModel {
@@ -28,7 +29,7 @@ final class BackgroundModel {
     static let trunkDuration: TimeInterval = 0.8
 
     let pins: PinnedRepositories
-    let arrangement: ArrangementSetting
+    let settings: BackgroundSettings
     /// Now and then a gust through the banners, while the background is on screen.
     @ObservationIgnored private(set) lazy var breeze = Breeze { [weak self] in self?.isVisible ?? false }
 
@@ -41,16 +42,16 @@ final class BackgroundModel {
 
     private var clock: Timer?
 
-    init(pins: PinnedRepositories, arrangement: ArrangementSetting) {
+    init(pins: PinnedRepositories, settings: BackgroundSettings) {
         self.pins = pins
-        self.arrangement = arrangement
+        self.settings = settings
     }
 
     func start() {
         observePins()
-        observeArrangement()
+        observeSettings()
+        updateBreeze()
         reconcile()
-        breeze.start()
         clock = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.now = Date()
@@ -73,18 +74,32 @@ final class BackgroundModel {
         }
     }
 
-    /// Log each switch of arrangement (the view redraws on its own; it reads the setting).
-    private func observeArrangement() {
+    /// Follow the settings (the view redraws on its own; it reads them): a new arrangement grows in
+    /// from the ground, and the breeze follows the banners and gusts.
+    private func observeSettings() {
+        let arrangement = settings.arrangement
+        let banners = (settings.showsBanners, settings.gusts)
         withObservationTracking {
-            _ = arrangement.value
+            _ = (settings.arrangement, settings.showsBanners, settings.gusts)
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                self.log("arrangement: \(self.arrangement.value.rawValue)")
-                self.growInFromTheGround()
-                self.observeArrangement()
+                if self.settings.arrangement != arrangement {
+                    logEvent("arrangement: \(self.settings.arrangement.rawValue)")
+                    self.growInFromTheGround()
+                }
+                if (self.settings.showsBanners, self.settings.gusts) != banners {
+                    logEvent("banners \(self.settings.showsBanners ? "shown" : "hidden"), gusts \(self.settings.gusts ? "on" : "off")")
+                    self.updateBreeze()
+                }
+                self.observeSettings()
             }
         }
+    }
+
+    /// Gusts blow only while there are banners to sway and they're wanted.
+    private func updateBreeze() {
+        breeze.isEnabled = settings.gusts && settings.showsBanners
     }
 
     /// Match the panes to the repositories shown: keep the stores of repos still pinned, start new ones, stop
@@ -104,7 +119,7 @@ final class BackgroundModel {
         for gone in existing.values { gone.stop() }
         if next.map(\.repoURL) != panes.map(\.repoURL) {
             panes = next
-            log("panes: \(panes.map(\.repoName))")
+            logEvent("panes: \(panes.map(\.repoName))")
         }
     }
 
@@ -130,7 +145,7 @@ final class BackgroundModel {
     private func growInFromTheGround() {
         guard isVisible else { return }
         let now = Date()
-        if arrangement.value == .singleTree, ready.count > 1 {
+        if settings.arrangement == .singleTree, ready.count > 1 {
             trunkGrowIn = now
             let boughs = now.addingTimeInterval(Self.trunkDuration * 0.85)
             for pane in ready { growIns[pane.repoURL] = boughs }
@@ -146,7 +161,7 @@ final class BackgroundModel {
     private func treeArrived(_ url: URL) {
         guard isVisible else { return }
         let now = Date()
-        switch (arrangement.value, ready.count) {
+        switch (settings.arrangement, ready.count) {
         case (.singleTree, 2):
             growInFromTheGround()
             return
@@ -172,9 +187,11 @@ final class BackgroundModel {
         }
     }
 
-    func log(_ message: String) {
-        let stamp = Date().formatted(.dateTime.hour().minute().second())
-        print("[\(stamp)] \(message)")
-        fflush(stdout)
-    }
+}
+
+/// A line in the run log (stdout), stamped with the time.
+func logEvent(_ message: String) {
+    let stamp = Date().formatted(.dateTime.hour().minute().second())
+    print("[\(stamp)] \(message)")
+    fflush(stdout)
 }

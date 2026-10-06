@@ -4,13 +4,12 @@ import Observation
 import SwiftUI
 import GitrasilCore
 
-// Branch names on hanging banners: each on a small paper pennant tied to its tip by a thread that
-// runs outward, clear of the crown (`BannerLayout` places them). They're drawn as their own small
-// views over the tree canvas, so a pennant swaying in a gust moves its own layer and never redraws
-// the tree.
+// Names on hanging banners: each branch's on a small paper pennant tied to its tip by a thread that
+// runs outward, clear of the crown, and in the single tree each repository's on a larger ribbon hung
+// by two cords from its bough (`BannerLayout` places both). They're drawn as their own small views
+// over the tree canvas, so a banner swaying in a gust moves its own layer and never redraws the tree.
 
-/// Where every name hangs, and where each bough's name is written in the single tree. Planned from
-/// the full-grown trees whenever they change, never per frame.
+/// Where every name hangs. Planned from the full-grown trees whenever they change, never per frame.
 struct BannerPlan {
 
     struct Hanging: Equatable, Identifiable {
@@ -26,11 +25,21 @@ struct BannerPlan {
         var id: String { banner.id }
     }
 
+    /// A repository's ribbon, in the single tree.
+    struct Ribbon: Equatable, Identifiable {
+        let ribbon: BannerLayout.Ribbon
+        /// The repository it names.
+        let pane: String
+        let fontSize: CGFloat
+
+        var id: String { ribbon.id }
+    }
+
     var banners: [Hanging] = []
-    var boughNames: [String: CGRect] = [:]
+    var ribbons: [Ribbon] = []
 }
 
-extension Scene {
+extension Landscape {
 
     /// Where the names hang over the trees as they stand (`panes` with their full trees).
     func plan(_ panes: [Pane], arrangement: Arrangement) -> BannerPlan {
@@ -43,18 +52,20 @@ extension Scene {
             obstacles += crown([full.trunk], frame: frame)
             for bough in full.boughs {
                 trees.append((bough.name, bough.layout.stems, frame))
-                if let rect = boughNameRect(bough, frame: frame, avoiding: taken) {
-                    plan.boughNames[bough.name] = rect
-                    taken.append(rect)
-                }
+                obstacles += crown(bough.layout.stems, frame: frame)
             }
+            // The repositories' ribbons first: the branches' pennants keep off them.
+            plan.ribbons = ribbons(full.boughs, frame: frame, obstacles: obstacles)
+            taken = plan.ribbons.map(\.ribbon.footprint)
         } else {
-            for planted in orchard(panes) { trees.append((panes[planted.index].name, planted.full.stems, planted.frame)) }
+            for planted in orchard(panes) {
+                trees.append((panes[planted.index].name, planted.full.stems, planted.frame))
+                obstacles += crown(planted.full.stems, frame: planted.frame)
+            }
         }
 
         var requests: [(request: BannerLayout.Request, rank: (Bool, Bool, Date), hanging: (BannerLayout.Banner) -> BannerPlan.Hanging)] = []
         for tree in trees {
-            obstacles += crown(tree.stems, frame: tree.frame)
             let drawing = TreeDrawing(style: style, now: now, frame: tree.frame)
             let fontSize = max(10, (style.labelSize * tree.frame.detail).rounded())
             let font = style.labelMetricsFont(fontSize)
@@ -82,8 +93,6 @@ extension Scene {
             if a.rank.1 != b.rank.1 { return a.rank.1 }
             return a.rank.2 > b.rank.2
         }
-        let ground = Composition.groundY(size.height)
-        let bounds = CGRect(x: 6, y: Composition.top - 16, width: size.width - 12, height: ground - 8 - (Composition.top - 16))
         let placed = BannerLayout.place(requests.map(\.request), obstacles: obstacles, taken: taken, bounds: bounds)
         let byID = Dictionary(requests.map { ($0.request.id, $0.hanging) }, uniquingKeysWith: { a, _ in a })
         plan.banners = placed.compactMap { banner in byID[banner.id].map { $0(banner) } }
@@ -107,40 +116,40 @@ extension Scene {
         return rects
     }
 
-    /// A repository's name at the foot of its bough, as quiet as a branch's name: under a leaning
-    /// bough, where there's no wood, or beside an upright one; nil when every spot is taken.
-    private func boughNameRect(_ bough: YggdrasilLayout.Bough, frame: TreeFrame, avoiding taken: [CGRect]) -> CGRect? {
-        guard let stem = bough.layout.stems.first, stem.curve.count > 2 else { return nil }
-        let font = style.labelMetricsFont(max(10, (style.labelSize * frame.detail).rounded()))
-        let measured = (bough.name as NSString).size(withAttributes: [.font: font])
-        let size = CGSize(width: ceil(measured.width) + 2, height: ceil(measured.height))
-        var rng = SeededRandom(bough.name, -11)
-        let heading = bough.planting.heading
-        let side: CGFloat = heading < -0.1 ? -1 : heading > 0.1 ? 1 : (rng.next() < 0.5 ? -1 : 1)
-        for fraction in [0.12, 0.2, 0.28, 0.36] {
-            let node = stem.curve[Int(Double(stem.curve.count - 1) * fraction)]
-            let point = frame.point(node.point)
-            let gap = node.width * frame.scale / 2 + 6
-            // The side of the bough facing the ground (or, upright, its own side).
-            let normal = abs(heading) > 0.1
-                ? CGPoint(x: -cos(node.heading) * side * -1, y: abs(sin(node.heading)))
-                : CGPoint(x: side, y: 0)
-            let length = max(hypot(normal.x, normal.y), 0.001)
-            let center = CGPoint(x: point.x + normal.x / length * (gap + size.height / 2),
-                                 y: point.y + normal.y / length * (gap + size.height / 2))
-            let x = side > 0 ? center.x : center.x - size.width
-            let rect = CGRect(x: x, y: center.y - size.height / 2, width: size.width, height: size.height)
-            if !taken.contains(where: { $0.insetBy(dx: -4, dy: -1).intersects(rect) }) { return rect }
+    /// Where banners may hang: under the menu bar, above the ground.
+    private var bounds: CGRect {
+        let ground = Composition.groundY(size.height)
+        return CGRect(x: 6, y: Composition.top - 16, width: size.width - 12, height: ground - 8 - (Composition.top - 16))
+    }
+
+    /// Each repository's ribbon, hung from the underside of its bough's first stretch, where it's
+    /// still near the shared trunk.
+    private func ribbons(_ boughs: [YggdrasilLayout.Bough], frame: TreeFrame, obstacles: [CGRect]) -> [BannerPlan.Ribbon] {
+        let fontSize = max(18, (style.ribbonSize * frame.detail).rounded())
+        var requests: [BannerLayout.RibbonRequest] = []
+        var names: [String: String] = [:]
+        for bough in boughs {
+            guard let stem = bough.layout.stems.first, stem.curve.count > 2 else { continue }
+            let anchors = [0.14, 0.2, 0.26, 0.32, 0.4, 0.48, 0.56].map { fraction -> CGPoint in
+                let node = stem.curve[Int(Double(stem.curve.count - 1) * fraction)]
+                let point = frame.point(node.point)
+                return CGPoint(x: point.x, y: point.y + node.width * frame.scale / 2)
+            }
+            let id = "ribbon\u{1F}\(bough.name)"
+            names[id] = bough.name
+            requests.append(.init(id: id, anchors: anchors, size: RibbonShape.size(bough.name, fontSize: fontSize, style: style)))
         }
-        return nil
+        return BannerLayout.hang(requests, obstacles: obstacles, bounds: bounds).map { ribbon in
+            BannerPlan.Ribbon(ribbon: ribbon, pane: names[ribbon.id] ?? "", fontSize: fontSize)
+        }
     }
 }
 
 // MARK: - Wind
 
-/// Now and then a gust: a few seconds in which the pennants sway, then stillness. Only when it's
-/// cheap to show: never while the background is covered, the display is asleep, the Mac is on
-/// battery or in Low Power Mode. Between gusts nothing ticks.
+/// Now and then a gust: a few seconds in which the banners sway, then stillness. Only while it's
+/// turned on and cheap to show: never while the background is covered, the display is asleep, the
+/// Mac is on battery or in Low Power Mode. Between gusts nothing ticks.
 @MainActor
 @Observable
 final class Breeze {
@@ -150,8 +159,23 @@ final class Breeze {
 
     static let gustLength: TimeInterval = 7
     /// The pause between gusts, before its seeded jitter of up to a third either way.
-    private let pause: TimeInterval
-    private let enabled: Bool
+    static let pause: TimeInterval = 45
+
+    /// Whether gusts blow (the menu's setting, while banners are shown). Turning it off stills them
+    /// at once.
+    var isEnabled = false {
+        didSet {
+            guard isEnabled != oldValue else { return }
+            timer?.invalidate()
+            timer = nil
+            gustStart = nil
+            if isEnabled, !isTurnedOff { scheduleNext() }
+        }
+    }
+
+    /// GITRASIL_BACKGROUND_BREEZE=off keeps the banners still, whatever the setting.
+    let isTurnedOff: Bool
+
     private let allowed: () -> Bool
     private var timer: Timer?
     private var count = 0
@@ -159,16 +183,7 @@ final class Breeze {
     /// - Parameter allowed: whether the background is on screen at all.
     init(allowed: @escaping () -> Bool, environment: [String: String] = ProcessInfo.processInfo.environment) {
         self.allowed = allowed
-        // GITRASIL_BACKGROUND_BREEZE=off keeps the pennants still; =often gusts every twenty seconds or so
-        // (to look at it, or measure it).
-        let setting = environment["GITRASIL_BACKGROUND_BREEZE"]
-        enabled = setting != "off"
-        pause = setting == "often" ? 20 : 45
-    }
-
-    func start() {
-        guard enabled else { return }
-        scheduleNext()
+        isTurnedOff = environment["GITRASIL_BACKGROUND_BREEZE"] == "off"
     }
 
     /// How hard it's blowing at `date`: rising and falling over the gust, 0 when still.
@@ -182,7 +197,7 @@ final class Breeze {
     private func scheduleNext() {
         count += 1
         var rng = SeededRandom("breeze", count)
-        let wait = pause * rng.next(in: 0.67...1.33)
+        let wait = Self.pause * rng.next(in: 0.67...1.33)
         timer = Timer.scheduledTimer(withTimeInterval: wait, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.gust() }
         }
@@ -194,8 +209,7 @@ final class Breeze {
         guard allowed(), Self.isCheapToAnimate() else { return }
         let start = Date()
         gustStart = start
-        print("[\(start.formatted(.dateTime.hour().minute().second()))] gust")
-        fflush(stdout)
+        logEvent("gust")
         Task {
             try? await Task.sleep(for: .seconds(Self.gustLength))
             if gustStart == start { gustStart = nil }
@@ -214,12 +228,12 @@ final class Breeze {
 
 // MARK: - Views
 
-/// Every banner, over the trees. Its clock runs only while a gust blows (≤12 fps); each pennant's
-/// own drawing is fixed (`Pennant` is equatable and drawn into its own layer), so a frame of wind
-/// only turns layers.
+/// Every banner, over the trees. Its clock runs only while a gust blows (≤12 fps); each banner's
+/// own drawing is fixed (`Pennant` and `RibbonShape` are equatable and drawn into their own layers),
+/// so a frame of wind only turns layers.
 struct BannerLayer: View {
-    let banners: [BannerPlan.Hanging]
-    /// Banners whose stem is growing in: hidden until it's grown, then fading in.
+    let plan: BannerPlan
+    /// Banners whose wood is growing in: hidden until it's grown, then fading in.
     let hidden: Set<String>
     let style: WallpaperStyle
     let breeze: Breeze
@@ -230,9 +244,19 @@ struct BannerLayer: View {
             let strength = breeze.strength(at: timeline.date)
             let seconds = timeline.date.timeIntervalSinceReferenceDate
             ZStack(alignment: .topLeading) {
-                ForEach(banners) { hanging in
+                ForEach(plan.ribbons) { ribbon in
+                    let isHidden = hidden.contains(ribbon.id)
+                    // Heavier: it swings less, and the wind doesn't lift it.
+                    RibbonView(ribbon: ribbon, style: style,
+                               angle: Self.sway(ribbon.id, side: 1, lift: 0, strength: strength * 0.35, seconds: seconds))
+                        .opacity(isHidden ? 0 : 1)
+                        .animation(isHidden ? nil : .easeIn(duration: 0.7), value: isHidden)
+                }
+                ForEach(plan.banners) { hanging in
                     let isHidden = hidden.contains(hanging.id)
-                    BannerView(hanging: hanging, style: style, angle: Self.sway(hanging, strength: strength, seconds: seconds))
+                    BannerView(hanging: hanging, style: style,
+                               angle: Self.sway(hanging.id, side: hanging.banner.side, lift: 1.8, strength: strength,
+                                                seconds: seconds))
                         .opacity(isHidden ? 0 : 1)
                         .animation(isHidden ? nil : .easeIn(duration: 0.7), value: isHidden)
                 }
@@ -242,15 +266,145 @@ struct BannerLayer: View {
         .allowsHitTesting(false)
     }
 
-    /// A pennant's swing about its hook, in degrees: a slow seeded pendulum, its free end lifted a
-    /// little by the wind, both scaled by how hard it's blowing.
-    static func sway(_ hanging: BannerPlan.Hanging, strength: Double, seconds: TimeInterval) -> Double {
+    /// A banner's swing about where it hangs, in degrees: a slow seeded pendulum, a pennant's free
+    /// end (streaming to `side`) lifted by the wind by `lift`, all scaled by how hard it's blowing.
+    static func sway(_ id: String, side: Double, lift: Double, strength: Double, seconds: TimeInterval) -> Double {
         guard strength > 0 else { return 0 }
-        var rng = SeededRandom(hanging.id, -17)
+        var rng = SeededRandom(id, -17)
         let period = rng.next(in: 1.8...3.2), phase = rng.next(in: 0...(2 * .pi))
         let swing = 2.6 * sin(seconds / period * 2 * .pi + phase) + 0.8 * sin(seconds / (period * 0.43) * 2 * .pi + phase * 2)
         // Positive turns clockwise: for a pennant streaming right, that drops its free end.
-        return strength * hanging.banner.side * (swing - 1.8)
+        return strength * side * (swing - lift)
+    }
+}
+
+/// A repository's ribbon: two cords from its anchor on the bough, and the ribbon hanging from them,
+/// turned about the anchor by `angle`.
+private struct RibbonView: View {
+    let ribbon: BannerPlan.Ribbon
+    let style: WallpaperStyle
+    let angle: Double
+
+    var body: some View {
+        let hung = ribbon.ribbon
+        let box = hung.footprint.insetBy(dx: -10, dy: -10)
+        let anchor = CGPoint(x: hung.anchor.x - box.minX, y: hung.anchor.y - box.minY)
+        ZStack(alignment: .topLeading) {
+            Cords(anchor: anchor, ends: [hung.cordEnds.0, hung.cordEnds.1].map { end in
+                CGPoint(x: end.x - box.minX,
+                        y: end.y - box.minY + RibbonShape.top(at: end.x - hung.rect.minX, size: hung.rect.size))
+            })
+                .stroke(style.ink.opacity(0.55), style: StrokeStyle(lineWidth: 0.9, lineCap: .round, lineJoin: .round))
+            RibbonShape(name: ribbon.pane, fontSize: ribbon.fontSize, style: style)
+                .equatable()
+                .frame(width: hung.rect.width, height: hung.rect.height)
+                .offset(x: hung.rect.minX - box.minX, y: hung.rect.minY - box.minY)
+        }
+        .frame(width: box.width, height: box.height, alignment: .topLeading)
+        .rotationEffect(.degrees(angle), anchor: UnitPoint(x: anchor.x / box.width, y: anchor.y / box.height))
+        .offset(x: box.minX, y: box.minY)
+    }
+}
+
+/// The two cords a ribbon hangs by, tied at one point, with a small knot there.
+private struct Cords: Shape {
+    let anchor: CGPoint
+    let ends: [CGPoint]
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        for end in ends {
+            path.move(to: anchor)
+            path.addLine(to: end)
+        }
+        path.addEllipse(in: CGRect(x: anchor.x - 1.8, y: anchor.y - 1.8, width: 3.6, height: 3.6))
+        return path
+    }
+}
+
+/// A paper banderole with the repository's name: an arched panel with a double-ruled frame, its
+/// ends folding back behind it into swallowtails. In plain ink, larger and more formal than a
+/// branch's pennant. Drawn once into its own layer; swaying only turns that layer.
+struct RibbonShape: View, Equatable {
+    let name: String
+    let fontSize: CGFloat
+    let style: WallpaperStyle
+
+    /// Room around the name on the panel.
+    static let padding = CGSize(width: 18, height: 4)
+
+    static func == (a: RibbonShape, b: RibbonShape) -> Bool {
+        a.name == b.name && a.fontSize == b.fontSize && a.style.paper == b.style.paper && a.style.ink == b.style.ink
+    }
+
+    /// The panel's height for a ribbon `size` tall.
+    private static func panel(_ height: CGFloat) -> CGFloat { height / (1 + archRatio + dropRatio) }
+    private static let archRatio: CGFloat = 0.14, dropRatio: CGFloat = 0.3, tailRatio: CGFloat = 0.8
+
+    /// How far below the ribbon's top its panel's arched top edge is at `x` (where the cords meet it).
+    static func top(at x: CGFloat, size: CGSize) -> CGFloat {
+        let ph = panel(size.height), tail = ph * tailRatio
+        let t = min(max((x - tail) / max(size.width - 2 * tail, 1), 0), 1)
+        return ph * archRatio * (1 - 4 * t * (1 - t))
+    }
+
+    /// The ribbon's whole size for `name`: the panel, its arch, and the tails out to each side and
+    /// dropped below it. The panel fits the script's letters, not its tall line.
+    static func size(_ name: String, fontSize: CGFloat, style: WallpaperStyle) -> CGSize {
+        let text = (name as NSString).size(withAttributes: [.font: style.ribbonMetricsFont(fontSize)])
+        let panel = ceil(fontSize * 1.1) + padding.height * 2
+        let width = ceil(text.width) + padding.width * 2 + panel * tailRatio * 2
+        return CGSize(width: width, height: ceil(panel * (1 + archRatio + dropRatio)))
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            let ph = Self.panel(size.height), arch = ph * Self.archRatio, drop = ph * Self.dropRatio
+            let tail = ph * Self.tailRatio, notch = ph * 0.32
+            let left = tail, right = size.width - tail
+            let ink = style.ink, line = style.lineWidth
+
+            // The tails, behind: from each end of the panel out to a swallowtail, dropped below it.
+            for side in [-1.0, 1.0] {
+                let inner = side < 0 ? left : right, outer = side < 0 ? 0 : size.width
+                var piece = Path()
+                piece.move(to: CGPoint(x: inner, y: arch + drop))
+                piece.addLine(to: CGPoint(x: outer, y: arch + drop))
+                piece.addLine(to: CGPoint(x: outer - side * notch, y: arch + drop + ph / 2))
+                piece.addLine(to: CGPoint(x: outer, y: arch + drop + ph))
+                piece.addLine(to: CGPoint(x: inner, y: arch + drop + ph))
+                piece.closeSubpath()
+                context.fill(piece, with: .color(style.paper[1]))
+                context.fill(piece, with: .color(ink.opacity(0.06)))
+                context.stroke(piece, with: .color(ink.opacity(0.8)), style: StrokeStyle(lineWidth: line, lineJoin: .round))
+                // The fold where the ribbon turns back behind the panel.
+                var fold = Path()
+                fold.move(to: CGPoint(x: inner, y: arch + ph))
+                fold.addLine(to: CGPoint(x: inner, y: arch + drop + ph))
+                fold.addLine(to: CGPoint(x: inner - side * drop, y: arch + ph))
+                fold.closeSubpath()
+                context.fill(fold, with: .color(ink.opacity(0.55)))
+                context.stroke(fold, with: .color(ink.opacity(0.8)), style: StrokeStyle(lineWidth: line * 0.8, lineJoin: .round))
+            }
+
+            // The panel, arched, with an inner rule.
+            func panel(inset: CGFloat) -> Path {
+                var path = Path()
+                path.move(to: CGPoint(x: left + inset, y: arch + inset))
+                path.addQuadCurve(to: CGPoint(x: right - inset, y: arch + inset), control: CGPoint(x: size.width / 2, y: -arch + inset))
+                path.addLine(to: CGPoint(x: right - inset, y: arch + ph - inset))
+                path.addQuadCurve(to: CGPoint(x: left + inset, y: arch + ph - inset),
+                                  control: CGPoint(x: size.width / 2, y: ph - arch - inset))
+                path.closeSubpath()
+                return path
+            }
+            context.fill(panel(inset: 0), with: .color(style.paper[0]))
+            context.stroke(panel(inset: 0), with: .color(ink.opacity(0.9)), style: StrokeStyle(lineWidth: line * 1.5, lineJoin: .round))
+            context.stroke(panel(inset: 3), with: .color(ink.opacity(0.45)), style: StrokeStyle(lineWidth: line * 0.6, lineJoin: .round))
+
+            let text = context.resolve(Text(name).font(style.ribbonFont(fontSize)).foregroundColor(ink.opacity(0.9)))
+            context.draw(text, at: CGPoint(x: size.width / 2, y: ph / 2 + 2), anchor: .center)
+        }
     }
 }
 

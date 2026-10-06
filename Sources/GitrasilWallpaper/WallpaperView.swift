@@ -12,7 +12,8 @@ struct WallpaperView: View {
     var body: some View {
         let style = WallpaperStyle.inkOnCream(dark: colorScheme == .dark)
         let panes = background.panes
-        let arrangement = background.arrangement.value
+        let arrangement = background.settings.arrangement
+        let showsBanners = background.settings.showsBanners
         let now = background.now
         // Read each pane here so Observation redraws when one publishes a new tree or growth.
         let growing = background.isGrowingIn || panes.contains { pane in
@@ -30,39 +31,46 @@ struct WallpaperView: View {
                         .font(style.captionFont.weight(.regular))
                         .foregroundStyle(style.captionInk)
                 } else {
-                    // The names hang where the full-grown trees put them, planned only when a tree changes.
-                    let plan = Scene(style: style, now: now, size: proxy.size, trunkGrowIn: nil).plan(
-                        panes.map { Pane(name: $0.repoName, tree: $0.tree, problem: $0.problem, grown: [:], growIn: nil) },
-                        arrangement: arrangement)
                     TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !growing)) { timeline in
                         let date = timeline.date
                         let panes = panes.map { Pane(name: $0.repoName, tree: $0.tree, problem: $0.problem,
                                                      grown: $0.grown(at: date), growIn: background.growIn($0.repoURL, at: date)) }
                         let trunkGrowIn = background.trunkGrowIn(at: date)
                         Canvas { context, size in
-                            let scene = Scene(style: style, now: now, size: size, trunkGrowIn: trunkGrowIn)
-                            if scene.isSingleTree(panes, arrangement: arrangement) {
-                                scene.drawSingleTree(panes, boughNames: plan.boughNames, in: &context)
+                            let landscape = Landscape(style: style, now: now, size: size, trunkGrowIn: trunkGrowIn)
+                            if landscape.isSingleTree(panes, arrangement: arrangement) {
+                                landscape.drawSingleTree(panes, in: &context)
                             } else {
-                                scene.drawOrchard(panes, in: &context)
+                                landscape.drawOrchard(panes, in: &context)
                             }
                         }
                     }
-                    BannerLayer(banners: plan.banners, hidden: hiddenBanners(plan), style: style, breeze: background.breeze)
+                    if showsBanners {
+                        // The names hang where the full-grown trees put them, planned only when a tree changes.
+                        let plan = Landscape(style: style, now: now, size: proxy.size, trunkGrowIn: nil).plan(
+                            panes.map { Pane(name: $0.repoName, tree: $0.tree, problem: $0.problem, grown: [:], growIn: nil) },
+                            arrangement: arrangement)
+                        BannerLayer(plan: plan, hidden: hiddenBanners(plan), style: style, breeze: background.breeze)
+                    }
                 }
             }
         }
         .ignoresSafeArea()
     }
 
-    /// Banners on wood that's growing in: hidden until it has grown, then fading in.
+    /// Banners on wood that's growing in: hidden until it has grown, then fading in. A repository's
+    /// ribbon waits for its whole bough.
     private func hiddenBanners(_ plan: BannerPlan) -> Set<String> {
         let panes = Dictionary(background.panes.map { ($0.repoName, $0) }, uniquingKeysWith: { a, _ in a })
-        return Set(plan.banners.filter { hanging in
+        func growingIn(_ name: String) -> Bool {
+            guard let pane = panes[name] else { return false }
+            return background.trunkGrowIn != nil || background.growIns[pane.repoURL] != nil
+        }
+        let banners = plan.banners.filter { hanging in
             guard let pane = panes[hanging.pane] else { return false }
-            if background.trunkGrowIn != nil || background.growIns[pane.repoURL] != nil { return true }
-            return pane.growthStart != nil && pane.growth[hanging.stem] != nil
-        }.map(\.id))
+            return growingIn(hanging.pane) || pane.growthStart != nil && pane.growth[hanging.stem] != nil
+        }
+        return Set(banners.map(\.id) + plan.ribbons.filter { growingIn($0.pane) }.map(\.id))
     }
 
     private func drawPaper(size: CGSize, style: WallpaperStyle, in context: inout GraphicsContext) {
@@ -139,7 +147,7 @@ struct Pane {
 }
 
 /// Lays the trees out on the screen and draws them, in either arrangement.
-struct Scene {
+struct Landscape {
     let style: WallpaperStyle
     let now: Date
     let size: CGSize
@@ -211,9 +219,8 @@ struct Scene {
         return (full, frame)
     }
 
-    /// The single tree, each repository's name written quietly at the foot of its bough (where
-    /// `boughNames` puts it), coming in as its bough grows.
-    func drawSingleTree(_ panes: [Pane], boughNames: [String: CGRect], in context: inout GraphicsContext) {
+    /// The single tree (each repository's name hangs on its ribbon over it: `BannerLayer`).
+    func drawSingleTree(_ panes: [Pane], in context: inout GraphicsContext) {
         let ready = panes.filter { $0.tree != nil }
         let (full, frame) = singleTree(ready)
         let still = trunkGrowIn == nil && ready.allSatisfy { $0.grown.isEmpty && $0.growIn == nil }
@@ -224,13 +231,6 @@ struct Scene {
         let stems = [layout.trunk] + layout.boughs.flatMap(\.layout.stems)
         drawing.shadow(width: full.bounds.width, in: &context)
         drawing.draw(stems, groundStem: layout.trunk, rootSeed: "yggdrasil", in: &context)
-        let font = style.labelFont(max(10, (style.labelSize * frame.detail).rounded()))
-        for pane in ready {
-            guard let rect = boughNames[pane.name] else { continue }
-            let shown = trunkGrowIn != nil ? 0 : pane.growIn.map { min(max(($0 - 0.5) * 2, 0), 1) } ?? 1
-            guard shown > 0 else { continue }
-            context.draw(Text(pane.name).font(font).foregroundColor(style.ink.opacity(0.6 * shown)), in: rect)
-        }
         let problems = panes.compactMap { pane in pane.problem.map { "\(pane.name): \($0)" } }
         if !problems.isEmpty {
             problemText(problems.joined(separator: "   "),

@@ -93,7 +93,7 @@ final class WallpaperModel {
         let grew = tree.map { Self.growth(from: $0, to: fresh) } ?? [:]
         tree = fresh
         redraws += 1
-        log("\(repoName): redraw #\(redraws) (derive #\(store.deriveCount)): \(fresh.trunk.count) trunk commits, "
+        logEvent("\(repoName): redraw #\(redraws) (derive #\(store.deriveCount)): \(fresh.trunk.count) trunk commits, "
             + "\(fresh.limbs.count) limbs, grew \(grew.keys.sorted())")
         if !grew.isEmpty, isVisible { grow(grew) }
         if first { onFirstTree?() }
@@ -126,11 +126,5 @@ final class WallpaperModel {
             try? await Task.sleep(for: .seconds(Self.growthDuration))
             if growthStart == start { growthStart = nil }
         }
-    }
-
-    func log(_ message: String) {
-        let stamp = Date().formatted(.dateTime.hour().minute().second())
-        print("[\(stamp)] \(message)")
-        fflush(stdout)
     }
 }

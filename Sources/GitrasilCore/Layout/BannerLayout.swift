@@ -3,8 +3,10 @@ import Foundation
 import CoreGraphics
 #endif
 
-/// Where branch names hang: each on a small pennant tied to its tip by a thread that runs outward,
-/// away from the crown. In screen points, y down. Pure, so a redraw places the same banners.
+/// Where names hang. Branch names go on small pennants, each tied to its tip by a thread that runs
+/// outward, away from the crown; in the single tree, repository names go on larger ribbons hung
+/// under their boughs (see `hang`). In screen points, y down. Pure, so a redraw places the same
+/// banners.
 ///
 /// A pennant hangs from its hook by its upper inner corner and streams outward (to the right of the
 /// hook on the right of the tree, to the left on the left). Tips are placed in the order given (the
@@ -85,6 +87,83 @@ public enum BannerLayout {
         }
         return banners
     }
+
+    // MARK: Ribbons
+
+    /// A repository's name in the single tree: a ribbon, larger than a pennant, hung by two cords
+    /// from a point under its bough.
+    public struct RibbonRequest: Sendable, Equatable {
+        public let id: String
+        /// Points under the bough it may hang from, the preferred first.
+        public let anchors: [CGPoint]
+        /// The ribbon's size.
+        public let size: CGSize
+
+        public init(id: String, anchors: [CGPoint], size: CGSize) {
+            self.id = id
+            self.anchors = anchors
+            self.size = size
+        }
+    }
+
+    public struct Ribbon: Sendable, Equatable {
+        public let id: String
+        /// Where both cords are tied.
+        public let anchor: CGPoint
+        /// The ribbon, unswayed.
+        public let rect: CGRect
+
+        /// Where the cords meet the ribbon's top edge.
+        public var cordEnds: (CGPoint, CGPoint) {
+            (CGPoint(x: rect.minX + rect.width * BannerLayout.cordInset, y: rect.minY),
+             CGPoint(x: rect.maxX - rect.width * BannerLayout.cordInset, y: rect.minY))
+        }
+
+        /// The ribbon with its cords, for keeping pennants off both.
+        public var footprint: CGRect { rect.union(CGRect(origin: anchor, size: .zero)) }
+    }
+
+    /// How far in from each end the cords meet the ribbon, as a fraction of its width.
+    public static let cordInset: CGFloat = 0.3
+    /// How far below its anchor a ribbon may hang, and where along it the anchor may be (0.5 hangs
+    /// it centred; off centre it hangs beside an upright bough).
+    static let drops: [CGFloat] = [14, 24, 36, 50, 66]
+    static let hangs: [CGFloat] = [0.5, 0.3, 0.7, 0.15, 0.85]
+
+    /// Hangs each ribbon (in the order given) from one of its anchors: never on another ribbon, its
+    /// cords never through one, inside the bounds; among those, the spot that covers the least of the
+    /// crown, weighing a preferred anchor, a short drop and hanging centred against a little cover.
+    /// A ribbon with no such spot is left out.
+    public static func hang(_ requests: [RibbonRequest], obstacles: [CGRect], taken: [CGRect] = [],
+                            bounds: CGRect) -> [Ribbon] {
+        var placed: [CGRect] = taken
+        var ribbons: [Ribbon] = []
+        for request in requests {
+            var best: (ribbon: Ribbon, cost: CGFloat)?
+            for (rank, anchor) in request.anchors.enumerated() {
+                for drop in drops {
+                    for (offset, hang) in hangs.enumerated() {
+                        let rect = CGRect(x: anchor.x - request.size.width * hang, y: anchor.y + drop,
+                                          width: request.size.width, height: request.size.height)
+                        let ribbon = Ribbon(id: request.id, anchor: anchor, rect: rect)
+                        let padded = rect.insetBy(dx: -margin, dy: -margin)
+                        guard bounds.contains(rect), !placed.contains(where: { other in
+                            other.intersects(padded) || crosses(anchor, ribbon.cordEnds.0, other)
+                                || crosses(anchor, ribbon.cordEnds.1, other)
+                        }) else { continue }
+                        let cost = covered(rect, by: obstacles) + CGFloat(rank) * 40 + drop * 3 + CGFloat(offset) * 60
+                        if best == nil || cost < best!.cost { best = (ribbon, cost) }
+                    }
+                }
+            }
+            guard let chosen = best?.ribbon else { continue }
+            ribbons.append(chosen)
+            placed.append(chosen.footprint)
+        }
+        return ribbons
+    }
+
+    // MARK: Geometry
 
     /// The pennant hanging from `hook` and streaming to `side`.
     public static func pennant(at hook: CGPoint, side: Double, size: CGSize) -> CGRect {

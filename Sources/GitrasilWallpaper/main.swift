@@ -2,15 +2,15 @@ import AppKit
 import SwiftUI
 import GitrasilCore
 
-// Gitrasil's history graph as a live desktop background (docs/live-background/DESIGN.md).
+// Gitrasil: the pinned repositories grown as trees on a live desktop background (docs/yggdrasil).
 //
 // Usage: GitrasilWallpaper [--quit-after <seconds>]
 //
 // Opens a desktop-level window on every display and grows the pinned repositories as trees (an
 // orchard, or one tree with a bough each) behind the desktop icons, redrawing when they change. A
-// menu-bar item adds and removes the pinned repositories and picks the arrangement, which are saved in the `com.gitrasil.background` defaults (or the suite
-// GITRASIL_BACKGROUND_DEFAULTS_SUITE names). Nothing is installed and the system wallpaper setting
-// is never touched.
+// menu-bar item adds and removes the pins and holds the settings (the arrangement, banners, gusts),
+// all saved in the `com.gitrasil.background` defaults (or the suite GITRASIL_BACKGROUND_DEFAULTS_SUITE
+// names). Nothing is installed and the system wallpaper setting is never touched.
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let quitAfter: TimeInterval?
@@ -29,29 +29,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let suite = PinnedRepositories.appSuiteName()
         let defaults = UserDefaults(suiteName: suite) ?? .standard
         let pins = PinnedRepositories(storage: defaults, limit: BackgroundModel.maxPanes)
-        let arrangement = ArrangementSetting(storage: defaults)
-        let background = BackgroundModel(pins: pins, arrangement: arrangement)
-        background.log("defaults \(suite), \(pins.pins.count) pinned (\(pins.shown.count) shown), \(arrangement.value.rawValue)")
+        let settings = BackgroundSettings(storage: defaults)
+        let background = BackgroundModel(pins: pins, settings: settings)
+        logEvent("defaults \(suite), \(pins.pins.count) pinned (\(pins.shown.count) shown), \(settings.arrangement.rawValue)")
 
-        // Follows the system's light/dark mode; GITRASIL_BACKGROUND_APPEARANCE=light|dark pins one,
-        // to preview the other mode without changing the system setting.
-        let appearance: NSAppearance? = switch ProcessInfo.processInfo.environment["GITRASIL_BACKGROUND_APPEARANCE"] {
-        case "dark": NSAppearance(named: .darkAqua)
-        case "light": NSAppearance(named: .aqua)
-        default: nil
+        // Follows the system's light/dark mode; GITRASIL_BACKGROUND_APPEARANCE=light|dark pins one (the
+        // background and the menu), to preview the other mode without changing the system setting.
+        switch ProcessInfo.processInfo.environment["GITRASIL_BACKGROUND_APPEARANCE"] {
+        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        default: break
         }
-        let windows = DesktopWindows(background: background, appearance: appearance)
+        let windows = DesktopWindows(background: background)
         windows.start()
         self.windows = windows
         self.background = background
-        self.menu = StatusMenu(pins: pins, arrangement: arrangement)
+        self.menu = StatusMenu(pins: pins, settings: settings, gustsOverridden: background.breeze.isTurnedOff)
 
         background.start()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-            MainActor.assumeIsolated {
-                if let menu = self?.menu { background.log(menu.placement) }
-            }
-        }
 
         if let quitAfter {
             DispatchQueue.main.asyncAfter(deadline: .now() + quitAfter) { NSApp.terminate(nil) }

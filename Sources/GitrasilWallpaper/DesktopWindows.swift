@@ -11,18 +11,13 @@ import SwiftUI
 final class DesktopWindows {
 
     private let background: BackgroundModel
-    private let appearance: NSAppearance?
     private var windows: [CGDirectDisplayID: DesktopWindow] = [:]
     private var occlusionObservers: [CGDirectDisplayID: NSObjectProtocol] = [:]
     private var screenObserver: NSObjectProtocol?
 
-    /// - Parameter appearance: pins light or dark for every window; nil follows the system.
-    init(background: BackgroundModel, appearance: NSAppearance?) {
+    init(background: BackgroundModel) {
         self.background = background
-        self.appearance = appearance
     }
-
-    var count: Int { windows.count }
 
     func start() {
         reconcile()
@@ -43,7 +38,7 @@ final class DesktopWindows {
         for id in removed {
             windows.removeValue(forKey: id)?.orderOut(nil)
             occlusionObservers.removeValue(forKey: id).map(NotificationCenter.default.removeObserver)
-            background.log("display \(id) removed")
+            logEvent("display \(id) removed")
         }
         for (id, screen) in current {
             if let window = windows[id] {
@@ -51,7 +46,6 @@ final class DesktopWindows {
                 continue
             }
             let window = DesktopWindow(screen: screen)
-            if let appearance { window.appearance = appearance }
             window.contentView = NSHostingView(rootView: WallpaperView(background: background))
             window.orderFront(nil)
             windows[id] = window
@@ -60,7 +54,7 @@ final class DesktopWindows {
             ) { [weak self] _ in
                 MainActor.assumeIsolated { self?.occlusionChanged() }
             }
-            background.log("display \(id) (\(screen.localizedName)): window level \(window.level.rawValue), "
+            logEvent("display \(id) (\(screen.localizedName)): window level \(window.level.rawValue), "
                            + "frame \(window.frame)")
         }
         // A new window reports its occlusion once it's on screen; losing one can change it now.
@@ -71,7 +65,7 @@ final class DesktopWindows {
         let visible = windows.values.contains { $0.occlusionState.contains(.visible) }
         if visible != background.isVisible {
             background.isVisible = visible
-            background.log("occlusion: \(visible ? "visible on at least one display" : "hidden everywhere")")
+            logEvent("occlusion: \(visible ? "visible on at least one display" : "hidden everywhere")")
         }
     }
 }
