@@ -5,7 +5,13 @@ branches and worktrees grow off it as curving, tapering limbs, with sub-branches
 forks again, foliage at the tips, and only branch names as text. Keep the ink-on-paper feel,
 per-branch inks, light and dark, displays, pins, ref-only watching and 0% idle.
 
-Branch `spike/yggdrasil`, cut from `spike/live-background` (ce20fcb).
+Branch `spike/yggdrasil`, cut from `spike/live-background` (ce20fcb); renamed `feature/yggdrasil`
+for review after round 4.
+
+**Status.** Built through round 4 (at the end). The rounds are kept as they were planned and
+built; where a later round changed something, a note says so. Since round 3 the old branch-graph
+drawing is gone: `GraphLayout` (lanes and rows) and the derivations only it used were removed, and
+the store's `HistoryGraph` became `RepoGraph` (trunk, branches, buds), which is all the tree needs.
 
 ## What stays
 
@@ -126,6 +132,7 @@ Findings:
 - `dnd-app`'s trunk resolves to `origin/master` (its `origin/HEAD`), so local `main` is drawn as a
   limb. That's the existing trunk detection, unchanged here.
 - `GraphLayout` is no longer used by the background; it stays in Core (with its tests) for now.
+  (Removed in round 4.)
 
 ## Round 2: an orchard or a single tree
 
@@ -158,6 +165,7 @@ there a bough per repository fans out, left to right in pin order.
   The boughs grow out of it: each foot is sunk into the trunk's rounded top.
 - A repository's name is written once, at the foot of its bough (under a leaning bough, beside an
   upright one), in the branch-label hand font and plain ink, as quiet as a branch name.
+  (Round 4 hangs it on a ribbon instead.)
 - Inks, leaves, ageing, blossoms, the grow-in and draw-only-on-change are the same code as the
   orchard.
 
@@ -251,7 +259,8 @@ looks like clip art slapped on top of the trunk."
 **1. Banners** (`BannerLayout`, `Banners.swift`). As planned. Each pennant hangs from its upper
 inner corner on a thread up to 175 pt long. Where a crown is crowded (24 names on a 1440-wide
 screen) a few names deep inside it still land partly on leaves, but never on another banner.
-Bough names in the single tree are placed in the same plan, so banners keep off them.
+Bough names in the single tree are placed in the same plan, so banners keep off them (round 4
+moves them onto ribbons).
 - Sway: a gust about every 45 s (jittered by a third), 7 s long, ≤12 fps. Each pennant swings a
   couple of degrees about its hook, its free end lifted a little. The tree canvas isn't redrawn.
 - Measured on AC power with two displays (1440×900 and 3440×1440), `top` once a second:
@@ -285,7 +294,8 @@ Bough names in the single tree are placed in the same plan, so banners keep off 
 - the claude.ai artifacts.
 
 `MenuBarIcon` draws a placeholder template glyph: a leafy crown with branches cut through it, on a
-trunk flaring into roots. Swap it for the real icon when that turns up.
+trunk flaring into roots. Swap it for the real icon when that turns up. (Round 4 moves it into
+a resource file and recreates the real icon from a screenshot.)
 
 **4. Branch collars.** As planned. The wood is one layer, so there's no seam or second tone where
 wood meets wood:
@@ -309,3 +319,82 @@ wood meets wood:
 
 ![folder pin, light](folder-pin-light.jpg) ![folder pin, dark](folder-pin-dark.jpg)
 ![the menu](folder-pin-menu.jpg)
+
+## Round 4: settings, repository ribbons, the icon, and ready for review
+
+Daniel (via Arbor) kept the round 3 behaviour (the gusts, the grow-in at launch, every bough
+regrowing on a new pin in the single tree, folders showing their most recently active
+repositories) and asked for four things, then for the branch to be made ready for a PR. After a
+first pass he asked for the repository names to have their own setting, and for the icon to be
+recreated from a screenshot.
+
+**1 and 2. Menu settings for the banners.** The menu gains a *Banners* section under *Arrange As*:
+- **Branch Names**: the branch pennants.
+- **Repository Names**: in the single tree, each repository's ribbon (item 3). The orchard writes
+  each repository's name under its tree either way, as part of the ground. Ribbons are placed
+  before pennants, so turning the branch names off or on never moves them.
+- **Sway in Gusts**: the gusts, about every 45 s as before. Off cancels the waiting timer, so
+  there's nothing scheduled at all. Gusts blow only while something hangs to sway, so with both
+  names off (or only ribbons on, in the orchard) the item is greyed out and no timer runs; it's
+  greyed out too when `GITRASIL_BACKGROUND_BREEZE=off` overrides it (the tooltip says so).
+- All take effect at once and are saved next to the arrangement (`showsBranchNames`,
+  `showsRepoNames`, `gusts`), in a tested Core value, `BackgroundSettings`, which now holds the
+  arrangement and decides when gusts blow.
+- The menu follows `GITRASIL_BACKGROUND_APPEARANCE`, so a light or dark preview reaches it too.
+
+![the settings, light](settings-menu-light.jpg) ![the settings, dark](settings-menu-dark.jpg)
+![repository names only](repo-names-only-light.jpg)
+![no names](banners-hidden-dark.jpg) ![the menu with no names](settings-menu-names-hidden-light.jpg)
+
+**3. Repository names on ribbons in the single tree.** Each repository's name is on a banderole,
+replacing the quiet name at the bough's foot: an arched panel with a double rule, in the paper
+colour with a heavier ink outline, its ends folding back into swallowtail tails, the name in
+Snell Roundhand Bold (larger than the branch names' hand). It hangs by two cords from one knot
+under the bough's first stretch.
+- Placement is in Core (`BannerLayout.hang`, tested): ribbons are placed first, each trying anchors
+  along its bough and a few drops and offsets below them. A ribbon never overlaps another or its
+  cords; among the spots left, it takes the one that covers the least of the crown, preferring a
+  short drop and hanging centred. An upright bough's ribbon hangs to one side of it, or across it
+  like a sign where there's no room beside it (`elm` below).
+- The pennants are placed after, with the ribbons (and their cords) as taken space, so a branch
+  name never lands on a repository's name.
+- Ribbons sway with the gusts at about a third of a pennant's swing, about their knot. They're
+  hidden while their bough grows in, like the pennants.
+
+![repository ribbons, light](repo-ribbons-light.jpg) ![repository ribbons, dark](repo-ribbons-dark.jpg)
+
+**4. The icon.** Daniel couldn't export the original, so it's recreated from his 50×54 px
+screenshot: a crown of four lobes with a small hole in each, a straight trunk, and a ground line
+that runs out both ways and curls up at the right end. (Arbor's brief called the ground an L; the
+screenshot shows it on both sides, so this follows the screenshot.) `scripts/draw-icon.swift`
+draws it as vector paths in the screenshot's own pixel coordinates and writes:
+- `Sources/GitrasilWallpaper/Resources/MenuBarIcon.pdf`, the menu-bar template: one page,
+  18×18 pt, the glyph 16 pt tall in black on transparent (the menu bar tints it). Its holes are a
+  quarter larger than in the screenshot so they survive at 2×; at 1× they blur but the shape reads.
+- `icon-colour.png`, the full-colour version (copper `#BB7545` on a `#F8F4EE` rounded tile). The
+  package has no place for it: the background is a plain SwiftPM executable running as an
+  accessory app, with no app bundle, `Info.plist` or `.icns`, so it's here for reference.
+- `icon-template.png`, the template at 512 px, and `icon-compare.png`: the screenshot, the glyph
+  traced over it, the colour glyph at the same scale, and the template.
+
+Swapping in a different icon is still one file: replace the PDF with another like it. If it's
+missing, the menu bar falls back to the SF Symbol `tree`.
+
+![the icon, compared with the screenshot](icon-compare.png)
+![the colour icon](icon-colour.png) ![the template](icon-template.png)
+
+**5. Ready for review.**
+- The lane layout is gone: `GraphLayout` and its tests, plus `GraphDerivation`, `Lineage` and the
+  topology fixtures only it used. `HistoryGraph` is now `RepoGraph`, holding only what the tree
+  reads (lanes became branches); each commit carries its committer date.
+- Dead and debug-only code removed: the `often` breeze, unused derivations (merge base, dirty
+  check, the trunk override), a per-window appearance and a few counters. Logging is one
+  `logEvent` function. `--quit-after` stays, as a test aid
+  (`scripts/run-wallpaper.sh --quit-after <seconds>`).
+- The README describes the background as built.
+
+Checks: `swift build` and `swift test` on the final commit, and a live run in a throwaway defaults
+suite against the throwaway repos `ash`, `elm` and `rowan` (screenshots above, the app's own windows
+only, on the 1440×900 display). Turning each setting on and off from the menu took effect at once and
+was saved to the suite; with both names off, *Sway in Gusts* greyed out as above. The icon showed
+in the menu bar as a template, in the bar's own tint.

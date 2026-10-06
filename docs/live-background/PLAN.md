@@ -1,5 +1,8 @@
 # Live background spike — plan
 
+> Kept as the record of the research and the first spike. The background has since moved on
+> (it draws trees, not a branch graph); `docs/yggdrasil/PLAN.md` describes what is built.
+
 Task (from Arbor): research how to turn Gitrasil's branch-graph work into a live macOS desktop
 background, write a design note, and prove the core with a spike. Report back to Arbor via
 SendMessage (`to: "Arbor"`).
