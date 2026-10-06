@@ -61,11 +61,12 @@ public struct YggdrasilLayout: Sendable {
             return TreeLayout.Node(point: p, width: width, heading: atan2(q.x - p.x, q.y - p.y))
         }
         trunk = TreeLayout.Stem(name: nil, level: 0, nodes: nodes, curve: nodes, commits: [], grown: 0,
-                                isBud: false, isCheckedOut: false, scale: 1)
+                                isBud: false, isCheckedOut: false, scale: 1, fork: nil)
 
         let crotch = nodes[count].point
         boughs = repos.enumerated().map { index, repo in
-            let planting = Self.planting(index: index, of: repos.count, name: repo.name, crotch: crotch)
+            var planting = Self.planting(index: index, of: repos.count, name: repo.name, crotch: crotch)
+            planting.fork = TreeLayout.Fork(parent: nil, node: count, width: nodes[count].width, heading: nodes[count].heading)
             return Bough(name: repo.name,
                          layout: TreeLayout(tree: repo.tree, seed: repo.name, grown: repo.grown, planting: planting),
                          planting: planting)

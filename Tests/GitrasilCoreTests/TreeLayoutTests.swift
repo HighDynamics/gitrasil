@@ -106,4 +106,39 @@ final class TreeLayoutTests: XCTestCase {
             XCTAssertLessThanOrEqual(abs(lean), 1)
         }
     }
+
+    func testEveryLimbKnowsTheWoodItGrowsFrom() {
+        let layout = TreeLayout(tree: tree(), seed: "ash")
+        XCTAssertNil(layout.stems[0].fork, "the trunk stands on the ground")
+        let low = stem(layout, "feature/low")!, sub = stem(layout, "feature/low-sub")!
+        XCTAssertEqual(low.fork?.parent, 0)
+        XCTAssertEqual(low.fork?.node, 8)
+        XCTAssertEqual(low.fork?.width, layout.stems[0].nodes[8].width)
+        XCTAssertEqual(sub.fork?.parent, layout.stems.firstIndex { $0.name == "feature/low" })
+        XCTAssertEqual(sub.fork?.node, 2)
+        XCTAssertEqual(sub.fork?.width, low.nodes[2].width)
+    }
+
+    func testACollarFlaresIntoItsParentAndEasesBackToItsOwnWidth() {
+        let own = 0.01, parent = 0.05, angle = 1.2
+        let exit = TreeLayout.collarExit(parentWidth: parent, angle: angle)
+        let widths = stride(from: 0.0, through: exit + own * 4, by: own / 8).map {
+            TreeLayout.collarWidth(at: $0, own: own, parentWidth: parent, angle: angle)
+        }
+        XCTAssertEqual(widths.first!, own * TreeLayout.collarFlare, accuracy: 1e-9, "flared at the fork")
+        XCTAssertEqual(widths.last!, own, accuracy: 1e-9, "its own width a few widths past the parent's edge")
+        XCTAssertEqual(widths, widths.sorted(by: >), "never swells again once it narrows")
+        // Concave like a fillet: it narrows fastest right at the parent's edge.
+        let past = widths.enumerated().filter { Double($0.offset) * own / 8 > exit }.map(\.element)
+        let drops = zip(past, past.dropFirst()).map { $0 - $1 }
+        XCTAssertEqual(drops, drops.sorted(by: >))
+    }
+
+    func testACollarNeverOutgrowsItsParent() {
+        let width = TreeLayout.collarWidth(at: 0, own: 0.04, parentWidth: 0.05, angle: 1.0)
+        XCTAssertLessThanOrEqual(width, 0.05)
+        XCTAssertGreaterThanOrEqual(width, 0.04)
+        XCTAssertEqual(TreeLayout.collarWidth(at: 0, own: 0.06, parentWidth: 0.05, angle: 1.0), 0.06,
+                       "a stem wider than its parent stays its own width")
+    }
 }

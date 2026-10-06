@@ -40,9 +40,30 @@ public struct TreeLayout: Sendable {
         public let isCheckedOut: Bool
         /// How large this stem's limbs are drawn relative to a low limb off the trunk.
         public let scale: Double
+        /// Where it grows out of other wood (nil for a trunk standing on the ground).
+        public let fork: Fork?
 
         public var isTrunk: Bool { level == 0 }
         public var tip: Node? { nodes.last }
+    }
+
+    /// Where a stem leaves its parent: what its base flares into (`collarWidth`).
+    public struct Fork: Sendable, Equatable {
+        /// The parent's index in `stems`; nil when the parent isn't in this layout (a bough's shared
+        /// trunk).
+        public let parent: Int?
+        /// The parent's node it leaves from.
+        public let node: Int
+        /// The parent's width and heading there.
+        public let width: Double
+        public let heading: Double
+
+        public init(parent: Int?, node: Int, width: Double, heading: Double) {
+            self.parent = parent
+            self.node = node
+            self.width = width
+            self.heading = heading
+        }
     }
 
     /// Where and how a tree stands. Upright at the origin on its own; as a bough of a single shared
@@ -55,11 +76,14 @@ public struct TreeLayout: Sendable {
         public var heading: Double
         /// Which side limbs off the trunk favour: -1 left, 1 right, 0 balanced.
         public var outward: Double
+        /// The wood the trunk grows out of (a shared trunk's top), for its foot's collar; nil on the ground.
+        public var fork: Fork?
 
-        public init(foot: CGPoint = .zero, heading: Double = 0, outward: Double = 0) {
+        public init(foot: CGPoint = .zero, heading: Double = 0, outward: Double = 0, fork: Fork? = nil) {
             self.foot = foot
             self.heading = heading
             self.outward = outward
+            self.fork = fork
         }
 
         public static let upright = Planting()
@@ -148,13 +172,14 @@ public struct TreeLayout: Sendable {
         let trunkName = tree.trunkName ?? ""
         stems.append(Stem(name: tree.trunkName, level: 0, nodes: trunkNodes, curve: trunkCurve, commits: tree.trunk,
                           grown: grown[trunkName] ?? Double(count), isBud: false,
-                          isCheckedOut: tree.isTrunkCheckedOut, scale: 1))
+                          isCheckedOut: tree.isTrunkCheckedOut, scale: 1, fork: planting.fork))
 
         // The limbs, each grown from its parent's node.
         var limbStems: [Stem?] = []
+        var stemIndex: [Int: Int] = [:]
         let sides = Self.sides(tree, outward: planting.outward)
         for (index, limb) in tree.limbs.enumerated() {
-            let base: Node, level: Int, scale: Double, lean: Double, parentGrown: Double
+            let base: Node, level: Int, scale: Double, lean: Double, parentGrown: Double, fork: Fork
             var rng = SeededRandom(limb.name)
             let side = sides[index]
             switch limb.parent {
@@ -167,6 +192,7 @@ public struct TreeLayout: Sendable {
                 lean = side * ((88 - 48 * u) + rng.next(in: -12...12)) * .pi / 180
                     + (planting.isUpright ? 0 : base.heading * 0.7)
                 parentGrown = .infinity
+                fork = Fork(parent: 0, node: min(node, trunkNodes.count - 1), width: base.width, heading: base.heading)
             case .limb(let parentIndex, let node):
                 guard let parent = limbStems[parentIndex], !parent.nodes.isEmpty else { limbStems.append(nil); continue }
                 base = parent.nodes[min(node, parent.nodes.count - 1)]
@@ -178,13 +204,16 @@ public struct TreeLayout: Sendable {
                 let childSide = pick.next() < 0.7 ? outward : -outward
                 lean = base.heading + childSide * rng.next(in: 28...50) * .pi / 180
                 parentGrown = parent.grown >= Double(node) ? .infinity : 0
+                fork = Fork(parent: stemIndex[parentIndex], node: min(node, parent.nodes.count - 1),
+                            width: base.width, heading: base.heading)
             }
             let full = Double(max(limb.commits.count, 1))
             let shown = min(full, grown[limb.name] ?? full, parentGrown)
             let (nodes, curve) = Self.grow(limb, from: base, lean: lean, scale: scale, shown: shown,
                                            weight: { k in Self.remainingWeight(limb, index: index, tree: tree, weights: weights, beyond: k) })
             let stem = Stem(name: limb.name, level: level, nodes: nodes, curve: curve, commits: limb.commits, grown: shown,
-                            isBud: limb.isBud, isCheckedOut: limb.isCheckedOut, scale: scale)
+                            isBud: limb.isBud, isCheckedOut: limb.isCheckedOut, scale: scale, fork: fork)
+            stemIndex[index] = stems.count
             limbStems.append(stem)
             stems.append(stem)
         }
@@ -308,6 +337,28 @@ public struct TreeLayout: Sendable {
         }
         return (nodes, curve)
     }
+
+    /// A branch collar: how wide a stem is drawn `distance` along it from its fork (tree units), where
+    /// its own width there is `own` and its parent's is `parentWidth`, leaving at `angle` (radians) off
+    /// the parent's heading. Inside the parent's wood it's as wide as the parent allows (up to
+    /// `collarFlare` times its own); from where it leaves the parent's edge it eases back to its own
+    /// width over `collarLength` of its own widths, concave like a fillet, so the outlines run into
+    /// each other instead of meeting at a corner.
+    public static func collarWidth(at distance: Double, own: Double, parentWidth: Double, angle: Double) -> Double {
+        let flared = max(own, min(parentWidth * 0.9, own * collarFlare))
+        let t = (distance - collarExit(parentWidth: parentWidth, angle: angle)) / (own * collarLength)
+        if t <= 0 { return flared }
+        if t >= 1 { return own }
+        return own + (flared - own) * pow(1 - t, 2.4)
+    }
+
+    /// How far along a stem leaving at `angle` it crosses its parent's edge.
+    public static func collarExit(parentWidth: Double, angle: Double) -> Double {
+        parentWidth / 2 / max(abs(sin(angle)), 0.35)
+    }
+
+    static let collarFlare = 2.0
+    static let collarLength = 2.4
 
     /// Sub-steps per commit step in a limb's curve.
     static let substeps = 4
