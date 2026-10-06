@@ -1,0 +1,202 @@
+import Foundation
+import Observation
+import GitrasilCore
+
+/// The whole background: one pane per repository the pins show (`PinnedRepositories.shown`, at most
+/// `maxPanes`), kept in step with them as pins and pinned folders change, and the settings for how
+/// they're shown (an orchard or a single tree, banners, gusts).
+@MainActor
+@Observable
+final class BackgroundModel {
+
+    /// The panes on screen, in pin order.
+    private(set) var panes: [WallpaperModel] = []
+
+    /// The clock commit ages are measured against. Ticks hourly so old commits keep fading on an
+    /// idle desktop; a graph change redraws with the current time anyway.
+    private(set) var now = Date()
+
+    /// More than this side by side gets too narrow to read.
+    static let maxPanes = 4
+
+    /// Trees growing in from nothing: when each pane's tree (or, in the single tree, its bough)
+    /// started, and when the single tree's shared trunk did. Empty when nothing is growing in.
+    private(set) var growIns: [URL: Date] = [:]
+    private(set) var trunkGrowIn: Date?
+
+    /// A tree, or a bough, grows in over this long; a shared trunk rises in `trunkDuration` first.
+    static let growInDuration: TimeInterval = 2.2
+    static let trunkDuration: TimeInterval = 0.8
+
+    let pins: PinnedRepositories
+    let settings: BackgroundSettings
+    /// Now and then a gust through the banners, while the background is on screen.
+    @ObservationIgnored let breeze = Breeze()
+
+    var isVisible = true {
+        didSet {
+            for pane in panes { pane.isVisible = isVisible }
+            breeze.isVisible = isVisible
+            if !isVisible { growIns = [:]; trunkGrowIn = nil }
+        }
+    }
+
+    private var clock: Timer?
+
+    init(pins: PinnedRepositories, settings: BackgroundSettings) {
+        self.pins = pins
+        self.settings = settings
+    }
+
+    func start() {
+        observePins()
+        observeSettings()
+        updateBreeze()
+        breeze.start()
+        reconcile()
+        clock = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.now = Date()
+                for pane in self?.panes ?? [] { pane.tick() }
+                // A pinned folder with more repositories than fit shows the most recently active.
+                self?.pins.refresh()
+            }
+        }
+    }
+
+    /// Re-arm Observation tracking on the shown repositories (one-shot, so re-armed on every change).
+    private func observePins() {
+        withObservationTracking {
+            _ = pins.shown
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.reconcile()
+                self.observePins()
+            }
+        }
+    }
+
+    /// Follow the settings (the view redraws on its own; it reads them): a new arrangement grows in
+    /// from the ground, and the breeze follows the banners and gusts.
+    private func observeSettings() {
+        let arrangement = settings.arrangement
+        let names = (settings.showsBranchNames, settings.showsRepoNames, settings.gusts)
+        withObservationTracking {
+            _ = (settings.arrangement, settings.showsBranchNames, settings.showsRepoNames, settings.gusts)
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                if self.settings.arrangement != arrangement {
+                    logEvent("arrangement: \(self.settings.arrangement.rawValue)")
+                    self.growInFromTheGround()
+                }
+                if (self.settings.showsBranchNames, self.settings.showsRepoNames, self.settings.gusts) != names {
+                    logEvent("branch names \(self.settings.showsBranchNames ? "shown" : "hidden"), "
+                             + "repository names \(self.settings.showsRepoNames ? "shown" : "hidden"), "
+                             + "gusts \(self.settings.gusts ? "on" : "off")")
+                }
+                self.updateBreeze()
+                self.observeSettings()
+            }
+        }
+    }
+
+    /// Gusts blow only while there are banners to sway and they're wanted.
+    private func updateBreeze() {
+        breeze.isEnabled = settings.gustsBlow
+    }
+
+    /// Match the panes to the repositories shown: keep the stores of repos still pinned, start new ones, stop
+    /// the rest.
+    private func reconcile() {
+        let wanted = pins.shown
+        var existing = Dictionary(panes.map { ($0.repoURL, $0) }, uniquingKeysWith: { a, _ in a })
+        let next = wanted.map { url in
+            existing.removeValue(forKey: url) ?? {
+                let pane = WallpaperModel(repoURL: url)
+                pane.isVisible = isVisible
+                pane.onFirstTree = { [weak self] in self?.treeArrived(url) }
+                Task { await pane.start() }
+                return pane
+            }()
+        }
+        for gone in existing.values { gone.stop() }
+        if next.map(\.repoURL) != panes.map(\.repoURL) {
+            panes = next
+            logEvent("panes: \(panes.map(\.repoName))")
+        }
+    }
+
+    // MARK: Growing in
+
+    /// How far along `url`'s tree (or bough) is in growing in at `date`, eased; nil when it isn't.
+    func growIn(_ url: URL, at date: Date) -> Double? {
+        growIns[url].map { TreeLayout.growIn(date.timeIntervalSince($0) / Self.growInDuration) }
+    }
+
+    /// How far the single tree's shared trunk has risen at `date`, eased; nil when it isn't rising.
+    func trunkGrowIn(at date: Date) -> Double? {
+        trunkGrowIn.map { TreeLayout.growIn(date.timeIntervalSince($0) / Self.trunkDuration) }
+    }
+
+    var isGrowingIn: Bool { !growIns.isEmpty || trunkGrowIn != nil }
+
+    /// Panes with a tree to draw.
+    private var ready: [WallpaperModel] { panes.filter { $0.tree != nil } }
+
+    /// Everything grows again from the ground, as when the arrangement changes: in the single tree,
+    /// the shared trunk rises first and the boughs follow from the crotch.
+    private func growInFromTheGround() {
+        guard isVisible else { return }
+        let now = Date()
+        if settings.arrangement == .singleTree, ready.count > 1 {
+            trunkGrowIn = now
+            let boughs = now.addingTimeInterval(Self.trunkDuration * 0.85)
+            for pane in ready { growIns[pane.repoURL] = boughs }
+        } else {
+            for pane in ready { growIns[pane.repoURL] = now }
+        }
+        finishGrowingIn()
+    }
+
+    /// A pane's first tree: just pinned, or just started. In the orchard it grows in on its own plot.
+    /// In the single tree every bough moves to make room for it, so they all grow again from the
+    /// crotch (from the ground, when it's the second and the single tree is only now forming).
+    private func treeArrived(_ url: URL) {
+        guard isVisible else { return }
+        let now = Date()
+        switch (settings.arrangement, ready.count) {
+        case (.singleTree, 2):
+            growInFromTheGround()
+            return
+        case (.singleTree, 3...):
+            // Boughs waiting on a rising trunk keep waiting.
+            for pane in ready { growIns[pane.repoURL] = max(growIns[pane.repoURL] ?? now, now) }
+        default:
+            growIns[url] = now
+        }
+        finishGrowingIn()
+    }
+
+    /// Once every grow-in has run, back to drawing only on change.
+    private func finishGrowingIn() {
+        let ends = growIns.values.map { $0.addingTimeInterval(Self.growInDuration) }
+            + [trunkGrowIn?.addingTimeInterval(Self.trunkDuration)].compactMap { $0 }
+        guard let last = ends.max() else { return }
+        Task {
+            try? await Task.sleep(for: .seconds(max(last.timeIntervalSinceNow, 0) + 0.05))
+            let now = Date()
+            growIns = growIns.filter { $0.value.addingTimeInterval(Self.growInDuration) > now }
+            if let trunk = trunkGrowIn, trunk.addingTimeInterval(Self.trunkDuration) <= now { trunkGrowIn = nil }
+        }
+    }
+
+}
+
+/// A line in the run log (stdout), stamped with the time.
+func logEvent(_ message: String) {
+    let stamp = Date().formatted(.dateTime.hour().minute().second())
+    print("[\(stamp)] \(message)")
+    fflush(stdout)
+}

@@ -19,11 +19,6 @@ public struct GitOutput: Sendable {
 
     /// stdout trimmed of surrounding whitespace/newlines — for single-value queries.
     public var trimmedStdout: String { (stdoutString ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
-
-    /// NUL-separated fields (from `-z` output), empty trailing field dropped.
-    public var nulFields: [String] {
-        (stdoutString ?? "").split(separator: "\0", omittingEmptySubsequences: true).map(String.init)
-    }
 }
 
 public enum GitError: Error, Sendable {
@@ -63,14 +58,33 @@ private final class DataBox: @unchecked Sendable {
 }
 
 public extension GitRunner {
-    /// Environment shared by the app's git runners, so the two stores can't drift:
-    /// - `GIT_EDITOR`/`GIT_SEQUENCE_EDITOR=true` never open an interactive editor (e.g. during
-    ///   `rebase --continue`); the user resolves conflicts in their own editor/terminal.
-    /// - `GIT_OPTIONAL_LOCKS=0` keeps our frequent reads truly read-only (see `WorktreeStore` for
-    ///   the FSEvents lock-loop this prevents).
+    /// Environment shared by the app's git runners:
+    /// - `GIT_EDITOR`/`GIT_SEQUENCE_EDITOR=true` never open an interactive editor.
+    /// - `GIT_OPTIONAL_LOCKS=0` keeps our frequent reads truly read-only, so a watcher on the git
+    ///   dir isn't woken by our own `git status` refreshing the index (an FSEvents lock-loop).
     static let appEnvironment: [String: String] = [
         "GIT_EDITOR": "true", "GIT_SEQUENCE_EDITOR": "true", "GIT_OPTIONAL_LOCKS": "0",
     ]
+
+    /// Inherited variables that point git at a repository other than the runner's working
+    /// directory — `git rev-parse --local-env-vars`, the set git itself clears when it enters a
+    /// submodule. A process launched from inside a git command (a terminal in an editor that
+    /// `git difftool` opened, a hook) inherits `GIT_DIR`/`GIT_WORK_TREE`, and git obeys them over the
+    /// cwd, so every runner would read that one repository.
+    static let repositoryEnvironment: Set<String> = [
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT",
+        "GIT_OBJECT_DIRECTORY", "GIT_DIR", "GIT_WORK_TREE", "GIT_IMPLICIT_WORK_TREE", "GIT_GRAFT_FILE",
+        "GIT_INDEX_FILE", "GIT_NO_REPLACE_OBJECTS", "GIT_REPLACE_REF_BASE", "GIT_PREFIX",
+        "GIT_SHALLOW_FILE", "GIT_COMMON_DIR",
+    ]
+
+    /// The environment a runner launches git with: the inherited one without the repository
+    /// selectors, then `extra` on top.
+    static func environment(inherited: [String: String], extra: [String: String]) -> [String: String] {
+        var environment = inherited.filter { !repositoryEnvironment.contains($0.key) }
+        for (key, value) in extra { environment[key] = value }
+        return environment
+    }
 }
 
 /// The real runner: launches `git` via `/usr/bin/env` so it honors the user's PATH,
@@ -95,9 +109,9 @@ public struct GitRunner: GitRunning {
             process.arguments = ["git"] + args
             process.currentDirectoryURL = workdir
 
-            var environment = ProcessInfo.processInfo.environment
-            for (key, value) in extraEnvironment { environment[key] = value }
-            process.environment = environment
+            // The workdir decides the repository, never an inherited GIT_DIR.
+            process.environment = GitRunner.environment(
+                inherited: ProcessInfo.processInfo.environment, extra: extraEnvironment)
 
             let outPipe = Pipe()
             let errPipe = Pipe()
