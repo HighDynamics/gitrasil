@@ -153,8 +153,10 @@ extension Landscape {
 // MARK: - Wind
 
 /// Now and then a gust: a few seconds in which the banners sway, then stillness. Only while it's
-/// turned on and cheap to show: never while the background is covered, the display is asleep, the
-/// Mac is on battery or in Low Power Mode. Between gusts nothing ticks.
+/// turned on and cheap to show: never while the background is covered, every display is asleep, or
+/// the Mac is on battery or in Low Power Mode. Between gusts only a one-shot timer waits, and in those
+/// states not even that: it's re-armed when the background shows, a display wakes or the power
+/// changes.
 @MainActor
 @Observable
 final class Breeze {
@@ -169,26 +171,46 @@ final class Breeze {
     /// Whether gusts blow (the menu's setting, while banners hang). Turning it off stills them
     /// at once.
     var isEnabled = false {
-        didSet {
-            guard isEnabled != oldValue else { return }
-            timer?.invalidate()
-            timer = nil
-            gustStart = nil
-            if isEnabled, !isTurnedOff { scheduleNext() }
-        }
+        didSet { if isEnabled != oldValue { update() } }
+    }
+
+    /// Whether the background is on screen at all. Covering it stills a gust at once.
+    var isVisible = true {
+        didSet { if isVisible != oldValue { update() } }
     }
 
     /// GITRASIL_BACKGROUND_BREEZE=off keeps the banners still, whatever the setting.
     let isTurnedOff: Bool
 
-    private let allowed: () -> Bool
-    private var timer: Timer?
-    private var count = 0
+    @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var count = 0
+    @ObservationIgnored private var observers: [(NotificationCenter, NSObjectProtocol)] = []
+    @ObservationIgnored private var power: PowerSourceWatcher?
 
-    /// - Parameter allowed: whether the background is on screen at all.
-    init(allowed: @escaping () -> Bool, environment: [String: String] = ProcessInfo.processInfo.environment) {
-        self.allowed = allowed
+    init(environment: [String: String] = ProcessInfo.processInfo.environment) {
         isTurnedOff = environment["GITRASIL_BACKGROUND_BREEZE"] == "off"
+    }
+
+    /// Starts listening for what decides whether gusts may blow: displays sleeping and waking, the
+    /// Mac waking, the power source and Low Power Mode.
+    func start() {
+        guard observers.isEmpty else { return }
+        let workspace = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.screensDidSleepNotification, NSWorkspace.screensDidWakeNotification,
+                     NSWorkspace.didWakeNotification] {
+            observers.append((workspace, workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.update() }
+            }))
+        }
+        observers.append((.default, NotificationCenter.default.addObserver(
+            forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.update() }
+        }))
+        power = PowerSourceWatcher { [weak self] in
+            MainActor.assumeIsolated { self?.update() }
+        }
+        update()
     }
 
     /// How hard it's blowing at `date`: rising and falling over the gust, 0 when still.
@@ -197,6 +219,23 @@ final class Breeze {
         let t = date.timeIntervalSince(gustStart) / Self.gustLength
         guard t > 0, t < 1 else { return 0 }
         return pow(sin(.pi * t), 2)
+    }
+
+    /// Whether gusts may blow now.
+    private var mayBlow: Bool {
+        isEnabled && !isTurnedOff && isVisible && Self.isCheapToAnimate()
+    }
+
+    /// Arms the timer for the next gust while gusts may blow; otherwise disarms it and stills a gust
+    /// in progress.
+    private func update() {
+        if mayBlow {
+            if timer == nil { scheduleNext() }
+        } else {
+            timer?.invalidate()
+            timer = nil
+            gustStart = nil
+        }
     }
 
     private func scheduleNext() {
@@ -210,8 +249,10 @@ final class Breeze {
     }
 
     private func gust() {
-        defer { scheduleNext() }
-        guard allowed(), Self.isCheapToAnimate() else { return }
+        timer = nil
+        // Missed notifications aside, the state is checked again here; the next gust is only
+        // scheduled while gusts may blow.
+        guard mayBlow else { return update() }
         let start = Date()
         gustStart = start
         logEvent("gust")
@@ -219,15 +260,39 @@ final class Breeze {
             try? await Task.sleep(for: .seconds(Self.gustLength))
             if gustStart == start { gustStart = nil }
         }
+        scheduleNext()
     }
 
-    /// Still unless the display is awake and the Mac is on mains power, out of Low Power Mode.
+    /// Still unless a display is awake and the Mac is on mains power, out of Low Power Mode.
     static func isCheapToAnimate() -> Bool {
         if ProcessInfo.processInfo.isLowPowerModeEnabled { return false }
-        if CGDisplayIsAsleep(CGMainDisplayID()) != 0 { return false }
+        var ids = [CGDirectDisplayID](repeating: 0, count: 16)
+        var found: UInt32 = 0
+        guard CGGetOnlineDisplayList(UInt32(ids.count), &ids, &found) == .success,
+              ids.prefix(Int(found)).contains(where: { CGDisplayIsAsleep($0) == 0 }) else { return false }
         let info = IOPSCopyPowerSourcesInfo().takeRetainedValue()
         let source = IOPSGetProvidingPowerSourceType(info).takeUnretainedValue() as String
         return source == kIOPMACPowerKey
+    }
+}
+
+/// Calls back on the main run loop when the power source changes (plugged in, on battery).
+private final class PowerSourceWatcher {
+    private let changed: () -> Void
+    private var source: CFRunLoopSource?
+
+    init(_ changed: @escaping () -> Void) {
+        self.changed = changed
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        source = IOPSNotificationCreateRunLoopSource({ context in
+            guard let context else { return }
+            Unmanaged<PowerSourceWatcher>.fromOpaque(context).takeUnretainedValue().changed()
+        }, context)?.takeRetainedValue()
+        if let source { CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode) }
+    }
+
+    deinit {
+        if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .defaultMode) }
     }
 }
 
