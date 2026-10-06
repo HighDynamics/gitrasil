@@ -52,7 +52,7 @@ derived values — no mocking of git.
 scripts/run-wallpaper.sh [--quit-after <seconds>]
 ```
 
-Pin repositories from the menu-bar item (the branch icon). The background grows the first four as an
+Pin repositories from the menu-bar item (the small tree). The background grows the first four as an
 orchard (a tree each) or, chosen under *Arrange As* in the same menu, as a single tree with a bough
 per repository, in a desktop-level window behind the icons on every display, and redraws as they change. Pins and the arrangement are saved between launches in the `com.gitrasil.background` defaults
 (`GITRASIL_BACKGROUND_DEFAULTS_SUITE` names another suite, e.g. for a test run).

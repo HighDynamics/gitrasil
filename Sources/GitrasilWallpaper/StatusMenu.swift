@@ -16,8 +16,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         self.arrangement = arrangement
         self.item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
-        item.button?.image = NSImage(systemSymbolName: "arrow.triangle.branch",
-                                     accessibilityDescription: "Gitrasil Background")
+        item.button?.image = MenuBarIcon.image()
         item.button?.toolTip = "Gitrasil Background"
         let menu = NSMenu()
         menu.delegate = self
