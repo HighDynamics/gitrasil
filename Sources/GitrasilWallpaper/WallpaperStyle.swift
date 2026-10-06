@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import GitrasilCore
 
@@ -53,6 +54,8 @@ struct WallpaperStyle {
 
     /// Branch names at the tips, at a given point size (scaled with the tree).
     var labelFont: (CGFloat) -> Font
+    /// The same face for measuring a name before it's drawn (to size its banner).
+    var labelMetricsFont: (CGFloat) -> NSFont
     var labelSize: CGFloat
     var captionFont: Font
     /// The repository's name under its tree.
@@ -107,6 +110,7 @@ extension WallpaperStyle {
             fadeHalfLife: 14,
             fadeFloor: 0.22,
             labelFont: { .custom("Bradley Hand", size: $0) },
+            labelMetricsFont: { NSFont(name: "Bradley Hand", size: $0) ?? .systemFont(ofSize: $0) },
             labelSize: 15,
             captionFont: .custom("Baskerville", size: 12).italic(),
             plateFont: .custom("Snell Roundhand", size: 34),
@@ -135,6 +139,7 @@ extension WallpaperStyle {
         fadeHalfLife: 0,
         fadeFloor: 1,
         labelFont: { .system(size: $0, weight: .semibold, design: .rounded) },
+        labelMetricsFont: { .systemFont(ofSize: $0, weight: .semibold) },
         labelSize: 12,
         captionFont: .system(size: 12, weight: .light),
         plateFont: .system(size: 40, weight: .ultraLight, design: .rounded),

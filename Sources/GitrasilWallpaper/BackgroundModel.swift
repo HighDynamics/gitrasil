@@ -29,6 +29,8 @@ final class BackgroundModel {
 
     let pins: PinnedRepositories
     let arrangement: ArrangementSetting
+    /// Now and then a gust through the banners, while the background is on screen.
+    @ObservationIgnored private(set) lazy var breeze = Breeze { [weak self] in self?.isVisible ?? false }
 
     var isVisible = true {
         didSet {
@@ -48,6 +50,7 @@ final class BackgroundModel {
         observePins()
         observeArrangement()
         reconcile()
+        breeze.start()
         clock = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.now = Date() }
         }
