@@ -50,8 +50,7 @@ scripts/run-wallpaper.sh [--quit-after <seconds>]
 ```
 
 Pin repositories from the menu-bar item (the branch icon). The background draws the first four side
-by side, in a desktop-level window behind the icons on the primary display, and redraws as they
-change. Pins are saved between launches in the `com.gitrasil.background` defaults
+by side, in a desktop-level window behind the icons on every display, and redraws as they change. Pins are saved between launches in the `com.gitrasil.background` defaults
 (`GITRASIL_BACKGROUND_DEFAULTS_SUITE` names another suite, e.g. for a test run).
 `GITRASIL_BACKGROUND_APPEARANCE=light|dark` previews a mode without changing the system's. Ctrl-C or
 the menu's Quit removes it; nothing is installed and the system wallpaper is never changed.

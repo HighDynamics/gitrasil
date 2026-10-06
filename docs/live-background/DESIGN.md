@@ -315,7 +315,8 @@ Known gaps in the spike:
   - Thin pen lines that wander slightly. The wander is seeded from position, so a redraw draws the
     same line.
   - Warm paper with faint fibres, which turns to charcoal in dark mode.
-  - The trunk is in plain ink, and each branch has its own ink, distinct within a repo.
+  - The trunk is in plain ink, and each branch has its own ink. (Round 3 changed this from
+    distinct within a repo to one ink per branch name everywhere; see below.)
   - Commits fade with age, halving every 14 days down to a floor.
   - Branch names are in a hand (Bradley Hand), subjects in Baskerville italic, and the repo name is
     a Snell Roundhand watermark.
@@ -353,17 +354,48 @@ Results:
 Not covered:
 - **Menu.** It hasn't been click-tested (no UI automation here). Adding, removing and saving pins
   are covered by unit tests, and the panes follow `pins.urls`.
-- **Displays.** The background covers the main display only.
+- **Displays.** The background covered the main display only (fixed in round 3).
 - **Occlusion.** The pause is unit-tested in the store but wasn't observed with a real full-screen
   app.
-- **Ink colours.** With more than 8 branches in one repo, inks repeat. Across repos the same branch
-  name can get a different ink, because inks are assigned per pane.
+
+## Round 3
+
+### The pinning bug: an inherited `GIT_DIR`
+
+Daniel pinned a repo in `~/repos` and saw `gitrasil-sandbox`. A second pin was then refused as
+"already pinned, as /Users/danieldenton/gitrasil-sandbox".
+
+- **Cause.** Daniel's running background had inherited `GIT_DIR=~/gitrasil-sandbox/.git` and
+  `GIT_WORK_TREE=~/gitrasil-sandbox`, along with `GIT_EXTERNAL_DIFF=git-difftool--helper`,
+  `GIT_PREFIX` and `GIT_DIFF_PATH_COUNTER`. That's the environment `git difftool` gives the tool it
+  launches.
+- **Where they came from.** The variables sit in the VS Code app process itself (running since
+  2026-09-13), so VS Code was first launched *by* `git difftool` in the sandbox, with `code` as the
+  diff tool. Every integrated terminal it has opened since inherits them. git obeys
+  `GIT_DIR`/`GIT_WORK_TREE` over the working directory, so every git call resolved to the sandbox.
+  It wasn't the shell profile, git config, launchd or `run-wallpaper.sh`.
+- **Fix on the machine (not applied).** Quit VS Code completely (⌘Q) and reopen it from the Dock or
+  Spotlight. Or run `unset GIT_DIR GIT_WORK_TREE GIT_PREFIX GIT_EXTERNAL_DIFF` in a terminal before
+  launching. Until then, *any* git command in those terminals acts on the sandbox. Remove the stray
+  `gitrasil-sandbox` pin from the menu.
+- **Fix in the app.** `GitRunner` now drops git's repository-selecting variables
+  (`git rev-parse --local-env-vars`) before every git launch, so the working directory always
+  decides. A regression test sets `GIT_DIR`/`GIT_WORK_TREE` to another repo and pins two repos.
+
+### Displays and inks
+
+- **Displays.** Every display gets its own window (`DesktopWindows`), all showing the same pins.
+  Windows follow displays being added, removed or resized, and the stores pause only when every
+  window is covered. Verified on two displays (built-in and a 3440×1440 external). Hot-plugging
+  wasn't exercised.
+- **Inks.** A branch's ink now comes from a stable hash of its name alone, so the same name has the
+  same ink in every repo, and the trunk stays plain ink. The trade-off: with 8 inks, two branches in
+  one repo can share one (in the test repos, `exp/ripple` and `spike/pulse` did).
 
 ## Open questions for Daniel
 
 - Is it OK to also set a still image as the real wallpaper, for Mission Control and the lock
-  screen? That one changes his wallpaper setting.
+  screen? That one changes his wallpaper setting. (Later.)
 - Should it launch at login (`SMAppService`) once it's real? That also needs a bundled `.app`.
-- Should every display get a window (one per `NSScreen`), and should each show the same pins?
-- Should the worktree-relative `historyGraph` and the layout cases only it uses go too? Dropping
-  them means reworking `GraphLayout` and its tests.
+  (Later.)
+- Should the worktree-relative `historyGraph` and the layout cases only it uses go too? (Later.)
