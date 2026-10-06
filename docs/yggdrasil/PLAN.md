@@ -245,3 +245,67 @@ looks like clip art slapped on top of the trunk."
   changes, hourly, and when the menu opens. The menu shows "4 of 9 shown".
 - Saved as a list of `{kind, path}` (`pins`), with the old `pinnedRepositories` list still written
   for the repository pins, so an older build reads them.
+
+### Round 3: what was built
+
+**1. Banners** (`BannerLayout`, `Banners.swift`). As planned. Each pennant hangs from its upper
+inner corner on a thread up to 175 pt long. Where a crown is crowded (24 names on a 1440-wide
+screen) a few names deep inside it still land partly on leaves, but never on another banner.
+Bough names in the single tree are placed in the same plan, so banners keep off them.
+- Sway: a gust about every 45 s (jittered by a third), 7 s long, ≤12 fps. Each pennant swings a
+  couple of degrees about its hook, its free end lifted a little. The tree canvas isn't redrawn.
+- Measured on AC power with two displays (1440×900 and 3440×1440), `top` once a second:
+  - Between gusts: 0.0%. No timer ticks; only a one-shot timer waits for the next gust.
+  - During a gust: 8–13% of one core, in debug and release alike.
+  - Averaged over the 45 s cycle: about 2%.
+  - A profile puts the cost in Core Animation's commit of the turned layers, not in our code or the
+    canvas. Dropping `drawingGroup` changed nothing, so it was dropped.
+- No gust while the background is covered, the main display is asleep, on battery, or in Low
+  Power Mode.
+- `GITRASIL_BACKGROUND_BREEZE=off` keeps the banners still.
+
+![banners, light](banners-light.jpg) ![banners, dark](banners-dark.jpg)
+![orchard, wide](banners-orchard-wide-light.jpg)
+
+**2. Growing in.** Timing: 2.2 s per tree or bough. In the single tree the shared trunk rises over
+0.8 s and the boughs start just before it finishes.
+- A pane's first tree at launch grows in too.
+- In the single tree a new pin regrows every bough from the crotch, since they all move.
+- Banners stay hidden until their wood has grown, then fade in over 0.7 s.
+
+![growing in](grow-in.jpg)
+
+**3. The icon.** Not found. I searched:
+- the repository (every branch, all history, no stashes);
+- `~/Downloads/gitrasil` (screenshots of the old worktree GUI and briefs);
+- the gitrasil, canopy and arbor session transcripts;
+- the Obsidian arbor notes;
+- Spotlight (`mdfind -name gitrasil`) and a `find` of `~/repos`, `~/Desktop`, `~/Documents`,
+  `~/Pictures` and `~/Downloads`;
+- the claude.ai artifacts.
+
+`MenuBarIcon` draws a placeholder template glyph: a leafy crown with branches cut through it, on a
+trunk flaring into roots. Swap it for the real icon when that turns up.
+
+**4. Branch collars.** As planned. The wood is one layer, so there's no seam or second tone where
+wood meets wood:
+- every stem with a fork gets a round foot, so no cut end shows;
+- bark streaks start past the collar;
+- a faint paper-coloured crease marks each crotch;
+- a limb's ink ramp starts from its parent's tone.
+
+![collar, light](collar-light.jpg) ![collar, dark](collar-dark.jpg)
+
+**5. Pins.** As planned, in two commits: folder pins, then the checklist.
+- Overflow: pins expand in order to four panes. A folder with more repositories than slots left
+  shows its most recently active (by `.git/logs/HEAD`), in name order. The menu shows "4 of 5
+  shown" and lists the folder's repositories, ticked where shown.
+- A repository pinned on its own isn't shown twice when its folder is pinned too.
+- Worked live:
+  - a repository cloned into the pinned folder appeared in under a second, and deleting it brought
+    the previous one back;
+  - two pins unticked in one visit came off at once;
+  - ticking them again in the other order put them back in their places.
+
+![folder pin, light](folder-pin-light.jpg) ![folder pin, dark](folder-pin-dark.jpg)
+![the menu](folder-pin-menu.jpg)
