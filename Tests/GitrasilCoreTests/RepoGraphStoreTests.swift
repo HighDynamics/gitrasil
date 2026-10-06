@@ -104,7 +104,10 @@ final class RepoGraphStoreTests: XCTestCase {
 
     func testRefPathFilter() {
         for path in ["/r/.git/HEAD", "/r/.git/HEAD.lock", "/r/.git/packed-refs", "/r/.git/refs/heads/main",
-                     "/r/.git/refs/heads/feature/a.lock", "/r/.git/worktrees/wt/HEAD"] {
+                     "/r/.git/refs/heads/feature/a.lock", "/r/.git/worktrees/wt/HEAD",
+                     "/r/.git/reftable/tables.list", "/r/.git/reftable/tables.list.lock",
+                     "/r/.git/reftable/0x000000000001-0x000000000002-1a2b3c4d.ref",
+                     "/r/.git/worktrees/wt/reftable/tables.list"] {
             XCTAssertTrue(RepoGraphStore.isRefPath(path), path)
         }
         for path in ["/r/.git/index", "/r/.git/index.lock", "/r/.git/objects/ab/cdef", "/r/.git/FETCH_HEAD",
@@ -153,6 +156,24 @@ final class RepoGraphStoreTests: XCTestCase {
         await store.tick()
         XCTAssertEqual(store.deriveCount, 2)
         XCTAssertEqual(store.graph?.branches.map(\.name), [], "the branch aged out without a ref moving")
+    }
+
+    func testAReftableRepositoryIsWatched() async throws {
+        let repo = try FixtureRepo()
+        do {
+            try await repo.git(["init", "-q", "-b", "main", "--ref-format=reftable"])
+        } catch {
+            throw XCTSkip("this git has no reftable backend")
+        }
+        try await repo.commitFile("root.txt", "0", message: "root")
+        let store = RepoGraphStore(repositoryURL: repo.url, options: options, settle: .milliseconds(200))
+        defer { store.stop() }
+        await store.start()
+        XCTAssertEqual(store.graph?.trunk.first?.subject, "root")
+
+        try await repo.commitFile("m1.txt", "1", message: "m1")
+        let derived = await waitFor(5) { store.graph?.trunk.first?.subject == "m1" }
+        XCTAssertTrue(derived, "a commit in a reftable repository is picked up")
     }
 }
 

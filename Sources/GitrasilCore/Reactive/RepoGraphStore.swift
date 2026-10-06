@@ -131,14 +131,15 @@ public final class RepoGraphStore {
     }
 
     /// Whether a changed path inside a git dir can affect the graph: refs, packed refs, and HEADs
-    /// (the repository's and each linked worktree's). Index, objects, `FETCH_HEAD` and friends can't.
+    /// (the repository's and each linked worktree's), and the reftable backend's tables
+    /// (`reftable/…`). Index, objects, `FETCH_HEAD` and friends can't.
     /// A `.lock` file counts as its target, since git writes refs through one. Reflogs (`logs/…`)
     /// don't: they're written alongside the ref itself. A false positive only costs a fingerprint
     /// check; a false negative misses a change, so the tests lean on suffixes, not the whole path.
     public nonisolated static func isRefPath(_ path: String) -> Bool {
         let p = path.hasSuffix(".lock") ? String(path.dropLast(".lock".count)) : path
         if p.hasSuffix("/logs/HEAD") || p.contains("/logs/refs/") { return false }
-        return p.hasSuffix("/HEAD") || p.hasSuffix("/packed-refs") || p.contains("/refs/")
+        return p.hasSuffix("/HEAD") || p.hasSuffix("/packed-refs") || p.contains("/refs/") || p.contains("/reftable/")
     }
 
     private func installWatcher() async {
