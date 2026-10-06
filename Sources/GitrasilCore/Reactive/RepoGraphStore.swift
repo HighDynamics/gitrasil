@@ -29,10 +29,13 @@ public final class RepoGraphStore {
     /// How many full derives have run (the fingerprint gate skips the rest). For tests and logging.
     public private(set) var deriveCount = 0
 
-    /// While true, ref changes are noted but not derived; clearing it runs one catch-up refresh.
+    /// While true, ref changes are noted but not derived; clearing it runs one catch-up refresh, and
+    /// starts watching if a tick found the repository while paused.
     public var isPaused = false {
         didSet {
-            guard oldValue != isPaused, !isPaused, missedChange else { return }
+            guard oldValue != isPaused, !isPaused else { return }
+            if watcher == nil { Task { await installWatcher() } }
+            guard missedChange else { return }
             missedChange = false
             refsChanged()
         }

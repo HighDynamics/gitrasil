@@ -154,6 +154,27 @@ final class RepoGraphStoreTests: XCTestCase {
         XCTAssertTrue(derived, "a commit after the tick is picked up")
     }
 
+    func testAMissingRepositoryFoundWhilePausedIsWatchedOnResume() async throws {
+        let parent = try FixtureRepo()
+        let store = RepoGraphStore(repositoryURL: parent.url.appendingPathComponent("later"), options: options,
+                                   settle: .milliseconds(200))
+        defer { store.stop() }
+        await store.start()
+        store.isPaused = true
+
+        try await parent.git(["init", "-q", "-b", "main", "later"])
+        try await parent.git(["-C", "later", "commit", "-q", "--allow-empty", "-m", "root"])
+        await store.tick()
+        XCTAssertNil(store.graph, "nothing derives while paused")
+
+        store.isPaused = false
+        let caughtUp = await waitFor(5) { store.graph?.trunk.first?.subject == "root" && store.isWatching }
+        XCTAssertTrue(caughtUp, "resuming derives and starts watching")
+        try await parent.git(["-C", "later", "commit", "-q", "--allow-empty", "-m", "m1"])
+        let derived = await waitFor(5) { store.graph?.trunk.first?.subject == "m1" }
+        XCTAssertTrue(derived, "a commit after the resume is picked up before the next tick")
+    }
+
     func testATickInFlightWhenStoppedWatchesNothing() async throws {
         let parent = try FixtureRepo()
         let store = RepoGraphStore(repositoryURL: parent.url.appendingPathComponent("later"), options: options)
