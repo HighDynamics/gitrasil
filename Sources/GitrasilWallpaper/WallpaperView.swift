@@ -329,6 +329,9 @@ private struct TreeDrawing {
         guard let base = samples.first, let tip = samples.last else { return }
         let shape = taper(samples)
         let alpha = 0.55 + 0.4 * max(vigour(tipCommit(stem)), stem.isTrunk ? 1 : 0)
+        // Paper under the ink first, so where wood overlaps wood (a limb's base on its parent, a
+        // bough on the trunk) it keeps one tone instead of showing a darker seam.
+        context.fill(shape, with: .color(style.paper[1]))
         if stem.isTrunk {
             // A shared trunk's top and a bough's foot are rounded off, so the boughs grow out of the
             // trunk rather than butting onto it.
