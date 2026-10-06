@@ -178,3 +178,70 @@ branches, `elm` 50 and 5, the sapling `rowan` 9 and 3):
 - `orchard-wide-light.jpg`, `single-tree-wide-light.jpg`: both on the 3440×1440 display.
 
 Idle after a growth was 0.0% CPU, as before.
+
+## Round 3: banners, growing in, the icon, branch collars, pins
+
+Daniel tried round 2 by hand. Five things, each its own commit.
+
+**1. Names on hanging banners.** "The branch/worktree names are often obscured by the tree itself.
+Can those be banners that 'hang off', and/or 'blow in the wind'?"
+
+- Each name is written on a small paper pennant (a swallowtail flag, outlined in its branch's ink,
+  the name in the hand font and that ink), tied to its tip by a thin thread that runs outward, away
+  from the crown.
+- Placement is a pure, tested step in Core (`BannerLayout`): for each tip, in priority order (trunk,
+  checked-out branches, then most recent), try hooks outward at a few distances and angles; take the
+  first spot whose banner and thread overlap no other banner and none of the crown (wood and leaf
+  clusters, given as obstacles), else the spot that overlaps the crown least. A name with no spot
+  clear of every other banner is left out, as before. Banners never overlap each other.
+- Sway: each pennant swings a degree or two about its hook. It runs as small separate views (only
+  their rotation changes, the tree canvas isn't redrawn), in gusts — a few seconds of breeze now
+  and then, at ≤12 fps — and not at all while the windows are covered, the display is asleep, the
+  Mac is on battery or in Low Power Mode. Measured idle CPU decides whether it stays on; if it can't
+  be near zero it ships still.
+
+**2. Growing in on a new view and a new pin.** "I'd love to see the tree grow anytime I change the
+view (orchard vs single) or when I pin a new repo."
+
+- `TreeLayout` gains a grow-in progress (0…1): the trunk rises from its foot, each limb starts when
+  the trunk (or its parent limb) reaches its fork and finishes by the end, leaves unfurl as their node
+  is reached. `YggdrasilLayout` grows the shared trunk first, then the boughs from the crotch.
+- Switching arrangement grows everything from the ground. A new pin grows its own tree in the
+  orchard; in the single tree the boughs regrow from the shared trunk (they all move to make room).
+  A pane's first tree at launch grows in too.
+- 2.4 s, eased, ≤30 fps in the existing TimelineView, then back to drawing only on change. Banners
+  are hidden while their stem grows and fade in after. The grow-in for new commits is unchanged.
+
+**3. The menu-bar icon.** Search every branch, stash, `~/Downloads/gitrasil`, the old transcripts
+and Spotlight for the Gitrasil icon. If it's found, use it as a template image; if not, draw a small
+tree glyph as a placeholder (template, so it follows the menu bar) and say where we looked.
+
+**4. Branch collars.** "Can the connected branches look more integrated into the trunk? Right now it
+looks like clip art slapped on top of the trunk."
+
+- A limb's base flares into its parent like a branch collar: wider at the fork (up to its parent's
+  width), easing to its own width over a couple of widths (`TreeLayout.collarWidth`, tested).
+  Boughs flare the same way into the shared trunk.
+- A tree's wood (trunk, limbs, collars, roots) is filled as one shape, so outlines merge and there's
+  no seam or double tone where wood meets wood. Bark streaks are drawn over the whole shape, so the
+  trunk's streaks carry past a join and a limb's emerge from its collar, with a small bark ridge in
+  the crotch. A limb's shading into its branch ink starts from its parent's tone at the fork.
+
+**5. Pins: remove several, pin a folder.**
+
+- The pins become a checklist in the menu (rows as menu-item views): unticking a repository unpins
+  it at once and the menu stays open; it stays listed, unticked, until the menu closes, so ticking it
+  again restores it in place. Each row keeps a small reveal-in-Finder button. Why: it's the macOS
+  idiom for toggling several things in one visit (like a menu of columns), there's no extra window,
+  and the background updates behind the open menu so you see the effect.
+- Pinning a folder that isn't a repository but holds repositories (one level down, or two through a
+  plain subfolder) makes a *folder pin*. It expands to the repositories in it and picks up ones added
+  or removed later (watching the folder and its plain subfolders, not the repositories' contents).
+  Linked worktrees of a repository already in the folder are skipped.
+- The pane limit (4) stays. Pins expand in order; a folder takes as many of the remaining slots as
+  it has repositories. When it has more than fit, it shows the **most recently active** ones (by the
+  time of their last commit or checkout, from `.git/logs/HEAD`, no git process), placed in name
+  order so a commit elsewhere doesn't shuffle the plots. The ranking is refreshed when the folder
+  changes, hourly, and when the menu opens. The menu shows "4 of 9 shown".
+- Saved as a list of `{kind, path}` (`pins`), with the old `pinnedRepositories` list still written
+  for the repository pins, so an older build reads them.
