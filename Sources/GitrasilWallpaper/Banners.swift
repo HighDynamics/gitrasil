@@ -14,7 +14,7 @@ struct BannerPlan {
 
     struct Hanging: Equatable, Identifiable {
         let banner: BannerLayout.Banner
-        /// The repository and the stem (`RepoTree.commitCounts` key) it names.
+        /// The repository (its pane's id) and the stem (`RepoTree.commitCounts` key) it names.
         let pane: String
         let stem: String
         let name: String
@@ -28,8 +28,9 @@ struct BannerPlan {
     /// A repository's ribbon, in the single tree.
     struct Ribbon: Equatable, Identifiable {
         let ribbon: BannerLayout.Ribbon
-        /// The repository it names.
+        /// The repository it names: its pane's id, and the name written on it.
         let pane: String
+        let name: String
         let fontSize: CGFloat
 
         var id: String { ribbon.id }
@@ -45,25 +46,27 @@ extension Landscape {
     /// pennants and, in the single tree, the repositories' ribbons, each only if shown.
     func plan(_ panes: [Pane], arrangement: Arrangement, branchNames: Bool, repoNames: Bool) -> BannerPlan {
         var plan = BannerPlan()
+        // Each tree by its pane's id.
         var trees: [(pane: String, stems: [TreeLayout.Stem], frame: TreeFrame)] = []
         var obstacles: [CGRect] = []
         var taken: [CGRect] = []
         if isSingleTree(panes, arrangement: arrangement) {
-            let (full, frame) = singleTree(panes.filter { $0.tree != nil })
+            let ready = panes.filter { $0.tree != nil }
+            let (full, frame) = singleTree(ready)
             obstacles += crown([full.trunk], frame: frame)
-            for bough in full.boughs {
-                trees.append((bough.name, bough.layout.stems, frame))
+            for (pane, bough) in zip(ready, full.boughs) {
+                trees.append((pane.id, bough.layout.stems, frame))
                 obstacles += crown(bough.layout.stems, frame: frame)
             }
             // The repositories' ribbons first, so they hang in the same places whether or not the
             // branches' pennants are shown; the pennants keep off them.
             if repoNames {
-                plan.ribbons = ribbons(full.boughs, frame: frame, obstacles: obstacles)
+                plan.ribbons = ribbons(Array(zip(ready, full.boughs)), frame: frame, obstacles: obstacles)
                 taken = plan.ribbons.map(\.ribbon.footprint)
             }
         } else {
             for planted in orchard(panes) {
-                trees.append((panes[planted.index].name, planted.full.stems, planted.frame))
+                trees.append((panes[planted.index].id, planted.full.stems, planted.frame))
                 obstacles += crown(planted.full.stems, frame: planted.frame)
             }
         }
@@ -129,23 +132,24 @@ extension Landscape {
 
     /// Each repository's ribbon, hung from the underside of its bough's first stretch, where it's
     /// still near the shared trunk.
-    private func ribbons(_ boughs: [YggdrasilLayout.Bough], frame: TreeFrame, obstacles: [CGRect]) -> [BannerPlan.Ribbon] {
+    private func ribbons(_ boughs: [(pane: Pane, bough: YggdrasilLayout.Bough)], frame: TreeFrame,
+                         obstacles: [CGRect]) -> [BannerPlan.Ribbon] {
         let fontSize = max(18, (style.ribbonSize * frame.detail).rounded())
         var requests: [BannerLayout.RibbonRequest] = []
-        var names: [String: String] = [:]
-        for bough in boughs {
+        var panes: [String: Pane] = [:]
+        for (pane, bough) in boughs {
             guard let stem = bough.layout.stems.first, stem.curve.count > 2 else { continue }
             let anchors = [0.14, 0.2, 0.26, 0.32, 0.4, 0.48, 0.56].map { fraction -> CGPoint in
                 let node = stem.curve[Int(Double(stem.curve.count - 1) * fraction)]
                 let point = frame.point(node.point)
                 return CGPoint(x: point.x, y: point.y + node.width * frame.scale / 2)
             }
-            let id = "ribbon\u{1F}\(bough.name)"
-            names[id] = bough.name
-            requests.append(.init(id: id, anchors: anchors, size: RibbonShape.size(bough.name, fontSize: fontSize, style: style)))
+            let id = "ribbon\u{1F}\(pane.id)"
+            panes[id] = pane
+            requests.append(.init(id: id, anchors: anchors, size: RibbonShape.size(pane.name, fontSize: fontSize, style: style)))
         }
-        return BannerLayout.hang(requests, obstacles: obstacles, bounds: bounds).map { ribbon in
-            BannerPlan.Ribbon(ribbon: ribbon, pane: names[ribbon.id] ?? "", fontSize: fontSize)
+        return BannerLayout.hang(requests, obstacles: obstacles, bounds: bounds).compactMap { ribbon in
+            panes[ribbon.id].map { BannerPlan.Ribbon(ribbon: ribbon, pane: $0.id, name: $0.name, fontSize: fontSize) }
         }
     }
 }
@@ -365,7 +369,7 @@ private struct RibbonView: View {
                         y: end.y - box.minY + RibbonShape.top(at: end.x - hung.rect.minX, size: hung.rect.size))
             })
                 .stroke(style.ink.opacity(0.55), style: StrokeStyle(lineWidth: 0.9, lineCap: .round, lineJoin: .round))
-            RibbonShape(name: ribbon.pane, fontSize: ribbon.fontSize, style: style)
+            RibbonShape(name: ribbon.name, fontSize: ribbon.fontSize, style: style)
                 .equatable()
                 .frame(width: hung.rect.width, height: hung.rect.height)
                 .offset(x: hung.rect.minX - box.minX, y: hung.rect.minY - box.minY)

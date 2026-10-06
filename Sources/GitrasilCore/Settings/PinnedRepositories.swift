@@ -225,6 +225,17 @@ public final class PinnedRepositories {
         return shown
     }
 
+    /// What each shown repository's tree is seeded from, so it keeps its shape between launches: its
+    /// folder's name. When an earlier repository already has that name (two `app` folders), the later
+    /// one's seed adds its path, so the two grow differently and the earlier keeps its shape.
+    public nonisolated static func seeds(_ shown: [URL]) -> [String] {
+        var taken = Set<String>()
+        return shown.map { url in
+            let name = url.lastPathComponent
+            return taken.insert(name).inserted ? name : "\(name)\u{1F}\(url.standardizedFileURL.path)"
+        }
+    }
+
     // MARK: Looking in folders (no git process: this runs on every change to a folder)
 
     /// The repositories in `folder`, one level down or two through a plain subfolder, in name order.

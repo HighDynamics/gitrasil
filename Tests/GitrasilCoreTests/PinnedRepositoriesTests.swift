@@ -224,4 +224,15 @@ final class PinnedRepositoriesTests: XCTestCase {
         XCTAssertEqual(PinnedRepositories.appSuiteName(
             environment: [PinnedRepositories.suiteOverrideVariable: "scratch"]), "scratch")
     }
+
+    func testSeedsAreTheNameUnlessAnEarlierRepositoryHasIt() {
+        let seeds = PinnedRepositories.seeds([URL(fileURLWithPath: "/work/app"), URL(fileURLWithPath: "/work/lib"),
+                                              URL(fileURLWithPath: "/home/app"), URL(fileURLWithPath: "/old/app")])
+        XCTAssertEqual(seeds[0], "app", "the first keeps its name, so its tree keeps its shape")
+        XCTAssertEqual(seeds[1], "lib")
+        XCTAssertEqual(Set(seeds).count, 4, "two folders with one name grow differently")
+        XCTAssertTrue(seeds[2].hasSuffix("/home/app"))
+        XCTAssertEqual(PinnedRepositories.seeds([URL(fileURLWithPath: "/home/app")]), ["app"],
+                       "once alone again, a repository's seed is its name")
+    }
 }
