@@ -3,7 +3,7 @@ import Observation
 import GitrasilCore
 
 /// The whole background: one pane per pinned repository (the first `maxPanes`), kept in step with
-/// the pins as they're added and removed.
+/// the pins as they're added and removed, and how to arrange them (an orchard or a single tree).
 @MainActor
 @Observable
 final class BackgroundModel {
@@ -19,6 +19,7 @@ final class BackgroundModel {
     static let maxPanes = 4
 
     let pins: PinnedRepositories
+    let arrangement: ArrangementSetting
 
     var isVisible = true {
         didSet { for pane in panes { pane.isVisible = isVisible } }
@@ -26,12 +27,14 @@ final class BackgroundModel {
 
     private var clock: Timer?
 
-    init(pins: PinnedRepositories) {
+    init(pins: PinnedRepositories, arrangement: ArrangementSetting) {
         self.pins = pins
+        self.arrangement = arrangement
     }
 
     func start() {
         observePins()
+        observeArrangement()
         reconcile()
         clock = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.now = Date() }
@@ -47,6 +50,19 @@ final class BackgroundModel {
                 guard let self else { return }
                 self.reconcile()
                 self.observePins()
+            }
+        }
+    }
+
+    /// Log each switch of arrangement (the view redraws on its own; it reads the setting).
+    private func observeArrangement() {
+        withObservationTracking {
+            _ = arrangement.value
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.log("arrangement: \(self.arrangement.value.rawValue)")
+                self.observeArrangement()
             }
         }
     }

@@ -6,9 +6,9 @@ import GitrasilCore
 //
 // Usage: GitrasilWallpaper [--quit-after <seconds>]
 //
-// Opens a desktop-level window on every display and draws the pinned repositories' branch graphs
-// behind the desktop icons, redrawing when they change. A menu-bar item adds and removes the
-// pinned repositories, which are saved in the `com.gitrasil.background` defaults (or the suite
+// Opens a desktop-level window on every display and grows the pinned repositories as trees (an
+// orchard, or one tree with a bough each) behind the desktop icons, redrawing when they change. A
+// menu-bar item adds and removes the pinned repositories and picks the arrangement, which are saved in the `com.gitrasil.background` defaults (or the suite
 // GITRASIL_BACKGROUND_DEFAULTS_SUITE names). Nothing is installed and the system wallpaper setting
 // is never touched.
 
@@ -27,9 +27,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
 
         let suite = PinnedRepositories.appSuiteName()
-        let pins = PinnedRepositories(storage: UserDefaults(suiteName: suite) ?? .standard)
-        let background = BackgroundModel(pins: pins)
-        background.log("defaults \(suite), \(pins.urls.count) pinned")
+        let defaults = UserDefaults(suiteName: suite) ?? .standard
+        let pins = PinnedRepositories(storage: defaults)
+        let arrangement = ArrangementSetting(storage: defaults)
+        let background = BackgroundModel(pins: pins, arrangement: arrangement)
+        background.log("defaults \(suite), \(pins.urls.count) pinned, \(arrangement.value.rawValue)")
 
         // Follows the system's light/dark mode; GITRASIL_BACKGROUND_APPEARANCE=light|dark pins one,
         // to preview the other mode without changing the system setting.
@@ -42,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windows.start()
         self.windows = windows
         self.background = background
-        self.menu = StatusMenu(pins: pins)
+        self.menu = StatusMenu(pins: pins, arrangement: arrangement)
 
         background.start()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in

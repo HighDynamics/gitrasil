@@ -2,15 +2,18 @@ import AppKit
 import GitrasilCore
 
 /// The menu-bar item: the one place to choose what the background shows. Lists the pinned
-/// repositories (each with Reveal in Finder and Remove), adds one through an open panel, and quits.
+/// repositories (each with Reveal in Finder and Remove), adds one through an open panel, picks how
+/// several are arranged (an orchard or a single tree), and quits.
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate {
 
     private let pins: PinnedRepositories
+    private let arrangement: ArrangementSetting
     private let item: NSStatusItem
 
-    init(pins: PinnedRepositories) {
+    init(pins: PinnedRepositories, arrangement: ArrangementSetting) {
         self.pins = pins
+        self.arrangement = arrangement
         self.item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
         item.button?.image = NSImage(systemSymbolName: "arrow.triangle.branch",
@@ -55,6 +58,19 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(action("Add Repository…", #selector(add), nil, key: "n"))
         menu.addItem(.separator())
+        menu.addItem(.sectionHeader(title: "Arrange As"))
+        for (choice, title, tip) in [
+            (Arrangement.orchard, "Orchard", "A tree for each repository"),
+            (.singleTree, "Single Tree", "One trunk with a bough for each repository"),
+        ] {
+            let entry = NSMenuItem(title: title, action: #selector(arrange(_:)), keyEquivalent: "")
+            entry.target = self
+            entry.representedObject = choice.rawValue
+            entry.toolTip = tip
+            entry.state = arrangement.value == choice ? .on : .off
+            menu.addItem(entry)
+        }
+        menu.addItem(.separator())
         menu.addItem(action("Quit Gitrasil Background", #selector(quit), nil, key: "q"))
     }
 
@@ -68,6 +84,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func reveal(_ sender: NSMenuItem) {
         guard let url = sender.representedObject as? URL else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    @objc private func arrange(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let choice = Arrangement(rawValue: raw) else { return }
+        arrangement.value = choice
     }
 
     @objc private func remove(_ sender: NSMenuItem) {

@@ -1,9 +1,10 @@
 import SwiftUI
 import GitrasilCore
 
-/// The wallpaper: each pinned repository grown as a tree (`TreeLayout`), side by side on one ground
-/// line, so several pins read as a small grove. Each tree is a Canvas inside a TimelineView whose
-/// clock is paused unless a limb is growing in, so an idle desktop costs no frames.
+/// The wallpaper: each pinned repository grown as a tree (`TreeLayout`). As an orchard, a tree per
+/// repository spaced along one ground; as a single tree (`YggdrasilLayout`), one shared trunk with a
+/// bough per repository. Everything is one Canvas inside a TimelineView whose clock is paused unless
+/// a limb is growing in, so an idle desktop costs no frames.
 struct WallpaperView: View {
     let background: BackgroundModel
     @Environment(\.colorScheme) private var colorScheme
@@ -11,6 +12,13 @@ struct WallpaperView: View {
     var body: some View {
         let style = WallpaperStyle.inkOnCream(dark: colorScheme == .dark)
         let panes = background.panes
+        let arrangement = background.arrangement.value
+        let now = background.now
+        // Read each pane here so Observation redraws when one publishes a new tree or growth.
+        let growing = panes.contains { pane in
+            let _ = (pane.tree, pane.growth, pane.problem)
+            return pane.growthStart != nil
+        }
         ZStack {
             Canvas { context, size in
                 drawPaper(size: size, style: style, in: &context)
@@ -21,9 +29,16 @@ struct WallpaperView: View {
                     .font(style.captionFont.weight(.regular))
                     .foregroundStyle(style.captionInk)
             } else {
-                HStack(spacing: 0) {
-                    ForEach(panes, id: \.repoURL) { pane in
-                        RepoPane(model: pane, style: style, now: background.now)
+                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !growing)) { timeline in
+                    let panes = panes.map { Pane(name: $0.repoName, tree: $0.tree, problem: $0.problem,
+                                                 grown: $0.grown(at: timeline.date)) }
+                    Canvas { context, size in
+                        let scene = Scene(style: style, now: now, size: size)
+                        if arrangement == .singleTree, panes.filter({ $0.tree != nil }).count > 1 {
+                            scene.drawSingleTree(panes, in: &context)
+                        } else {
+                            scene.drawOrchard(panes, in: &context)
+                        }
                     }
                 }
             }
@@ -86,45 +101,98 @@ enum Composition {
     static let top: CGFloat = 44
     /// The height a full-grown tree is drawn for, crown included, in tree units (`TreeLayout`).
     static let nominalHeight = 1.45
+    /// An orchard plot's width in tree units: the trees share one scale, so each is drawn as big as
+    /// its own history makes it, and a crown a little wider than its plot reaches into the next.
+    static let plotWidth = 1.3
 }
 
-/// One repository's tree.
-private struct RepoPane: View {
-    let model: WallpaperModel
+// MARK: - Arrangements
+
+/// One repository as it's drawn this frame.
+private struct Pane {
+    let name: String
+    let tree: RepoTree?
+    let problem: String?
+    /// Commits grown in so far, while a limb is growing in.
+    let grown: [String: Double]
+}
+
+/// Lays the trees out on the screen and draws them, in either arrangement.
+private struct Scene {
     let style: WallpaperStyle
     let now: Date
+    let size: CGSize
 
-    var body: some View {
-        // Read the model here so Observation re-renders only when it publishes a new tree or growth.
-        let tree = model.tree
-        let growthStart = model.growthStart
-        let _ = model.growth
-        let name = model.repoName, problem = model.problem
-
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: growthStart == nil)) { timeline in
-            Canvas { context, size in
-                guard let tree else {
-                    if let problem { TreeDrawing.problem(problem, style: style, size: size, in: &context) }
-                    return
-                }
-                let full = TreeLayout(tree: tree, seed: name)
-                let grown = model.grown(at: timeline.date)
-                let layout = grown.isEmpty ? full : TreeLayout(tree: tree, seed: name, grown: grown)
-                let drawing = TreeDrawing(style: style, layout: layout, now: now,
-                                          frame: TreeFrame(size: size, fitting: full))
-                drawing.draw(repoName: name, in: &context)
-                if let problem { TreeDrawing.problem(problem, style: style, size: size, in: &context) }
+    /// A tree per repository, each standing in its own plot along the ground. Every tree is drawn at
+    /// one shared scale (set by the screen and the number of plots, never by another tree), so a
+    /// sapling stands small beside a full-grown tree; a tree only shrinks when it outgrows the
+    /// screen's height or spills well past its plot. Each is planted a seeded touch off its plot's
+    /// centre, so the row isn't ruled.
+    func drawOrchard(_ panes: [Pane], in context: inout GraphicsContext) {
+        let plot = size.width / CGFloat(panes.count)
+        let tall = Composition.groundY(size.height) - Composition.top - TreeFrame.margin
+        let shared = min(tall / Composition.nominalHeight, plot / Composition.plotWidth)
+        var placed: [CGRect] = []
+        for (index, pane) in panes.enumerated() {
+            let center = plot * (CGFloat(index) + 0.5)
+            guard let tree = pane.tree else {
+                if let problem = pane.problem { problemText(problem, at: CGPoint(x: center, y: size.height / 2), in: &context) }
+                continue
             }
+            let full = TreeLayout(tree: tree, seed: pane.name)
+            let grown = pane.grown
+            let layout = grown.isEmpty ? full : TreeLayout(tree: tree, seed: pane.name, grown: grown)
+            var rng = SeededRandom(pane.name, -9)
+            let x = center + (panes.count > 1 ? plot * rng.next(in: -0.05...0.05) : 0)
+            let frame = TreeFrame(size: size, bounds: full.bounds, nominalHeight: Composition.nominalHeight,
+                                  scale: shared, maxWidth: min(plot * 1.45, size.width - 2 * TreeFrame.margin), x: x)
+            let drawing = TreeDrawing(style: style, now: now, frame: frame)
+            drawing.shadow(width: full.bounds.width, in: &context)
+            drawing.plate(pane.name, in: &context)
+            drawing.draw(layout.stems, groundStem: layout.stems.first, rootSeed: pane.name, in: &context)
+            drawing.labels(layout.stems, placed: &placed, in: &context)
+            if let problem = pane.problem { problemText(problem, at: CGPoint(x: frame.origin.x, y: size.height / 2), in: &context) }
         }
-        .clipped()
+    }
+
+    /// One tree for every repository: a shared trunk, a bough each, fanned in pin order. Each
+    /// repository's name is written quietly at the foot of its bough.
+    func drawSingleTree(_ panes: [Pane], in context: inout GraphicsContext) {
+        let ready = panes.filter { $0.tree != nil }
+        let full = YggdrasilLayout(repos: ready.map { .init(name: $0.name, tree: $0.tree!) })
+        let growing = ready.map(\.grown)
+        let layout = growing.allSatisfy(\.isEmpty) ? full : YggdrasilLayout(repos: zip(ready, growing).map {
+            .init(name: $0.name, tree: $0.tree!, grown: $1)
+        })
+        let tall = Composition.groundY(size.height) - Composition.top - TreeFrame.margin
+        // Its boughs lean, so it's rarely as tall as its trees would be on their own.
+        let nominal = YggdrasilLayout.crotchHeight + Composition.nominalHeight * 0.82
+        let frame = TreeFrame(size: size, bounds: full.bounds, nominalHeight: nominal, scale: tall / nominal,
+                              maxWidth: size.width - 2 * TreeFrame.margin, x: size.width / 2)
+        let drawing = TreeDrawing(style: style, now: now, frame: frame)
+        let stems = [layout.trunk] + layout.boughs.flatMap(\.layout.stems)
+        drawing.shadow(width: full.bounds.width, in: &context)
+        drawing.draw(stems, groundStem: layout.trunk, rootSeed: "yggdrasil", in: &context)
+        var placed: [CGRect] = []
+        for bough in layout.boughs { drawing.boughName(bough, placed: &placed, in: &context) }
+        drawing.labels(stems, placed: &placed, in: &context)
+        let problems = panes.compactMap { pane in pane.problem.map { "\(pane.name): \($0)" } }
+        if !problems.isEmpty {
+            problemText(problems.joined(separator: "   "),
+                        at: CGPoint(x: size.width / 2, y: Composition.groundY(size.height) + 56), in: &context)
+        }
+    }
+
+    private func problemText(_ text: String, at point: CGPoint, in context: inout GraphicsContext) {
+        context.draw(Text(text).font(style.captionFont).foregroundColor(style.captionInk), at: point, anchor: .center)
     }
 }
 
 // MARK: - Geometry
 
-/// Maps tree units to the pane: the trunk's foot on the ground line, centered unless the crown would
-/// spill over a side. A tree is drawn at the nominal full-grown size and shrinks only when it outgrows
-/// it, so a new commit doesn't rescale the picture.
+/// Maps tree units to the screen: the trunk's foot on the ground line at `x`, unless the crown would
+/// spill off a side. A tree is drawn at the scale it's given and shrinks only when it outgrows the
+/// height for a nominal tree or `maxWidth`, so a new commit doesn't rescale the picture.
 private struct TreeFrame {
     let size: CGSize
     let scale: CGFloat
@@ -134,19 +202,18 @@ private struct TreeFrame {
     static let margin: CGFloat = 40
 
     /// How large leaves and names are drawn: in step with the tree, within limits, so a small tree in a
-    /// narrow pane isn't buried under them.
+    /// narrow plot isn't buried under them.
     var detail: CGFloat { min(max(scale / 520, 0.62), 1.15) }
 
-    init(size: CGSize, fitting layout: TreeLayout) {
+    init(size: CGSize, bounds: CGRect, nominalHeight: Double, scale: CGFloat, maxWidth: CGFloat, x: CGFloat) {
         self.size = size
         let ground = Composition.groundY(size.height)
         let tall = ground - Composition.top - Self.margin
-        let bounds = layout.bounds
-        var scale = tall / Composition.nominalHeight
+        var scale = min(scale, tall / nominalHeight)
         if bounds.maxY > 0 { scale = min(scale, tall / bounds.maxY) }
-        if bounds.width > 0 { scale = min(scale, (size.width - 2 * Self.margin) / bounds.width) }
+        if bounds.width > 0 { scale = min(scale, maxWidth / bounds.width) }
         self.scale = max(scale, 1)
-        var x = size.width / 2
+        var x = x
         x = max(x, Self.margin - bounds.minX * self.scale)
         x = min(x, size.width - Self.margin - bounds.maxX * self.scale)
         origin = CGPoint(x: x, y: ground)
@@ -164,26 +231,21 @@ private struct TreeFrame {
 /// branch's name and a commit's place on it, never time), so a redraw draws the same tree.
 private struct TreeDrawing {
     let style: WallpaperStyle
-    let layout: TreeLayout
     let now: Date
     let frame: TreeFrame
 
-    private var trunk: TreeLayout.Stem? { layout.stems.first }
-
-    func draw(repoName: String, in context: inout GraphicsContext) {
-        plate(repoName, in: &context)
-        for stem in layout.stems { canopy(stem, in: &context) }
-        roots(seed: repoName, in: &context)
-        for stem in layout.stems { wood(stem, in: &context) }
-        for stem in layout.stems { leaves(stem, in: &context) }
-        for stem in layout.stems where stem.isCheckedOut { blossom(stem, in: &context) }
-        labels(in: &context)
+    /// The wood and foliage of `stems` (names are drawn separately, so they can avoid every tree's),
+    /// with roots spreading from `groundStem`'s foot.
+    func draw(_ stems: [TreeLayout.Stem], groundStem: TreeLayout.Stem?, rootSeed: String, in context: inout GraphicsContext) {
+        for stem in stems { canopy(stem, in: &context) }
+        if let groundStem { roots(of: groundStem, seed: rootSeed, in: &context) }
+        for stem in stems { wood(stem, in: &context) }
+        for stem in stems { leaves(stem, in: &context) }
+        for stem in stems where stem.isCheckedOut { blossom(stem, in: &context) }
     }
 
-    static func problem(_ text: String, style: WallpaperStyle, size: CGSize, in context: inout GraphicsContext) {
-        context.draw(Text(text).font(style.captionFont).foregroundColor(style.captionInk),
-                     at: CGPoint(x: size.width / 2, y: size.height / 2), anchor: .center)
-    }
+    /// A stem that bears leaves: any but a shared trunk, which has no commits of its own.
+    private func isLeafy(_ stem: TreeLayout.Stem) -> Bool { stem.isBud || !stem.commits.isEmpty }
 
     // MARK: Inks and age
 
@@ -268,6 +330,18 @@ private struct TreeDrawing {
         let shape = taper(samples)
         let alpha = 0.55 + 0.4 * max(vigour(tipCommit(stem)), stem.isTrunk ? 1 : 0)
         if stem.isTrunk {
+            // A shared trunk's top and a bough's foot are rounded off, so the boughs grow out of the
+            // trunk rather than butting onto it.
+            var caps = Path()
+            for (end, rounded) in [(base, frame.origin.y - base.point.y > 2), (tip, stem.commits.isEmpty)] where rounded {
+                let r = end.width / 2
+                caps.addEllipse(in: CGRect(x: end.point.x - r, y: end.point.y - r, width: 2 * r, height: 2 * r))
+            }
+            if !caps.isEmpty {
+                context.fill(caps, with: .color(style.paper[1]))
+                context.fill(caps, with: .color(style.ink.opacity(style.woodOpacity)))
+                context.fill(shape, with: .color(style.paper[1]))
+            }
             context.fill(shape, with: .color(style.ink.opacity(style.woodOpacity)))
         } else {
             context.fill(shape, with: .linearGradient(
@@ -308,8 +382,8 @@ private struct TreeDrawing {
     }
 
     /// A few roots spreading from the trunk's foot along and just under the ground.
-    private func roots(seed: String, in context: inout GraphicsContext) {
-        guard let trunk, let foot = trunk.nodes.first else { return }
+    private func roots(of trunk: TreeLayout.Stem, seed: String, in context: inout GraphicsContext) {
+        guard let foot = trunk.nodes.first else { return }
         var rng = SeededRandom(seed, -3)
         let base = frame.point(foot.point)
         let width = foot.width * frame.scale
@@ -335,7 +409,7 @@ private struct TreeDrawing {
 
     /// A soft wash of the branch's ink behind its tip, sized by how much it carries, fading with age.
     private func canopy(_ stem: TreeLayout.Stem, in context: inout GraphicsContext) {
-        guard style.canopyOpacity > 0, !stem.isBud, let tip = stem.tip else { return }
+        guard style.canopyOpacity > 0, !stem.isBud, isLeafy(stem), let tip = stem.tip else { return }
         let center = frame.point(tip.point)
         let leavesShown = min(Double(stem.commits.count), stem.grown)
         let radius = CGFloat(30 + 7 * sqrt(min(leavesShown, 40)))
@@ -350,6 +424,7 @@ private struct TreeDrawing {
     /// and drop some of theirs, so a dormant limb thins out. The trunk leafs out only along its recent
     /// commits.
     private func leaves(_ stem: TreeLayout.Stem, in context: inout GraphicsContext) {
+        guard isLeafy(stem) else { return }
         let key = stem.name ?? "trunk"
         let color = leafInk(stem)
         let size = style.leafSize * frame.detail * (0.75 + 0.25 * min(stem.scale, 1))
@@ -466,8 +541,17 @@ private struct TreeDrawing {
 
     // MARK: Text
 
+    /// A faint wash of shade on the ground under the tree.
+    func shadow(width: Double, in context: inout GraphicsContext) {
+        let half = max(CGFloat(width) * frame.scale * 0.32, 40), depth: CGFloat = 7
+        let rect = CGRect(x: frame.origin.x - half, y: frame.origin.y - depth / 2, width: half * 2, height: depth * 2)
+        context.fill(Path(ellipseIn: rect), with: .radialGradient(
+            Gradient(colors: [style.ink.opacity(0.12), .clear]),
+            center: CGPoint(x: rect.midX, y: rect.midY), startRadius: 0, endRadius: half))
+    }
+
     /// The repository's name under its tree, like a plate's caption.
-    private func plate(_ name: String, in context: inout GraphicsContext) {
+    func plate(_ name: String, in context: inout GraphicsContext) {
         let text = Text(name).font(style.plateFont).foregroundColor(style.ink.opacity(style.plateOpacity))
         context.draw(text, at: CGPoint(x: frame.origin.x, y: frame.origin.y + 22), anchor: .top)
     }
@@ -476,15 +560,14 @@ private struct TreeDrawing {
     /// first, then the most recently active. A name that would land on one already placed tries a
     /// little further out, nudged up or down, or on the tip's other side; if every spot is taken it's
     /// left out rather than piled on another.
-    private func labels(in context: inout GraphicsContext) {
-        let named = layout.stems.filter { $0.name != nil && $0.tip != nil && $0.grown > 0 }
+    func labels(_ stems: [TreeLayout.Stem], placed: inout [CGRect], in context: inout GraphicsContext) {
+        let named = stems.filter { $0.name != nil && $0.tip != nil && $0.grown > 0 }
         let ordered = named.sorted { a, b in
             if a.isTrunk != b.isTrunk { return a.isTrunk }
             if a.isCheckedOut != b.isCheckedOut { return a.isCheckedOut }
             return (tipCommit(a)?.date ?? .distantPast) > (tipCommit(b)?.date ?? .distantPast)
         }
         let font = style.labelFont(max(10, (style.labelSize * frame.detail).rounded()))
-        var placed: [CGRect] = []
         for stem in ordered {
             guard let name = stem.name, let tip = stem.tip else { continue }
             let alpha = max(0.6, freshness(tipCommit(stem)))
@@ -514,6 +597,36 @@ private struct TreeDrawing {
             guard let rect = spot else { continue }
             placed.append(rect)
             context.draw(text, in: rect)
+        }
+    }
+
+    /// A repository's name at the foot of its bough, as quiet as a branch's name (the hand font, in
+    /// plain ink): under a leaning bough, where there's no wood, or beside an upright one.
+    func boughName(_ bough: YggdrasilLayout.Bough, placed: inout [CGRect], in context: inout GraphicsContext) {
+        guard let stem = bough.layout.stems.first, stem.curve.count > 2 else { return }
+        let font = style.labelFont(max(10, (style.labelSize * frame.detail).rounded()))
+        let text = context.resolve(Text(bough.name).font(font).foregroundColor(style.ink.opacity(0.6)))
+        let size = text.measure(in: CGSize(width: 2000, height: 200))
+        var rng = SeededRandom(bough.name, -11)
+        let heading = bough.planting.heading
+        let side: CGFloat = heading < -0.1 ? -1 : heading > 0.1 ? 1 : (rng.next() < 0.5 ? -1 : 1)
+        for fraction in [0.12, 0.2, 0.28, 0.36] {
+            let node = stem.curve[Int(Double(stem.curve.count - 1) * fraction)]
+            let point = frame.point(node.point)
+            let gap = node.width * frame.scale / 2 + 6
+            // The side of the bough facing the ground (or, upright, its own side).
+            let normal = abs(heading) > 0.1
+                ? CGPoint(x: -cos(node.heading) * side * -1, y: abs(sin(node.heading)))
+                : CGPoint(x: side, y: 0)
+            let length = max(hypot(normal.x, normal.y), 0.001)
+            let center = CGPoint(x: point.x + normal.x / length * (gap + size.height / 2),
+                                 y: point.y + normal.y / length * (gap + size.height / 2))
+            let x = side > 0 ? center.x : center.x - size.width
+            let rect = CGRect(x: x, y: center.y - size.height / 2, width: size.width, height: size.height)
+            guard !placed.contains(where: { $0.insetBy(dx: -4, dy: -1).intersects(rect) }) else { continue }
+            placed.append(rect)
+            context.draw(text, in: rect)
+            return
         }
     }
 }
