@@ -1,16 +1,23 @@
 import AppKit
 import GitrasilCore
 
-/// The menu-bar item: the one place to choose what the background shows. Lists the pins (each with
-/// Reveal in Finder and Remove; a pinned folder says how many of its repositories are shown), adds
-/// repositories or a folder of them through an open panel, picks how
-/// several are arranged (an orchard or a single tree), and quits.
+/// The menu-bar item: the one place to choose what the background shows. Lists the pins as a
+/// checklist (unticking one unpins it and the menu stays open, so several go in one visit; it stays
+/// listed, unticked, until the menu closes, so ticking it again puts it back in its place), each with
+/// a button to reveal it in Finder; a pinned folder lists its repositories under it, ticked where
+/// they're shown. Adds repositories or folders through an open panel, picks how several are arranged
+/// (an orchard or a single tree), and quits.
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate {
 
     private let pins: PinnedRepositories
     private let arrangement: ArrangementSetting
     private let item: NSStatusItem
+    /// While the menu is open: the pins as listed when it opened (unticked ones too), their rows, and
+    /// each listed repository of a pinned folder.
+    private var listed: [Pin] = []
+    private var rows: [PinRow] = []
+    private var folderEntries: [(entry: NSMenuItem, repo: URL)] = []
 
     init(pins: PinnedRepositories, arrangement: ArrangementSetting) {
         self.pins = pins
@@ -36,32 +43,40 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.removeAllItems()
         // A pinned folder may have gained a repository, or another become the most recently active.
         pins.refresh()
+        listed = pins.pins
+        rows = []
+        folderEntries = []
         menu.addItem(.sectionHeader(title: "Pinned"))
-        if pins.pins.isEmpty {
+        if listed.isEmpty {
             let none = NSMenuItem(title: "None yet", action: nil, keyEquivalent: "")
             none.isEnabled = false
             menu.addItem(none)
         }
-        let shown = Set(pins.shown.map(\.path))
-        for (index, pin) in pins.pins.enumerated() {
-            let entry = NSMenuItem(title: pin.url.lastPathComponent, action: nil, keyEquivalent: "")
-            entry.toolTip = pin.url.path
-            if !FileManager.default.fileExists(atPath: pin.url.path) {
-                entry.badge = NSMenuItemBadge(string: "missing")
-            } else if pin.kind == .folder {
-                entry.image = NSImage(systemSymbolName: "folder", accessibilityDescription: "Folder")
-                let count = pins.shownCount(of: pin)
-                entry.badge = NSMenuItemBadge(string: "\(count.shown) of \(count.of) shown")
-            } else if !shown.contains(pin.url.path) {
-                entry.badge = NSMenuItemBadge(string: "not shown")
-                entry.toolTip = "\(pin.url.path)\nThe background shows \(pins.limit) at most."
-            }
-            let submenu = NSMenu()
-            submenu.addItem(action("Reveal in Finder", #selector(reveal(_:)), index))
-            submenu.addItem(action("Remove", #selector(remove(_:)), index))
-            entry.submenu = submenu
+        for pin in listed {
+            let row = PinRow(pin: pin, toggled: { [weak self] row in self?.toggle(row) },
+                             reveal: { NSWorkspace.shared.activateFileViewerSelecting([pin.url]) })
+            rows.append(row)
+            let entry = NSMenuItem()
+            entry.view = row
             menu.addItem(entry)
+            guard pin.kind == .folder else { continue }
+            let repos = pins.contents[pin.url] ?? []
+            for repo in repos.prefix(12) {
+                let inner = NSMenuItem(title: repo.lastPathComponent, action: nil, keyEquivalent: "")
+                inner.indentationLevel = 2
+                inner.isEnabled = false
+                inner.toolTip = repo.path
+                folderEntries.append((inner, repo))
+                menu.addItem(inner)
+            }
+            if repos.count > 12 {
+                let more = NSMenuItem(title: "and \(repos.count - 12) more", action: nil, keyEquivalent: "")
+                more.indentationLevel = 2
+                more.isEnabled = false
+                menu.addItem(more)
+            }
         }
+        update()
         menu.addItem(.separator())
         menu.addItem(action("Add Repository or Folder…", #selector(add), nil, key: "n"))
         menu.addItem(.separator())
@@ -81,20 +96,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(action("Quit Gitrasil Background", #selector(quit), nil, key: "q"))
     }
 
-    private func action(_ title: String, _ selector: Selector, _ index: Int?, key: String = "") -> NSMenuItem {
+    private func action(_ title: String, _ selector: Selector, _ url: URL?, key: String = "") -> NSMenuItem {
         let item = NSMenuItem(title: title, action: selector, keyEquivalent: key)
         item.target = self
-        item.tag = index ?? -1
+        item.representedObject = url
         return item
-    }
-
-    private func pin(_ sender: NSMenuItem) -> Pin? {
-        pins.pins.indices.contains(sender.tag) ? pins.pins[sender.tag] : nil
-    }
-
-    @objc private func reveal(_ sender: NSMenuItem) {
-        guard let pin = pin(sender) else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([pin.url])
     }
 
     @objc private func arrange(_ sender: NSMenuItem) {
@@ -102,9 +108,49 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         arrangement.value = choice
     }
 
-    @objc private func remove(_ sender: NSMenuItem) {
-        guard let pin = pin(sender) else { return }
-        pins.remove(pin)
+    func menuDidClose(_ menu: NSMenu) {
+        listed = []
+        rows = []
+        folderEntries = []
+    }
+
+    /// Untick to unpin, tick to pin again where it was listed.
+    private func toggle(_ row: PinRow) {
+        if row.isOn {
+            guard let index = listed.firstIndex(of: row.pin) else { return }
+            let before = listed[..<index].filter { pins.pins.contains($0) }.count
+            pins.insert(row.pin, at: before)
+        } else {
+            pins.remove(row.pin)
+        }
+        update()
+    }
+
+    /// Each row's note (missing, not shown, how many of a folder's are shown) and which of a folder's
+    /// repositories are ticked, as the pins stand now.
+    private func update() {
+        let shown = Set(pins.shown.map(\.path))
+        for row in rows {
+            let pinned = pins.pins.contains(row.pin)
+            var note = ""
+            var tip = row.pin.url.path
+            if !FileManager.default.fileExists(atPath: row.pin.url.path) {
+                note = "missing"
+            } else if pinned, row.pin.kind == .folder {
+                let count = pins.shownCount(of: row.pin)
+                note = count.of == 0 ? "no repositories" : count.shown == count.of ? "all \(count.of)" : "\(count.shown) of \(count.of) shown"
+                if count.shown < count.of {
+                    tip += "\nThe background shows \(pins.limit) at most: of a folder with more, the most recently active."
+                }
+            } else if pinned, !shown.contains(row.pin.url.path) {
+                note = "not shown"
+                tip += "\nThe background shows the first \(pins.limit)."
+            }
+            row.show(on: pinned, note: note, tip: tip)
+        }
+        for (entry, repo) in folderEntries {
+            entry.state = shown.contains(repo.path) ? .on : .off
+        }
     }
 
     @objc private func add() {
@@ -136,5 +182,72 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     @objc private func quit() {
         NSApp.terminate(nil)
+    }
+}
+
+/// A pin's row in the menu: a checkbox with its name (a folder icon for a pinned folder), a quiet note,
+/// and a reveal-in-Finder button. A view, so clicking it doesn't close the menu.
+@MainActor
+private final class PinRow: NSView {
+    let pin: Pin
+    private let check: NSButton
+    private let note = NSTextField(labelWithString: "")
+    private let toggled: (PinRow) -> Void
+    private let reveal: () -> Void
+
+    var isOn: Bool { check.state == .on }
+
+    init(pin: Pin, toggled: @escaping (PinRow) -> Void, reveal: @escaping () -> Void) {
+        self.pin = pin
+        self.toggled = toggled
+        self.reveal = reveal
+        check = NSButton(checkboxWithTitle: pin.url.lastPathComponent, target: nil, action: nil)
+        super.init(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        autoresizingMask = [.width]
+        check.target = self
+        check.action = #selector(flip)
+        let icon = NSImageView(image: NSImage(systemSymbolName: "folder", accessibilityDescription: "Folder") ?? NSImage())
+        icon.contentTintColor = .secondaryLabelColor
+        icon.isHidden = pin.kind != .folder
+        note.font = .menuFont(ofSize: NSFont.smallSystemFontSize)
+        note.textColor = .secondaryLabelColor
+        note.alignment = .right
+        let finder = NSButton(image: NSImage(systemSymbolName: "arrow.forward.circle",
+                                             accessibilityDescription: "Reveal in Finder")!,
+                              target: nil, action: nil)
+        finder.isBordered = false
+        finder.toolTip = "Reveal in Finder"
+        finder.target = self
+        finder.action = #selector(revealInFinder)
+        for view in [check, icon, note, finder] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            check.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            check.centerYAnchor.constraint(equalTo: centerYAnchor),
+            icon.leadingAnchor.constraint(equalTo: check.trailingAnchor, constant: 4),
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            note.leadingAnchor.constraint(greaterThanOrEqualTo: icon.trailingAnchor, constant: 12),
+            note.centerYAnchor.constraint(equalTo: centerYAnchor),
+            finder.leadingAnchor.constraint(equalTo: note.trailingAnchor, constant: 6),
+            finder.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            finder.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    func show(on: Bool, note text: String, tip: String) {
+        check.state = on ? .on : .off
+        note.stringValue = text
+        toolTip = tip
+        check.toolTip = tip
+    }
+
+    @objc private func flip() { toggled(self) }
+
+    @objc private func revealInFinder() {
+        reveal()
     }
 }
