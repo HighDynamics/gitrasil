@@ -116,6 +116,23 @@ final class RepoGraphStoreTests: XCTestCase {
         }
     }
 
+    func testAPauseWhileSettlingDerivesNothingUntilResume() async throws {
+        let repo = try await repo()
+        let store = RepoGraphStore(repositoryURL: repo.url, options: options, settle: .milliseconds(300))
+        await store.refresh()
+
+        try await repo.commitFile("m2.txt", "2", message: "m2")
+        store.refsChanged()
+        store.isPaused = true
+        try await Task.sleep(for: .seconds(1))
+        XCTAssertEqual(store.deriveCount, 1, "the settle timer that was pending derives nothing while paused")
+
+        store.isPaused = false
+        let derived = await waitFor(5) { store.deriveCount == 2 }
+        XCTAssertTrue(derived, "resuming catches up")
+        XCTAssertEqual(store.graph?.trunk.first?.subject, "m2")
+    }
+
     func testAMissingRepositoryIsPickedUpOnTheHourlyTick() async throws {
         let parent = try FixtureRepo()
         let store = RepoGraphStore(repositoryURL: parent.url.appendingPathComponent("later"), options: options,

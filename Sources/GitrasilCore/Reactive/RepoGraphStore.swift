@@ -125,8 +125,13 @@ public final class RepoGraphStore {
         settleTask?.cancel()
         settleTask = Task { [weak self, settle] in
             try? await Task.sleep(for: settle)
-            guard !Task.isCancelled else { return }
-            await self?.refresh()
+            guard !Task.isCancelled, let self else { return }
+            // Paused while settling: catch up on resume instead.
+            if self.isPaused {
+                self.missedChange = true
+                return
+            }
+            await self.refresh()
         }
     }
 
