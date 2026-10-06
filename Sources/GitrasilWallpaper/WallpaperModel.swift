@@ -2,21 +2,27 @@ import Foundation
 import Observation
 import GitrasilCore
 
-/// One repository on the wallpaper: bridges its `RepoGraphStore` to the view. The store already
-/// settles bursts and publishes only real graph changes; this adds the pulse — the branch tips that
-/// moved in a change ring briefly; otherwise nothing ticks.
+/// One repository on the wallpaper: bridges its `RepoGraphStore` to the view as a `RepoTree`. The
+/// store already settles bursts and publishes only real graph changes; this adds the growth — limbs
+/// that gained commits (or appeared) grow in over a moment; otherwise nothing ticks.
 @MainActor
 @Observable
 final class WallpaperModel {
 
-    /// The graph being drawn, or nil before the first derive.
-    private(set) var graph: HistoryGraph?
+    /// The tree being drawn, or nil before the first derive.
+    private(set) var tree: RepoTree?
 
-    /// When the pulse began, while it's running; nil when idle (the animation clock is paused).
-    private(set) var pulseStart: Date?
+    /// When the growth began, while it's running; nil when idle (the animation clock is paused).
+    private(set) var growthStart: Date?
 
-    /// The commits the running pulse rings: the tips of branches that moved or appeared.
-    private(set) var pulseTips: Set<String> = []
+    /// The stems growing in the running growth, by name (`RepoTree.commitCounts` keys): the commits
+    /// each had before, and has now.
+    private(set) var growth: [String: Growth] = [:]
+
+    struct Growth: Equatable {
+        let from: Double
+        let to: Double
+    }
 
     /// The repository's folder and display name.
     let repoURL: URL
@@ -25,17 +31,22 @@ final class WallpaperModel {
     /// Why there's nothing to draw (the folder is gone, or git can't read it), or nil.
     var problem: String? {
         if !FileManager.default.fileExists(atPath: repoURL.path) { return "This folder is missing." }
-        return graph == nil && store.lastError != nil ? "Git can’t read this repository." : nil
+        return tree == nil && store.lastError != nil ? "Git can’t read this repository." : nil
     }
 
-    static let pulseDuration: TimeInterval = 1.6
+    static let growthDuration: TimeInterval = 1.8
+
+    /// What a tree draws: a long stretch of trunk, so fork heights spread out, and enough branches to
+    /// make a crown, including dormant ones (they draw as bare limbs).
+    static let options = RepoGraphOptions(trunkCommits: 200, maxBranches: 14, maxAge: 120 * 24 * 3600,
+                                          laneCommitLimit: 60)
 
     /// False while the window is fully covered (a full-screen app, another Space's windows on top):
     /// the store stops deriving until it's visible again, and no animation runs.
     var isVisible = true {
         didSet {
             store.isPaused = !isVisible
-            if !isVisible { pulseStart = nil }
+            if !isVisible { growthStart = nil }
         }
     }
 
@@ -45,7 +56,7 @@ final class WallpaperModel {
     init(repoURL: URL) {
         self.repoURL = repoURL
         self.repoName = repoURL.lastPathComponent
-        self.store = RepoGraphStore(repositoryURL: repoURL)
+        self.store = RepoGraphStore(repositoryURL: repoURL, options: Self.options)
     }
 
     func start() async {
@@ -71,33 +82,43 @@ final class WallpaperModel {
     }
 
     private func graphDidChange() {
-        guard let fresh = store.graph, fresh != graph else { return }
-        let moved = Self.tips(of: fresh).filter { name, sha in graph.map { Self.tips(of: $0)[name] != sha } ?? false }
-        graph = fresh
+        guard let graph = store.graph else { return }
+        let fresh = RepoTree(graph: graph)
+        guard fresh != tree else { return }
+        let grew = tree.map { Self.growth(from: $0, to: fresh) } ?? [:]
+        tree = fresh
         redraws += 1
-        let rows = GraphLayout.rows(for: fresh, expanded: false)
-        log("\(repoName): redraw #\(redraws) (derive #\(store.deriveCount)): \(rows.count) rows, "
-            + "\(Set(rows.map(\.lane)).count) lanes, moved \(moved.keys.sorted())")
-        if !moved.isEmpty, isVisible { pulse(Set(moved.values)) }
+        log("\(repoName): redraw #\(redraws) (derive #\(store.deriveCount)): \(fresh.trunk.count) trunk commits, "
+            + "\(fresh.limbs.count) limbs, grew \(grew.keys.sorted())")
+        if !grew.isEmpty, isVisible { grow(grew) }
     }
 
-    /// Each drawn branch's tip commit, by branch name: the spine's tip, each lane's, and each pill's.
-    static func tips(of graph: HistoryGraph) -> [String: String] {
-        var tips: [String: String] = [:]
-        for segment in graph.segments + graph.revealedLanes {
-            if let name = segment.branchLabel, let tip = segment.commits.first?.sha { tips[name] = tip }
+    /// The stems with more commits than before (a new stem grows from nothing).
+    static func growth(from old: RepoTree, to new: RepoTree) -> [String: Growth] {
+        let before = old.commitCounts
+        var growth: [String: Growth] = [:]
+        for (name, count) in new.commitCounts {
+            let from = before[name] ?? 0
+            if count > from { growth[name] = Growth(from: Double(from), to: Double(count)) }
         }
-        for (sha, names) in graph.revealedPointers { for name in names { tips[name] = sha } }
-        return tips
+        return growth
     }
 
-    private func pulse(_ shas: Set<String>) {
+    /// Commits grown in so far, by stem, at `date` in the running growth (eased); empty when idle.
+    func grown(at date: Date) -> [String: Double] {
+        guard let growthStart else { return [:] }
+        let t = min(max(date.timeIntervalSince(growthStart) / Self.growthDuration, 0), 1)
+        let eased = 1 - pow(1 - t, 3)
+        return growth.mapValues { $0.from + ($0.to - $0.from) * eased }
+    }
+
+    private func grow(_ stems: [String: Growth]) {
         let start = Date()
-        pulseStart = start
-        pulseTips = shas
+        growthStart = start
+        growth = stems
         Task {
-            try? await Task.sleep(for: .seconds(Self.pulseDuration))
-            if pulseStart == start { pulseStart = nil }
+            try? await Task.sleep(for: .seconds(Self.growthDuration))
+            if growthStart == start { growthStart = nil }
         }
     }
 
