@@ -112,4 +112,25 @@ final class RepoGraphStoreTests: XCTestCase {
             XCTAssertFalse(RepoGraphStore.isRefPath(path), path)
         }
     }
+
+    func testAMissingRepositoryIsPickedUpOnTheHourlyTick() async throws {
+        let parent = try FixtureRepo()
+        let store = RepoGraphStore(repositoryURL: parent.url.appendingPathComponent("later"), options: options,
+                                   settle: .milliseconds(200))
+        defer { store.stop() }
+        await store.start()
+        XCTAssertNil(store.graph)
+        XCTAssertNotNil(store.lastError)
+
+        try await parent.git(["init", "-q", "-b", "main", "later"])
+        try await parent.git(["-C", "later", "commit", "-q", "--allow-empty", "-m", "root"])
+        await store.tick()
+        XCTAssertEqual(store.graph?.trunk.first?.subject, "root")
+        XCTAssertNil(store.lastError)
+
+        // Watched from then on.
+        try await parent.git(["-C", "later", "commit", "-q", "--allow-empty", "-m", "m1"])
+        let derived = await waitFor(5) { store.graph?.trunk.first?.subject == "m1" }
+        XCTAssertTrue(derived, "a commit after the tick is picked up")
+    }
 }

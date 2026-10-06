@@ -13,6 +13,7 @@ import Observation
 ///   the graph depends on moved.
 /// - It publishes only when the graph actually changed.
 /// - While paused (the desktop is hidden) it derives nothing; one catch-up derive runs on resume.
+/// - An hourly `tick` catches what no ref event signals: a repository that was missing appearing.
 @MainActor
 @Observable
 public final class RepoGraphStore {
@@ -61,6 +62,17 @@ public final class RepoGraphStore {
 
     /// Derive the first graph, then start watching. Call once.
     public func start() async {
+        await refresh()
+        await installWatcher()
+    }
+
+    /// The hourly check: start watching if the repository couldn't be watched before (it was missing
+    /// or not yet a repository), and refresh.
+    public func tick() async {
+        if isPaused {
+            missedChange = true
+            return
+        }
         await refresh()
         await installWatcher()
     }
@@ -125,7 +137,10 @@ public final class RepoGraphStore {
         guard watcher == nil,
               let common = try? await runner.runChecked(["rev-parse", "--git-common-dir"]).trimmedStdout,
               !common.isEmpty else { return }
-        let commonURL = URL(fileURLWithPath: common, relativeTo: repositoryURL).standardizedFileURL
+        // Relative to the repository itself, whether or not its URL ends in a slash (it doesn't when
+        // the folder was missing as the URL was made).
+        let commonURL = (common.hasPrefix("/") ? URL(fileURLWithPath: common)
+                         : repositoryURL.appendingPathComponent(common, isDirectory: true)).standardizedFileURL
         let watcher = FSEventsWatcher(paths: [commonURL.path], latency: 0.3,
                                       filter: { RepoGraphStore.isRefPath($0) }) { [weak self] in
             Task { @MainActor in self?.refsChanged() }

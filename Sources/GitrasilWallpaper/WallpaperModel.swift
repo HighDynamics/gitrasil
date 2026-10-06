@@ -72,6 +72,11 @@ final class WallpaperModel {
         store.stop()
     }
 
+    /// The hourly check: picks up a repository that was missing and branches ageing out.
+    func tick() {
+        Task { await store.tick() }
+    }
+
     /// Re-arm Observation tracking on the store's graph (one-shot, so re-armed on every change).
     private func observe() {
         withObservationTracking {

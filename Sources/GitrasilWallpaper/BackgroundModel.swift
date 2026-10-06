@@ -57,6 +57,7 @@ final class BackgroundModel {
         clock = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.now = Date()
+                for pane in self?.panes ?? [] { pane.tick() }
                 // A pinned folder with more repositories than fit shows the most recently active.
                 self?.pins.refresh()
             }
