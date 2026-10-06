@@ -8,6 +8,7 @@ import GitrasilCore
 struct WallpaperView: View {
     let background: BackgroundModel
     @Environment(\.colorScheme) private var colorScheme
+    @State private var plans = PlanCache()
 
     var body: some View {
         let style = WallpaperStyle.inkOnCream(dark: colorScheme == .dark)
@@ -47,10 +48,16 @@ struct WallpaperView: View {
                         }
                     }
                     if showsBranchNames || showsRepoNames {
-                        // The names hang where the full-grown trees put them, planned only when a tree changes.
-                        let plan = Landscape(style: style, now: now, size: proxy.size, trunkGrowIn: nil).plan(
-                            panes.map { Pane(name: $0.repoName, tree: $0.tree, problem: $0.problem, grown: [:], growIn: nil) },
-                            arrangement: arrangement, branchNames: showsBranchNames, repoNames: showsRepoNames)
+                        // The names hang where the full-grown trees put them, planned only when a tree or
+                        // what's shown changes, not on every redraw.
+                        let key = PlanCache.Key(dark: colorScheme == .dark, size: proxy.size, now: now,
+                                                arrangement: arrangement, branchNames: showsBranchNames,
+                                                repoNames: showsRepoNames, trees: panes.map { .init(name: $0.repoName, tree: $0.tree) })
+                        let plan = plans.plan(for: key) {
+                            Landscape(style: style, now: now, size: proxy.size, trunkGrowIn: nil).plan(
+                                panes.map { Pane(name: $0.repoName, tree: $0.tree, problem: $0.problem, grown: [:], growIn: nil) },
+                                arrangement: arrangement, branchNames: showsBranchNames, repoNames: showsRepoNames)
+                        }
                         BannerLayer(plan: plan, hidden: hiddenBanners(plan), style: style, breeze: background.breeze)
                     }
                 }
@@ -118,6 +125,36 @@ struct WallpaperView: View {
             }
         }
         context.stroke(tufts, with: .color(style.ink.opacity(0.32)), lineWidth: style.lineWidth * 0.7)
+    }
+}
+
+/// The last banner plan a window made, kept until anything it was planned from changes. Planning
+/// measures every banner against the whole crown, so it's too slow to redo on every redraw (a growth
+/// starting or ending, a grow-in, the hourly tick).
+final class PlanCache {
+    struct Key: Equatable {
+        struct Tree: Equatable {
+            let name: String
+            let tree: RepoTree?
+        }
+        let dark: Bool
+        let size: CGSize
+        let now: Date
+        let arrangement: Arrangement
+        let branchNames: Bool
+        let repoNames: Bool
+        let trees: [Tree]
+    }
+
+    private var key: Key?
+    private var plan = BannerPlan()
+
+    func plan(for key: Key, make: () -> BannerPlan) -> BannerPlan {
+        if key != self.key {
+            plan = make()
+            self.key = key
+        }
+        return plan
     }
 }
 
