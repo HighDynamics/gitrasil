@@ -74,4 +74,17 @@ final class YggdrasilLayoutTests: XCTestCase {
         let b = TreeLayout(tree: tree("a"), seed: "ash", planting: .upright)
         XCTAssertEqual(a.stems.map(\.nodes), b.stems.map(\.nodes))
     }
+
+    func testTheSharedTrunkRisesFirstThenTheBoughsGrowFromTheCrotch() {
+        let repos: [YggdrasilLayout.Repo] = [.init(name: "ash", tree: tree("a"), growIn: 0), .init(name: "elm", tree: tree("e"), growIn: 0)]
+        let rising = YggdrasilLayout(repos: repos, trunkGrowIn: 0.5)
+        XCTAssertEqual(Double(rising.trunk.nodes.last!.point.y), YggdrasilLayout.crotchHeight / 2, accuracy: 1e-9)
+        XCTAssertTrue(rising.boughs.allSatisfy { $0.layout.stems.allSatisfy { $0.nodes.count <= 1 } }, "the boughs wait")
+        let full = layout()
+        let grown = YggdrasilLayout(repos: [.init(name: "ash", tree: tree("a"), growIn: 1), .init(name: "elm", tree: tree("e", trunk: 12), growIn: 1),
+                                            .init(name: "oak", tree: tree("o", trunk: 60), growIn: 1)], trunkGrowIn: 1)
+        XCTAssertEqual(grown.trunk.nodes, full.trunk.nodes)
+        for bough in 0..<3 { XCTAssertEqual(points(grown, bough: bough), points(full, bough: bough)) }
+        XCTAssertEqual(grown.bounds, full.bounds)
+    }
 }

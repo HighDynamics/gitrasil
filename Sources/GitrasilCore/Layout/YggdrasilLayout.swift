@@ -19,11 +19,14 @@ public struct YggdrasilLayout: Sendable {
         public let tree: RepoTree
         /// Commits grown in so far, as `TreeLayout` takes them.
         public let grown: [String: Double]
+        /// While the bough grows in from the crotch, how far along it is (as `TreeLayout` takes it).
+        public let growIn: Double?
 
-        public init(name: String, tree: RepoTree, grown: [String: Double] = [:]) {
+        public init(name: String, tree: RepoTree, grown: [String: Double] = [:], growIn: Double? = nil) {
             self.name = name
             self.tree = tree
             self.grown = grown
+            self.growIn = growIn
         }
     }
 
@@ -44,7 +47,9 @@ public struct YggdrasilLayout: Sendable {
     /// How high the boughs leave the shared trunk.
     public static let crotchHeight = 0.34
 
-    public init(repos: [Repo]) {
+    /// - Parameter trunkGrowIn: while the shared trunk rises from the ground, how far along it is
+    ///   (0…1); its boughs wait for it (their own `growIn`).
+    public init(repos: [Repo], trunkGrowIn: Double? = nil) {
         // The shared trunk carries all of them: the pipe model again, width² adds up.
         let carried = sqrt(repos.reduce(0) { $0 + pow(TreeLayout.footWidth($1.tree), 2) })
         var rng = SeededRandom("yggdrasil", -1)
@@ -60,7 +65,10 @@ public struct YggdrasilLayout: Sendable {
             let width = carried * (1.3 - 0.3 * Double(k) / Double(count)) + 0.004
             return TreeLayout.Node(point: p, width: width, heading: atan2(q.x - p.x, q.y - p.y))
         }
-        trunk = TreeLayout.Stem(name: nil, level: 0, nodes: nodes, curve: nodes, commits: [], grown: 0,
+        let shown = trunkGrowIn.map { progress in
+            TreeLayout.cut(nodes, heights: nodes.map { Double($0.point.y) }, at: Self.crotchHeight * min(max(progress, 0), 1))
+        } ?? nodes
+        trunk = TreeLayout.Stem(name: nil, level: 0, nodes: shown, curve: shown, commits: [], grown: 0,
                                 isBud: false, isCheckedOut: false, scale: 1, fork: nil)
 
         let crotch = nodes[count].point
@@ -68,7 +76,8 @@ public struct YggdrasilLayout: Sendable {
             var planting = Self.planting(index: index, of: repos.count, name: repo.name, crotch: crotch)
             planting.fork = TreeLayout.Fork(parent: nil, node: count, width: nodes[count].width, heading: nodes[count].heading)
             return Bough(name: repo.name,
-                         layout: TreeLayout(tree: repo.tree, seed: repo.name, grown: repo.grown, planting: planting),
+                         layout: TreeLayout(tree: repo.tree, seed: repo.name, grown: repo.grown, planting: planting,
+                                            growIn: repo.growIn),
                          planting: planting)
         }
 

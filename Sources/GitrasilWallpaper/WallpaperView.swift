@@ -15,7 +15,7 @@ struct WallpaperView: View {
         let arrangement = background.arrangement.value
         let now = background.now
         // Read each pane here so Observation redraws when one publishes a new tree or growth.
-        let growing = panes.contains { pane in
+        let growing = background.isGrowingIn || panes.contains { pane in
             let _ = (pane.tree, pane.growth, pane.problem)
             return pane.growthStart != nil
         }
@@ -30,10 +30,12 @@ struct WallpaperView: View {
                     .foregroundStyle(style.captionInk)
             } else {
                 TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !growing)) { timeline in
+                    let date = timeline.date
                     let panes = panes.map { Pane(name: $0.repoName, tree: $0.tree, problem: $0.problem,
-                                                 grown: $0.grown(at: timeline.date)) }
+                                                 grown: $0.grown(at: date), growIn: background.growIn($0.repoURL, at: date)) }
+                    let trunkGrowIn = background.trunkGrowIn(at: date)
                     Canvas { context, size in
-                        let scene = Scene(style: style, now: now, size: size)
+                        let scene = Scene(style: style, now: now, size: size, trunkGrowIn: trunkGrowIn)
                         if arrangement == .singleTree, panes.filter({ $0.tree != nil }).count > 1 {
                             scene.drawSingleTree(panes, in: &context)
                         } else {
@@ -115,6 +117,8 @@ private struct Pane {
     let problem: String?
     /// Commits grown in so far, while a limb is growing in.
     let grown: [String: Double]
+    /// How far the whole tree (or bough) is in growing in from nothing, while it is.
+    let growIn: Double?
 }
 
 /// Lays the trees out on the screen and draws them, in either arrangement.
@@ -122,6 +126,8 @@ private struct Scene {
     let style: WallpaperStyle
     let now: Date
     let size: CGSize
+    /// How far the single tree's shared trunk has risen, while it's rising.
+    let trunkGrowIn: Double?
 
     /// A tree per repository, each standing in its own plot along the ground. Every tree is drawn at
     /// one shared scale (set by the screen and the number of plots, never by another tree), so a
@@ -141,7 +147,8 @@ private struct Scene {
             }
             let full = TreeLayout(tree: tree, seed: pane.name)
             let grown = pane.grown
-            let layout = grown.isEmpty ? full : TreeLayout(tree: tree, seed: pane.name, grown: grown)
+            let layout = pane.growIn.map { TreeLayout(tree: tree, seed: pane.name, growIn: $0) }
+                ?? (grown.isEmpty ? full : TreeLayout(tree: tree, seed: pane.name, grown: grown))
             var rng = SeededRandom(pane.name, -9)
             let x = center + (panes.count > 1 ? plot * rng.next(in: -0.05...0.05) : 0)
             let frame = TreeFrame(size: size, bounds: full.bounds, nominalHeight: Composition.nominalHeight,
@@ -160,10 +167,10 @@ private struct Scene {
     func drawSingleTree(_ panes: [Pane], in context: inout GraphicsContext) {
         let ready = panes.filter { $0.tree != nil }
         let full = YggdrasilLayout(repos: ready.map { .init(name: $0.name, tree: $0.tree!) })
-        let growing = ready.map(\.grown)
-        let layout = growing.allSatisfy(\.isEmpty) ? full : YggdrasilLayout(repos: zip(ready, growing).map {
-            .init(name: $0.name, tree: $0.tree!, grown: $1)
-        })
+        let still = trunkGrowIn == nil && ready.allSatisfy { $0.grown.isEmpty && $0.growIn == nil }
+        let layout = still ? full : YggdrasilLayout(repos: ready.map {
+            .init(name: $0.name, tree: $0.tree!, grown: $0.grown, growIn: $0.growIn)
+        }, trunkGrowIn: trunkGrowIn)
         let tall = Composition.groundY(size.height) - Composition.top - TreeFrame.margin
         // Its boughs lean, so it's rarely as tall as its trees would be on their own.
         let nominal = YggdrasilLayout.crotchHeight + Composition.nominalHeight * 0.82
@@ -352,7 +359,7 @@ private struct TreeDrawing {
         var pieces = shapes + roots
         // A shared trunk (no commits of its own) is rounded off at its top, so the boughs grow out of it.
         for stem in stems where stem.isTrunk && stem.commits.isEmpty && stem.fork == nil {
-            guard let top = stem.curve.last else { continue }
+            guard stem.curve.count >= 2, let top = stem.curve.last else { continue }
             let center = frame.point(top.point), r = top.width * frame.scale / 2
             pieces.append(Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: 2 * r, height: 2 * r)))
         }
@@ -504,7 +511,8 @@ private struct TreeDrawing {
 
     /// A soft wash of the branch's ink behind its tip, sized by how much it carries, fading with age.
     private func canopy(_ stem: TreeLayout.Stem, in context: inout GraphicsContext) {
-        guard style.canopyOpacity > 0, !stem.isBud, isLeafy(stem), let tip = stem.tip else { return }
+        guard style.canopyOpacity > 0, !stem.isBud, isLeafy(stem), stem.nodes.count >= 2, stem.grown > 0,
+              let tip = stem.tip else { return }
         let center = frame.point(tip.point)
         let leavesShown = min(Double(stem.commits.count), stem.grown)
         let radius = CGFloat(30 + 7 * sqrt(min(leavesShown, 40)))

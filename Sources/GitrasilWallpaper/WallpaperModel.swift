@@ -50,6 +50,10 @@ final class WallpaperModel {
         }
     }
 
+    /// Called when the first tree arrives (the pane was just pinned, or the app just started), so the
+    /// background can grow it in.
+    var onFirstTree: (() -> Void)?
+
     private let store: RepoGraphStore
     private var redraws = 0
 
@@ -85,12 +89,14 @@ final class WallpaperModel {
         guard let graph = store.graph else { return }
         let fresh = RepoTree(graph: graph)
         guard fresh != tree else { return }
+        let first = tree == nil
         let grew = tree.map { Self.growth(from: $0, to: fresh) } ?? [:]
         tree = fresh
         redraws += 1
         log("\(repoName): redraw #\(redraws) (derive #\(store.deriveCount)): \(fresh.trunk.count) trunk commits, "
             + "\(fresh.limbs.count) limbs, grew \(grew.keys.sorted())")
         if !grew.isEmpty, isVisible { grow(grew) }
+        if first { onFirstTree?() }
     }
 
     /// The stems with more commits than before (a new stem grows from nothing).

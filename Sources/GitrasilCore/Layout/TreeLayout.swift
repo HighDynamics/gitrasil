@@ -120,7 +120,10 @@ public struct TreeLayout: Sendable {
     ///   - grown: commits grown in so far, by stem name (`RepoTree.commitCounts` keys), for a stem
     ///     that's growing; a stem not in it is fully grown.
     ///   - planting: where the trunk stands and which way it leans (upright at the origin by default).
-    public init(tree: RepoTree, seed: String, grown: [String: Double] = [:], planting: Planting = .upright) {
+    ///   - growIn: while the whole tree grows in from nothing, how far along it is (0…1; `growIn(…)`);
+    ///     it overrides `grown`. Nil for the tree as it stands.
+    public init(tree: RepoTree, seed: String, grown: [String: Double] = [:], planting: Planting = .upright,
+                growIn: Double? = nil) {
         var stems: [Stem] = []
         let weights = Self.weights(tree)
 
@@ -158,7 +161,7 @@ public struct TreeLayout: Sendable {
             return Node(point: p, width: Self.width(weight: above[node] + 1), heading: atan2(q.x - p.x, q.y - p.y))
         }
         // The trunk's curve: its nodes, with points between any two far apart (the bare foot, say).
-        var trunkCurve: [Node] = []
+        var trunkCurve: [Node] = [], curveHeights: [Double] = []
         for (index, (a, b)) in zip(trunkNodes, trunkNodes.dropFirst()).enumerated() {
             let from = trunkHeights[index], to = trunkHeights[index + 1]
             let pieces = max(1, Int(ceil((to - from) / 0.03)))
@@ -166,17 +169,32 @@ public struct TreeLayout: Sendable {
                 let t = Double(piece) / Double(pieces)
                 let p = trunkPoint(from + (to - from) * t)
                 trunkCurve.append(Node(point: p, width: a.width + (b.width - a.width) * t, heading: a.heading))
+                curveHeights.append(from + (to - from) * t)
             }
         }
         trunkCurve += trunkNodes.suffix(1)
+        curveHeights += trunkHeights.suffix(1)
         let trunkName = tree.trunkName ?? ""
-        stems.append(Stem(name: tree.trunkName, level: 0, nodes: trunkNodes, curve: trunkCurve, commits: tree.trunk,
-                          grown: grown[trunkName] ?? Double(count), isBud: false,
+        var trunkGrown = grown[trunkName] ?? Double(count)
+        // Growing in, the trunk rises from its foot first; it's cut off at the height reached so far.
+        let trunkReach = growIn.map { min(max($0 / Self.trunkShare, 0), 1) * height }
+        var shownTrunk = trunkNodes, shownCurve = trunkCurve
+        if let reach = trunkReach {
+            shownTrunk = Self.cut(trunkNodes, heights: trunkHeights, at: reach)
+            shownCurve = Self.cut(trunkCurve, heights: curveHeights, at: reach)
+            let k = trunkHeights.lastIndex { $0 <= reach } ?? 0
+            trunkGrown = k < count ? Double(k) + (reach - trunkHeights[k]) / max(trunkHeights[k + 1] - trunkHeights[k], 1e-9)
+                                   : Double(count)
+        }
+        stems.append(Stem(name: tree.trunkName, level: 0, nodes: shownTrunk, curve: shownCurve, commits: tree.trunk,
+                          grown: trunkGrown, isBud: false,
                           isCheckedOut: tree.isTrunkCheckedOut, scale: 1, fork: planting.fork))
 
         // The limbs, each grown from its parent's node.
         var limbStems: [Stem?] = []
         var stemIndex: [Int: Int] = [:]
+        // Growing in, when each limb starts: as the trunk (or its parent limb) reaches its fork.
+        var starts: [Double] = []
         let sides = Self.sides(tree, outward: planting.outward)
         for (index, limb) in tree.limbs.enumerated() {
             let base: Node, level: Int, scale: Double, lean: Double, parentGrown: Double, fork: Fork
@@ -193,7 +211,11 @@ public struct TreeLayout: Sendable {
                     + (planting.isUpright ? 0 : base.heading * 0.7)
                 parentGrown = .infinity
                 fork = Fork(parent: 0, node: min(node, trunkNodes.count - 1), width: base.width, heading: base.heading)
+                starts.append(Self.trunkShare * trunkHeights[min(node, count)] / max(height, 1e-9))
             case .limb(let parentIndex, let node):
+                let parentStart = parentIndex < starts.count ? starts[parentIndex] : 1
+                let parentCount = Double(max(tree.limbs[parentIndex].commits.count, 1))
+                starts.append(parentStart + (1 - parentStart) * min(Double(node) / parentCount, 1))
                 guard let parent = limbStems[parentIndex], !parent.nodes.isEmpty else { limbStems.append(nil); continue }
                 base = parent.nodes[min(node, parent.nodes.count - 1)]
                 level = parent.level + 1
@@ -208,7 +230,12 @@ public struct TreeLayout: Sendable {
                             width: base.width, heading: base.heading)
             }
             let full = Double(max(limb.commits.count, 1))
-            let shown = min(full, grown[limb.name] ?? full, parentGrown)
+            var shown = min(full, grown[limb.name] ?? full, parentGrown)
+            if let growIn {
+                // Each limb grows from its start to the end, so they all finish together.
+                let start = starts[index]
+                shown = full * min(max((growIn - start) / max(1 - start, 1e-9), 0), 1)
+            }
             let (nodes, curve) = Self.grow(limb, from: base, lean: lean, scale: scale, shown: shown,
                                            weight: { k in Self.remainingWeight(limb, index: index, tree: tree, weights: weights, beyond: k) })
             let stem = Stem(name: limb.name, level: level, nodes: nodes, curve: curve, commits: limb.commits, grown: shown,
@@ -230,6 +257,33 @@ public struct TreeLayout: Sendable {
     }
 
     // MARK: - Pieces
+
+    /// The share of a grow-in spent raising the trunk; limbs start as it reaches their forks.
+    static let trunkShare = 0.45
+
+    /// Eased grow-in progress for the time since it began, as a fraction of its duration.
+    public static func growIn(_ fraction: Double) -> Double {
+        let t = min(max(fraction, 0), 1)
+        return t * t * (3 - 2 * t)
+    }
+
+    /// The run of `nodes` (at `heights` along the stem) up to `reach`, the last one placed part-way.
+    static func cut(_ nodes: [Node], heights: [Double], at reach: Double) -> [Node] {
+        guard let first = nodes.first else { return [] }
+        var kept = [first]
+        for i in nodes.indices.dropFirst() {
+            if heights[i] <= reach { kept.append(nodes[i]); continue }
+            let a = nodes[i - 1], b = nodes[i]
+            let span = heights[i] - heights[i - 1]
+            let f = span > 0 ? (reach - heights[i - 1]) / span : 0
+            if f > 0 {
+                kept.append(Node(point: CGPoint(x: a.point.x + (b.point.x - a.point.x) * f, y: a.point.y + (b.point.y - a.point.y) * f),
+                                 width: a.width + (b.width - a.width) * f, heading: b.heading))
+            }
+            break
+        }
+        return kept
+    }
 
     /// A trunk of `commits` drawn commits: a sapling for a young repository, full height from
     /// `fullTrunkCommits` on.

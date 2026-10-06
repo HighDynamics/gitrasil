@@ -18,11 +18,23 @@ final class BackgroundModel {
     /// More than this side by side gets too narrow to read.
     static let maxPanes = 4
 
+    /// Trees growing in from nothing: when each pane's tree (or, in the single tree, its bough)
+    /// started, and when the single tree's shared trunk did. Empty when nothing is growing in.
+    private(set) var growIns: [URL: Date] = [:]
+    private(set) var trunkGrowIn: Date?
+
+    /// A tree, or a bough, grows in over this long; a shared trunk rises in `trunkDuration` first.
+    static let growInDuration: TimeInterval = 2.2
+    static let trunkDuration: TimeInterval = 0.8
+
     let pins: PinnedRepositories
     let arrangement: ArrangementSetting
 
     var isVisible = true {
-        didSet { for pane in panes { pane.isVisible = isVisible } }
+        didSet {
+            for pane in panes { pane.isVisible = isVisible }
+            if !isVisible { growIns = [:]; trunkGrowIn = nil }
+        }
     }
 
     private var clock: Timer?
@@ -62,6 +74,7 @@ final class BackgroundModel {
             Task { @MainActor in
                 guard let self else { return }
                 self.log("arrangement: \(self.arrangement.value.rawValue)")
+                self.growInFromTheGround()
                 self.observeArrangement()
             }
         }
@@ -76,6 +89,7 @@ final class BackgroundModel {
             existing.removeValue(forKey: url) ?? {
                 let pane = WallpaperModel(repoURL: url)
                 pane.isVisible = isVisible
+                pane.onFirstTree = { [weak self] in self?.treeArrived(url) }
                 Task { await pane.start() }
                 return pane
             }()
@@ -84,6 +98,70 @@ final class BackgroundModel {
         if next.map(\.repoURL) != panes.map(\.repoURL) {
             panes = next
             log("panes: \(panes.map(\.repoName))")
+        }
+    }
+
+    // MARK: Growing in
+
+    /// How far along `url`'s tree (or bough) is in growing in at `date`, eased; nil when it isn't.
+    func growIn(_ url: URL, at date: Date) -> Double? {
+        growIns[url].map { TreeLayout.growIn(date.timeIntervalSince($0) / Self.growInDuration) }
+    }
+
+    /// How far the single tree's shared trunk has risen at `date`, eased; nil when it isn't rising.
+    func trunkGrowIn(at date: Date) -> Double? {
+        trunkGrowIn.map { TreeLayout.growIn(date.timeIntervalSince($0) / Self.trunkDuration) }
+    }
+
+    var isGrowingIn: Bool { !growIns.isEmpty || trunkGrowIn != nil }
+
+    /// Panes with a tree to draw.
+    private var ready: [WallpaperModel] { panes.filter { $0.tree != nil } }
+
+    /// Everything grows again from the ground, as when the arrangement changes: in the single tree,
+    /// the shared trunk rises first and the boughs follow from the crotch.
+    private func growInFromTheGround() {
+        guard isVisible else { return }
+        let now = Date()
+        if arrangement.value == .singleTree, ready.count > 1 {
+            trunkGrowIn = now
+            let boughs = now.addingTimeInterval(Self.trunkDuration * 0.85)
+            for pane in ready { growIns[pane.repoURL] = boughs }
+        } else {
+            for pane in ready { growIns[pane.repoURL] = now }
+        }
+        finishGrowingIn()
+    }
+
+    /// A pane's first tree: just pinned, or just started. In the orchard it grows in on its own plot.
+    /// In the single tree every bough moves to make room for it, so they all grow again from the
+    /// crotch (from the ground, when it's the second and the single tree is only now forming).
+    private func treeArrived(_ url: URL) {
+        guard isVisible else { return }
+        let now = Date()
+        switch (arrangement.value, ready.count) {
+        case (.singleTree, 2):
+            growInFromTheGround()
+            return
+        case (.singleTree, 3...):
+            // Boughs waiting on a rising trunk keep waiting.
+            for pane in ready { growIns[pane.repoURL] = max(growIns[pane.repoURL] ?? now, now) }
+        default:
+            growIns[url] = now
+        }
+        finishGrowingIn()
+    }
+
+    /// Once every grow-in has run, back to drawing only on change.
+    private func finishGrowingIn() {
+        let ends = growIns.values.map { $0.addingTimeInterval(Self.growInDuration) }
+            + [trunkGrowIn?.addingTimeInterval(Self.trunkDuration)].compactMap { $0 }
+        guard let last = ends.max() else { return }
+        Task {
+            try? await Task.sleep(for: .seconds(max(last.timeIntervalSinceNow, 0) + 0.05))
+            let now = Date()
+            growIns = growIns.filter { $0.value.addingTimeInterval(Self.growInDuration) > now }
+            if let trunk = trunkGrowIn, trunk.addingTimeInterval(Self.trunkDuration) <= now { trunkGrowIn = nil }
         }
     }
 

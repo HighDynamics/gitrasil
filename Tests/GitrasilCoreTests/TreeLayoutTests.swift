@@ -141,4 +141,51 @@ final class TreeLayoutTests: XCTestCase {
         XCTAssertEqual(TreeLayout.collarWidth(at: 0, own: 0.06, parentWidth: 0.05, angle: 1.0), 0.06,
                        "a stem wider than its parent stays its own width")
     }
+
+    func testGrownInFullyIsTheTreeAsItStands() {
+        let full = TreeLayout(tree: tree(), seed: "ash"), grown = TreeLayout(tree: tree(), seed: "ash", growIn: 1)
+        XCTAssertEqual(grown.stems.map(\.nodes), full.stems.map(\.nodes))
+        XCTAssertEqual(grown.stems.map(\.grown), full.stems.map(\.grown))
+    }
+
+    func testAGrowInStartsFromTheGroundAndOnlyEverAdds() {
+        let start = TreeLayout(tree: tree(), seed: "ash", growIn: 0)
+        XCTAssertLessThanOrEqual(start.stems[0].nodes.count, 1, "nothing above the foot yet")
+        XCTAssertTrue(start.stems.dropFirst().allSatisfy(\.nodes.isEmpty), "no limbs yet")
+        var top = -1.0, nodes = 0
+        for step in 1...20 {
+            let layout = TreeLayout(tree: tree(), seed: "ash", growIn: Double(step) / 20)
+            let height = Double(layout.stems[0].nodes.last!.point.y)
+            let count = layout.stems.reduce(0) { $0 + $1.nodes.count }
+            XCTAssertGreaterThanOrEqual(height, top)
+            XCTAssertGreaterThanOrEqual(count, nodes)
+            top = height
+            nodes = count
+        }
+    }
+
+    func testAGrowingInLimbWaitsForTheTrunkToReachItsFork() {
+        let full = TreeLayout(tree: tree(), seed: "ash")
+        let forkHeight = Double(stem(full, "feature/high")!.nodes[0].point.y)
+        for step in 1...40 {
+            let layout = TreeLayout(tree: tree(), seed: "ash", growIn: Double(step) / 40)
+            let reached = Double(layout.stems[0].nodes.last!.point.y)
+            if reached < forkHeight - 1e-9 {
+                XCTAssertEqual(stem(layout, "feature/high")?.nodes.count ?? 0, 0, "step \(step)")
+            }
+            let low = stem(layout, "feature/low")?.grown ?? 0
+            if low < 2 { XCTAssertEqual(stem(layout, "feature/low-sub")?.nodes.count ?? 0, 0, "the sub-branch waits for node 2") }
+        }
+        let partway = TreeLayout(tree: tree(), seed: "ash", growIn: 0.7)
+        XCTAssertEqual(Array(points(stem(partway, "feature/low")).prefix(2)), Array(points(stem(full, "feature/low")).prefix(2)),
+                       "a growing limb follows its full shape")
+    }
+
+    func testGrowInEasesInAndOut() {
+        XCTAssertEqual(TreeLayout.growIn(0), 0)
+        XCTAssertEqual(TreeLayout.growIn(1), 1)
+        XCTAssertEqual(TreeLayout.growIn(2), 1)
+        XCTAssertLessThan(TreeLayout.growIn(0.1), 0.1)
+        XCTAssertGreaterThan(TreeLayout.growIn(0.9), 0.9)
+    }
 }
