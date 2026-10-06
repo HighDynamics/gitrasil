@@ -42,24 +42,18 @@ struct WallpaperStyle {
     var watermarkFont: Font
     var watermarkOpacity: Double
 
-    /// Inks for the branches drawn together, each distinct while there are enough to go round. A
-    /// branch starts from the ink its name hashes to (stable across redraws and launches: FNV-1a with
-    /// a final mix, not Swift's seeded hash) and moves to the next free one when that's taken; names
-    /// claim in sorted order, so the same set of branches always gets the same inks.
-    func inks(for branches: some Sequence<String>) -> [String: Color] {
-        guard !branchInks.isEmpty else { return [:] }
-        var taken = Set<Int>(), result: [String: Color] = [:]
-        for branch in Set(branches).sorted() {
-            var hash = branch.utf8.reduce(UInt64(0xcbf29ce484222325)) { ($0 ^ UInt64($1)) &* 0x100000001b3 }
-            hash ^= hash >> 33; hash &*= 0xff51afd7ed558ccd; hash ^= hash >> 33
-            var slot = Int(hash % UInt64(branchInks.count))
-            if taken.count < branchInks.count {
-                while taken.contains(slot) { slot = (slot + 1) % branchInks.count }
-            }
-            taken.insert(slot)
-            result[branch] = branchInks[slot]
-        }
-        return result
+    /// A branch's ink, from its name alone: the same branch name is the same ink in every repository,
+    /// on every redraw and launch (FNV-1a with a final mix, not Swift's seeded hash). Two branches
+    /// can share an ink when their names hash alike.
+    func ink(forBranch branch: String) -> Color {
+        guard !branchInks.isEmpty else { return ink }
+        return branchInks[Self.inkSlot(forBranch: branch, count: branchInks.count)]
+    }
+
+    static func inkSlot(forBranch branch: String, count: Int) -> Int {
+        var hash = branch.utf8.reduce(UInt64(0xcbf29ce484222325)) { ($0 ^ UInt64($1)) &* 0x100000001b3 }
+        hash ^= hash >> 33; hash &*= 0xff51afd7ed558ccd; hash ^= hash >> 33
+        return Int(hash % UInt64(count))
     }
 
     /// How strongly a commit made `ageDays` ago is drawn.

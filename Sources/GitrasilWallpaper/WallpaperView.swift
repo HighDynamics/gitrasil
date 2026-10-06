@@ -65,14 +65,10 @@ private struct RepoPane: View {
         let pulseTips = model.pulseTips
         let ages = Self.ages(rows, now: now)
         let checkedOut = model.graph?.checkedOutBranches ?? []
-        // Trunk (lane 0) is drawn in plain ink, so it doesn't take a branch ink.
-        let inks = style.inks(for: rows.flatMap {
-            ($0.lane > 0 ? [$0.branch, $0.label].compactMap { $0 } : []) + $0.extraLabels
-        })
 
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: pulseStart == nil)) { timeline in
             Canvas { context, size in
-                let drawing = Drawing(style: style, rows: rows, ages: ages, inks: inks, checkedOut: checkedOut,
+                let drawing = Drawing(style: style, rows: rows, ages: ages, checkedOut: checkedOut,
                                       geometry: Geometry(size: size, rowCount: rows.count))
                 drawing.watermark(model.repoName, problem: model.problem, size: size, in: &context)
                 guard !rows.isEmpty else { return }
@@ -137,8 +133,6 @@ private struct Drawing {
     let style: WallpaperStyle
     let rows: [GraphRow]
     let ages: [Double]
-    /// Each drawn branch's ink, distinct within the pane.
-    let inks: [String: Color]
     /// Branches checked out in some worktree: their tips get a second ring.
     let checkedOut: Set<String>
     let geometry: Geometry
@@ -146,13 +140,13 @@ private struct Drawing {
     private var g: Geometry { geometry }
 
     /// Lane 0 is the trunk spine (and its anchor) in the repo-wide graph, drawn in plain ink; every
-    /// other lane is a branch in its own ink.
+    /// other lane is a branch in its name's ink, the same in every repository.
     private func ink(_ row: GraphRow) -> Color {
         row.lane == 0 ? style.ink : ink(branch: row.branch)
     }
 
     private func ink(branch: String?) -> Color {
-        branch.flatMap { inks[$0] } ?? style.ink
+        branch.map(style.ink(forBranch:)) ?? style.ink
     }
 
     private func opacity(_ index: Int) -> Double { style.opacity(ageDays: ages[index]) }
