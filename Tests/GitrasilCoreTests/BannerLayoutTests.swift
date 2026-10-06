@@ -125,4 +125,18 @@ final class BannerLayoutTests: XCTestCase {
         XCTAssertEqual(BannerLayout.hang(ribbonRequests(), obstacles: crown, bounds: bounds),
                        BannerLayout.hang(ribbonRequests(), obstacles: crown, bounds: bounds))
     }
+
+    func testTheCrownGridMeasuresCoverLikeBruteForce() {
+        var rng = SeededRandom(seed: 7)
+        func random(_ scale: CGFloat) -> CGRect {
+            CGRect(x: rng.next() * 1400 - 20, y: rng.next() * 800 - 20,
+                   width: rng.next() * scale, height: rng.next() * scale)
+        }
+        let obstacles = (0..<2000).map { _ in random(60) } + [CGRect(x: 96, y: 96, width: 48, height: 48), .zero]
+        let crown = BannerLayout.Crown(obstacles)
+        for _ in 0..<300 {
+            let rect = random(200)
+            XCTAssertEqual(crown.covered(rect), BannerLayout.covered(rect, by: obstacles), accuracy: 0.01, "\(rect)")
+        }
+    }
 }

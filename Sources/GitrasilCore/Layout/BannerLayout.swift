@@ -58,6 +58,7 @@ public enum BannerLayout {
     ///   - bounds: where pennants may go.
     public static func place(_ requests: [Request], obstacles: [CGRect], taken: [CGRect] = [],
                              bounds: CGRect) -> [Banner] {
+        let crown = Crown(obstacles)
         var placed: [CGRect] = taken
         var banners: [Banner] = []
         for request in requests {
@@ -72,7 +73,7 @@ public enum BannerLayout {
                         guard bounds.contains(rect),
                               !placed.contains(where: { $0.intersects(padded) || crosses(request.tip, hook, $0) })
                         else { continue }
-                        let cover = covered(rect, by: obstacles)
+                        let cover = crown.covered(rect)
                         let banner = Banner(id: request.id, tip: request.tip, hook: hook, rect: rect, side: side)
                         if cover == 0 { best = (banner, 0); break search }
                         // A little extra cover is worth a shorter thread and the outward side.
@@ -136,6 +137,7 @@ public enum BannerLayout {
     /// A ribbon with no such spot is left out.
     public static func hang(_ requests: [RibbonRequest], obstacles: [CGRect], taken: [CGRect] = [],
                             bounds: CGRect) -> [Ribbon] {
+        let crown = Crown(obstacles)
         var placed: [CGRect] = taken
         var ribbons: [Ribbon] = []
         for request in requests {
@@ -151,7 +153,7 @@ public enum BannerLayout {
                             other.intersects(padded) || crosses(anchor, ribbon.cordEnds.0, other)
                                 || crosses(anchor, ribbon.cordEnds.1, other)
                         }) else { continue }
-                        let cost = covered(rect, by: obstacles) + CGFloat(rank) * 40 + drop * 3 + CGFloat(offset) * 60
+                        let cost = crown.covered(rect) + CGFloat(rank) * 40 + drop * 3 + CGFloat(offset) * 60
                         if best == nil || cost < best!.cost { best = (ribbon, cost) }
                     }
                 }
@@ -170,7 +172,7 @@ public enum BannerLayout {
         CGRect(x: side > 0 ? hook.x : hook.x - size.width, y: hook.y, width: size.width, height: size.height)
     }
 
-    /// How much of `rect` the obstacles cover (overlaps counted again).
+    /// How much of `rect` the obstacles cover (overlaps counted again), by brute force.
     static func covered(_ rect: CGRect, by obstacles: [CGRect]) -> CGFloat {
         obstacles.reduce(0) { total, obstacle in
             let overlap = rect.intersection(obstacle)
@@ -178,8 +180,67 @@ public enum BannerLayout {
         }
     }
 
+    /// The crown's rects bucketed in a grid, so measuring a candidate's cover only looks at the rects
+    /// near it: a dense crown has thousands, and every banner tries dozens of spots.
+    struct Crown {
+        static let cell: CGFloat = 48
+        private let rects: [CGRect]
+        /// Rect indices per cell, row by row, over the cells the rects span from `origin`.
+        private var cells: [[Int]] = []
+        private var origin = (x: 0, y: 0), columns = 0, rows = 0
+
+        init(_ rects: [CGRect]) {
+            self.rects = rects.filter { !$0.isNull && !$0.isInfinite }
+            guard let first = self.rects.first else { return }
+            let low = Self.cell(first.minX, first.minY), high = Self.cell(first.maxX, first.maxY)
+            var minX = low.x, minY = low.y, maxX = high.x, maxY = high.y
+            for rect in self.rects {
+                let low = Self.cell(rect.minX, rect.minY), high = Self.cell(rect.maxX, rect.maxY)
+                minX = min(minX, low.x); minY = min(minY, low.y); maxX = max(maxX, high.x); maxY = max(maxY, high.y)
+            }
+            origin = (minX, minY)
+            columns = maxX - minX + 1
+            rows = maxY - minY + 1
+            cells = Array(repeating: [], count: columns * rows)
+            for (index, rect) in self.rects.enumerated() {
+                let low = Self.cell(rect.minX, rect.minY), high = Self.cell(rect.maxX, rect.maxY)
+                for y in low.y...high.y {
+                    for x in low.x...high.x { cells[(y - minY) * columns + x - minX].append(index) }
+                }
+            }
+        }
+
+        /// The same as `BannerLayout.covered(_:by:)`. A rect spanning several cells is counted once,
+        /// in the cell holding its overlap's top-left corner.
+        func covered(_ rect: CGRect) -> CGFloat {
+            guard !cells.isEmpty, !rect.isNull else { return 0 }
+            let low = Self.cell(rect.minX, rect.minY), high = Self.cell(rect.maxX, rect.maxY)
+            let x0 = max(low.x, origin.x), x1 = min(high.x, origin.x + columns - 1)
+            let y0 = max(low.y, origin.y), y1 = min(high.y, origin.y + rows - 1)
+            guard x0 <= x1, y0 <= y1 else { return 0 }
+            var total: CGFloat = 0
+            for y in y0...y1 {
+                for x in x0...x1 {
+                    for index in cells[(y - origin.y) * columns + x - origin.x] {
+                        let overlap = rect.intersection(rects[index])
+                        guard !overlap.isNull, Self.cell(overlap.minX, overlap.minY) == (x, y) else { continue }
+                        total += overlap.width * overlap.height
+                    }
+                }
+            }
+            return total
+        }
+
+        private static func cell(_ x: CGFloat, _ y: CGFloat) -> (x: Int, y: Int) {
+            (Int((x / cell).rounded(.down)), Int((y / cell).rounded(.down)))
+        }
+    }
+
     /// Whether the thread from `a` to `b` passes through `rect`.
     static func crosses(_ a: CGPoint, _ b: CGPoint, _ rect: CGRect) -> Bool {
+        // Most placed banners are nowhere near the thread.
+        if max(a.x, b.x) < rect.minX || min(a.x, b.x) > rect.maxX || max(a.y, b.y) < rect.minY
+            || min(a.y, b.y) > rect.maxY { return false }
         let steps = max(2, Int(hypot(b.x - a.x, b.y - a.y) / 4))
         return (0...steps).contains { i in
             let t = CGFloat(i) / CGFloat(steps)
