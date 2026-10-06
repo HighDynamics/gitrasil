@@ -13,7 +13,9 @@ import Observation
 ///   the graph depends on moved.
 /// - It publishes only when the graph actually changed.
 /// - While paused (the desktop is hidden) it derives nothing; one catch-up derive runs on resume.
-/// - An hourly `tick` catches what no ref event signals: a repository that was missing appearing.
+/// - An hourly `tick` catches what no ref event signals: a repository that was missing appearing,
+///   and a branch ageing past the cutoff (the fingerprint carries the day, so that's one derive a
+///   day).
 @MainActor
 @Observable
 public final class RepoGraphStore {
@@ -42,6 +44,7 @@ public final class RepoGraphStore {
     private let executor: WorktreeExecutor
     private let options: RepoGraphOptions
     private let settle: Duration
+    private let now: @Sendable () -> Date
     private var watcher: DirectoryWatching?
     private var settleTask: Task<Void, Never>?
     private var fingerprint: String?
@@ -49,11 +52,13 @@ public final class RepoGraphStore {
 
     /// - Parameters:
     ///   - settle: the quiet period a burst of ref changes must end with before one derive runs.
+    ///   - now: the clock the age cutoff is measured from.
     public init(repositoryURL: URL, options: RepoGraphOptions = RepoGraphOptions(),
-                settle: Duration = .seconds(1)) {
+                settle: Duration = .seconds(1), now: @escaping @Sendable () -> Date = { Date() }) {
         self.repositoryURL = repositoryURL
         self.options = options
         self.settle = settle
+        self.now = now
         // GIT_OPTIONAL_LOCKS=0 keeps every read lock-free, so our own git calls never write into the
         // directory we watch.
         self.runner = GitRunner(workdir: repositoryURL, extraEnvironment: GitRunner.appEnvironment)
@@ -67,7 +72,7 @@ public final class RepoGraphStore {
     }
 
     /// The hourly check: start watching if the repository couldn't be watched before (it was missing
-    /// or not yet a repository), and refresh.
+    /// or not yet a repository), and refresh, which re-derives on a new day for the age cutoff.
     public func tick() async {
         if isPaused {
             missedChange = true
@@ -89,10 +94,13 @@ public final class RepoGraphStore {
     public func refresh() async {
         let options = self.options
         let known = graph == nil ? nil : fingerprint
+        let date = now()
+        // Which branches are recent enough to draw changes by the day, without any ref moving.
+        let day = Int((date.timeIntervalSince1970 / 86_400).rounded(.down))
         let task = await executor.read(.graph) { runner -> (fingerprint: String, graph: RepoGraph?) in
-            let print = try await Derivations.refFingerprint(runner: runner)
+            let print = try await Derivations.refFingerprint(runner: runner) + "\nday \(day)"
             if print == known { return (print, nil) }
-            return (print, try await Derivations.repoGraph(runner: runner, options: options))
+            return (print, try await Derivations.repoGraph(runner: runner, options: options, now: date))
         }
         do {
             let result = try await task.value

@@ -133,4 +133,31 @@ final class RepoGraphStoreTests: XCTestCase {
         let derived = await waitFor(5) { store.graph?.trunk.first?.subject == "m1" }
         XCTAssertTrue(derived, "a commit after the tick is picked up")
     }
+
+    func testABranchAgeingPastTheCutoffGoesOnTheNextDay() async throws {
+        let repo = try await repo()
+        try await repo.createBranch("feature")
+        try await repo.commitFile("f1.txt", "1", message: "f1")
+        try await repo.checkout("main")
+        let committed = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-01-01T00:00:00Z"))
+        let clock = TestClock(committed.addingTimeInterval(5 * 86_400))
+        let store = RepoGraphStore(repositoryURL: repo.url, options: RepoGraphOptions(maxAge: 10 * 86_400),
+                                   now: { clock.date })
+
+        await store.tick()
+        XCTAssertEqual(store.graph?.branches.map(\.name), ["feature"])
+        await store.tick()
+        XCTAssertEqual(store.deriveCount, 1, "the same day with no ref moved is one derive")
+
+        clock.date = committed.addingTimeInterval(20 * 86_400)
+        await store.tick()
+        XCTAssertEqual(store.deriveCount, 2)
+        XCTAssertEqual(store.graph?.branches.map(\.name), [], "the branch aged out without a ref moving")
+    }
+}
+
+/// A clock a test can move.
+private final class TestClock: @unchecked Sendable {
+    var date: Date
+    init(_ date: Date) { self.date = date }
 }
