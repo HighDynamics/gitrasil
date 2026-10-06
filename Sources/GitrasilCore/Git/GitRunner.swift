@@ -19,11 +19,6 @@ public struct GitOutput: Sendable {
 
     /// stdout trimmed of surrounding whitespace/newlines — for single-value queries.
     public var trimmedStdout: String { (stdoutString ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
-
-    /// NUL-separated fields (from `-z` output), empty trailing field dropped.
-    public var nulFields: [String] {
-        (stdoutString ?? "").split(separator: "\0", omittingEmptySubsequences: true).map(String.init)
-    }
 }
 
 public enum GitError: Error, Sendable {

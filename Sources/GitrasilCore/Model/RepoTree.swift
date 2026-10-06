@@ -1,9 +1,8 @@
 import Foundation
 
 /// The repository's history as a tree: the trunk's first-parent history, and each drawn branch as a
-/// limb growing off the trunk or off another limb. Built from the repo-wide `HistoryGraph`
-/// (`Derivations.repoGraph`), so it carries the same commits; it only reorganizes them by where each
-/// branch forks.
+/// limb growing off the trunk or off another limb. Built from the `RepoGraph`, so it carries the
+/// same commits; it only reorganizes them by where each branch forks.
 ///
 /// Node numbering, shared with `TreeLayout`: on every stem, node 0 is the base (the trunk's ground,
 /// a limb's fork point) and node k is the k-th commit, oldest first.
@@ -72,40 +71,35 @@ public struct RepoTree: Sendable, Equatable {
 
 extension RepoTree {
 
-    /// The tree in a repo-wide graph: the spine is the trunk, each revealed lane a limb whose parent
-    /// holds its fork commit, and each pointer (a branch with no commits of its own) a bud on the
-    /// commit it points at. A fork older than anything drawn joins the trunk's oldest commit.
-    public init(graph: HistoryGraph) {
-        let spine = graph.segments.first { if case .trunk = $0.kind { return true } else { return false } }
-        let trunkNodes = (spine?.commits ?? []) + [graph.meetingCommit].compactMap { $0 }
-        let trunk = trunkNodes.reversed().map(Self.commit)
-        let trunkName = spine?.branchLabel
+    /// The tree in a repository's graph: its trunk, each branch a limb whose parent holds its fork
+    /// commit, and each bud (a branch with no commits of its own) on the commit it points at. A fork
+    /// older than anything drawn joins the trunk's oldest commit.
+    public init(graph: RepoGraph) {
+        let trunk = graph.trunk.reversed().map(Self.commit)
+        let trunkName = graph.trunkName
 
         // Where every drawn commit sits.
         var location: [String: Parent] = [:]
         for (index, commit) in trunk.enumerated() { location[commit.sha] = .trunk(node: index + 1) }
-        let lanes = graph.revealedLanes.compactMap { lane -> (name: String, commits: [Commit], forkBase: String?)? in
-            guard let name = lane.branchLabel else { return nil }
-            return (name, lane.commits.reversed().map(Self.commit), lane.forkBase)
-        }
-        for (laneIndex, lane) in lanes.enumerated() {
-            for (index, commit) in lane.commits.enumerated() {
-                location[commit.sha] = .limb(index: laneIndex, node: index + 1)
+        let branches = graph.branches.map { (name: $0.name, commits: $0.commits.reversed().map(Self.commit), forkBase: $0.forkBase) }
+        for (branchIndex, branch) in branches.enumerated() {
+            for (index, commit) in branch.commits.enumerated() {
+                location[commit.sha] = .limb(index: branchIndex, node: index + 1)
             }
         }
         let base = Parent.trunk(node: trunk.isEmpty ? 0 : 1)
 
-        // Order limbs so each follows its parent (lanes already mostly are: bases claim first).
+        // Order limbs so each follows its parent (they already mostly are: bases claim first).
         var order: [Int] = []
         var placed = Set<Int>()
         func place(_ index: Int, depth: Int = 0) {
-            guard !placed.contains(index), depth < lanes.count else { return }
-            if let fork = lanes[index].forkBase, case .limb(let parent, _) = location[fork], parent != index {
+            guard !placed.contains(index), depth < branches.count else { return }
+            if let fork = branches[index].forkBase, case .limb(let parent, _) = location[fork], parent != index {
                 place(parent, depth: depth + 1)
             }
             if placed.insert(index).inserted { order.append(index) }
         }
-        lanes.indices.forEach { place($0) }
+        branches.indices.forEach { place($0) }
         let newIndex = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
         func remap(_ parent: Parent?) -> Parent {
             switch parent {
@@ -117,11 +111,11 @@ extension RepoTree {
 
         let checkedOut = graph.checkedOutBranches
         var limbs = order.map { index in
-            Limb(name: lanes[index].name, commits: lanes[index].commits,
-                 parent: remap(lanes[index].forkBase.flatMap { location[$0] }),
-                 isCheckedOut: checkedOut.contains(lanes[index].name))
+            Limb(name: branches[index].name, commits: branches[index].commits,
+                 parent: remap(branches[index].forkBase.flatMap { location[$0] }),
+                 isCheckedOut: checkedOut.contains(branches[index].name))
         }
-        let buds = graph.revealedPointers.flatMap { sha, names in names.map { ($0, sha) } }.sorted { $0.0 < $1.0 }
+        let buds = graph.buds.flatMap { sha, names in names.map { ($0, sha) } }.sorted { $0.0 < $1.0 }
         for (name, sha) in buds where name != trunkName {
             guard let at = location[sha] else { continue }
             limbs.append(Limb(name: name, commits: [], parent: remap(at), isCheckedOut: checkedOut.contains(name)))
@@ -131,9 +125,7 @@ extension RepoTree {
                   isTrunkCheckedOut: trunkName.map(checkedOut.contains) ?? false)
     }
 
-    private static let iso = ISO8601DateFormatter()
-
-    private static func commit(_ node: CommitNode) -> Commit {
-        Commit(sha: node.sha, date: iso.date(from: node.date) ?? .distantPast)
+    private static func commit(_ commit: RepoGraph.Commit) -> Commit {
+        Commit(sha: commit.sha, date: commit.date)
     }
 }

@@ -39,7 +39,7 @@ final class WallpaperModel {
     /// What a tree draws: a long stretch of trunk, so fork heights spread out, and enough branches to
     /// make a crown, including dormant ones (they draw as bare limbs).
     static let options = RepoGraphOptions(trunkCommits: 200, maxBranches: 14, maxAge: 120 * 24 * 3600,
-                                          laneCommitLimit: 60)
+                                          branchCommitLimit: 60)
 
     /// False while the window is fully covered (a full-screen app, another Space's windows on top):
     /// the store stops deriving until it's visible again, and no animation runs.

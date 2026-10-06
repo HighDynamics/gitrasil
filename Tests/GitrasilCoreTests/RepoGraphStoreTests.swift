@@ -36,7 +36,7 @@ final class RepoGraphStoreTests: XCTestCase {
         await store.start()
 
         XCTAssertEqual(store.deriveCount, 1)
-        XCTAssertEqual(store.graph?.segments.first?.kind, .trunk(branch: "main"))
+        XCTAssertEqual(store.graph?.trunkName, "main")
         XCTAssertNil(store.lastError)
     }
 
@@ -51,7 +51,7 @@ final class RepoGraphStoreTests: XCTestCase {
         try await repo.commitFile("m2.txt", "2", message: "m2")
         await store.refresh()
         XCTAssertEqual(store.deriveCount, 2)
-        XCTAssertEqual(store.graph?.segments.first?.commits.first?.subject, "m2")
+        XCTAssertEqual(store.graph?.trunk.first?.subject, "m2")
     }
 
     func testABurstOfRefChangesIsOneDerive() async throws {
@@ -69,7 +69,7 @@ final class RepoGraphStoreTests: XCTestCase {
         XCTAssertTrue(derived, "the burst is picked up")
         try await Task.sleep(for: .seconds(1.5))
         XCTAssertEqual(store.deriveCount, 2, "the whole burst is one derive")
-        XCTAssertEqual(store.graph?.revealedLanes.first?.commits.map(\.subject), ["f1"])
+        XCTAssertEqual(store.graph?.branches.first?.commits.map(\.subject), ["f1"])
     }
 
     func testAWorkingTreeChangeDerivesNothing() async throws {
@@ -99,7 +99,7 @@ final class RepoGraphStoreTests: XCTestCase {
         store.isPaused = false
         let derived = await waitFor(5) { store.deriveCount == 2 }
         XCTAssertTrue(derived, "resuming runs one catch-up derive")
-        XCTAssertEqual(store.graph?.segments.first?.commits.first?.subject, "m2")
+        XCTAssertEqual(store.graph?.trunk.first?.subject, "m2")
     }
 
     func testRefPathFilter() {

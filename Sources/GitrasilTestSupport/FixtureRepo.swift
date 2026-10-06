@@ -3,9 +3,6 @@ import GitrasilCore
 
 /// Builds a real git repository in a temp directory so derivations can be tested against actual
 /// git output — no mocking of git. Commits use pinned dates/identity for reproducibility.
-///
-/// Shared by the XCTest suite and the `gitrasil-smoke` runner so both exercise identical
-/// scenarios (architecture decision #13).
 public final class FixtureRepo {
     public let url: URL
     public let runner: GitRunner

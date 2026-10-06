@@ -5,26 +5,26 @@ import Foundation
 public struct RepoGraphOptions: Sendable, Equatable {
     /// How many first-parent trunk commits make up the spine (the oldest is the bottom anchor).
     public var trunkCommits: Int
-    /// The most branch lanes to draw.
+    /// The most branches to draw.
     public var maxBranches: Int
     /// Branches whose tip is older than this are left out — unless checked out in a worktree.
     public var maxAge: TimeInterval
-    /// The most commits read per branch lane (longer lanes collapse to their tip when drawn).
-    public var laneCommitLimit: Int
+    /// The most commits read per branch.
+    public var branchCommitLimit: Int
 
     public init(trunkCommits: Int = 24, maxBranches: Int = 6, maxAge: TimeInterval = 30 * 24 * 3600,
-                laneCommitLimit: Int = 40) {
+                branchCommitLimit: Int = 40) {
         self.trunkCommits = trunkCommits
         self.maxBranches = maxBranches
         self.maxAge = maxAge
-        self.laneCommitLimit = laneCommitLimit
+        self.branchCommitLimit = branchCommitLimit
     }
 }
 
 extension Derivations {
 
-    // <sha> US <shortsha> US <author> US <iso-date> US <parents> US <subject>, records split by NUL.
-    private static let laneFormat = "%H%x1f%h%x1f%an%x1f%cI%x1f%P%x1f%s"
+    // <sha> US <committer unix time> US <parents> US <subject>, records split by NUL.
+    private static let commitFormat = "%H%x1f%ct%x1f%P%x1f%s"
 
     /// One local branch as `for-each-ref` reports it.
     struct BranchRef: Equatable {
@@ -36,26 +36,23 @@ extension Derivations {
     }
 
     /// The repository's graph as a whole, not relative to any worktree: the trunk's recent
-    /// first-parent history as the spine, and the recently active local branches as lanes forking
-    /// off it (or off each other). Emits a `HistoryGraph` so `GraphLayout` lays it out unchanged.
+    /// first-parent history as the spine, and the recently active local branches forking off it (or
+    /// off each other).
     ///
     /// Read-only — never writes refs, never touches the index — and costs a fixed handful of `git`
     /// spawns plus one per branch drawn.
     public static func repoGraph(
         runner: GitRunning, options: RepoGraphOptions = RepoGraphOptions(), now: Date = Date()
-    ) async throws -> HistoryGraph {
+    ) async throws -> RepoGraph {
         let branches = try await branchRefs(runner: runner)
         guard let spine = try await spineRef(runner: runner, branches: branches) else { return .empty }
 
         // 1. The spine: trunk's last N first-parent commits, newest first. The oldest is the anchor
-        // at the bottom, where lanes whose fork point lies further back join.
-        let spineCommits = try await laneCommits(
-            ["-n", "\(max(options.trunkCommits, 1))", spine.ref], runner: runner).map(\.node)
-        guard let anchor = spineCommits.last else { return .empty }
+        // at the bottom, where branches whose fork point lies further back join.
+        let spineCommits = try await firstParentCommits(
+            ["-n", "\(max(options.trunkCommits, 1))", spine.ref], runner: runner).map(\.commit)
+        guard !spineCommits.isEmpty else { return .empty }
         var drawn = Set(spineCommits.map(\.sha))
-        let segments = spineCommits.count > 1
-            ? [GraphSegment(kind: .trunk(branch: spine.label), commits: Array(spineCommits.dropLast()))]
-            : []
 
         // 2. Which branches: those checked out in a worktree first, then the most recently committed,
         // within the age limit, up to the cap.
@@ -68,49 +65,38 @@ extension Derivations {
             }
             .prefix(max(options.maxBranches, 0))
 
-        // 3. Each branch's commits not on the spine. Lanes claim commits fewest-first: a branch built
+        // 3. Each branch's commits not on the spine. Branches claim commits fewest-first: a branch built
         // on another branch contains all of that branch's commits, so the base claims them and the
         // branch on top keeps only its own, forking from the base's tip — a chain stacks into one
         // line rather than two parallel copies.
-        var unique: [(branch: BranchRef, commits: [(node: CommitNode, parent: String?)])] = []
+        var unique: [(branch: BranchRef, commits: [(commit: RepoGraph.Commit, parent: String?)])] = []
         for branch in candidates {
-            let commits = try await laneCommits(
-                ["-n", "\(max(options.laneCommitLimit, 1))", branch.tip, "^\(spine.tip)"], runner: runner)
+            let commits = try await firstParentCommits(
+                ["-n", "\(max(options.branchCommitLimit, 1))", branch.tip, "^\(spine.tip)"], runner: runner)
             unique.append((branch, commits))
         }
         unique.sort { a, b in
             a.commits.count != b.commits.count ? a.commits.count < b.commits.count : a.branch.committed < b.branch.committed
         }
 
-        var lanes: [GraphSegment] = []
-        var pointers: [String: [String]] = [:]
+        var drawnBranches: [RepoGraph.Branch] = []
+        var buds: [String: [String]] = [:]
         for (branch, commits) in unique {
-            // The branch's own run is everything newer than the first commit another lane (or the
+            // The branch's own run is everything newer than the first commit another branch (or the
             // spine) already drew; that commit is where it forks.
-            let own = commits.prefix { !drawn.contains($0.node.sha) }
+            let own = commits.prefix { !drawn.contains($0.commit.sha) }
             if own.isEmpty {
-                // Nothing of its own: a ref pill on its tip — if the tip is on screen at all.
-                if drawn.contains(branch.tip) { pointers[branch.tip, default: []].append(branch.name) }
+                // Nothing of its own: a bud on its tip, if the tip is drawn at all.
+                if drawn.contains(branch.tip) { buds[branch.tip, default: []].append(branch.name) }
                 continue
             }
-            let forkBase = own.count < commits.count ? commits[own.count].node.sha : own.last?.parent
-            lanes.append(GraphSegment(kind: .revealed(branch: branch.name), commits: own.map(\.node),
-                                      forkBase: forkBase))
-            drawn.formUnion(own.map(\.node.sha))
+            let forkBase = own.count < commits.count ? commits[own.count].commit.sha : own.last?.parent
+            drawnBranches.append(RepoGraph.Branch(name: branch.name, commits: own.map(\.commit), forkBase: forkBase))
+            drawn.formUnion(own.map(\.commit.sha))
         }
 
-        return HistoryGraph(
-            meetingCommit: anchor,
-            segments: segments,
-            trunkAhead: nil,
-            revealedLanes: lanes,
-            revealedPointers: pointers,
-            branchesBetween: 0,
-            isEmpty: false,
-            isDetached: false,
-            isOnTrunk: false,
-            hasUncommittedChanges: false,
-            checkedOutBranches: Set(branches.filter(\.isCheckedOut).map(\.name)))
+        return RepoGraph(trunkName: spine.label, trunk: spineCommits, branches: drawnBranches, buds: buds,
+                         checkedOutBranches: Set(branches.filter(\.isCheckedOut).map(\.name)))
     }
 
     // MARK: - Helpers
@@ -160,14 +146,14 @@ extension Derivations {
     }
 
     /// First-parent commits for a `git log` selection, newest first, each with its first parent.
-    static func laneCommits(_ selection: [String], runner: GitRunning) async throws -> [(node: CommitNode, parent: String?)] {
-        let out = try await runner.runChecked(["log", "--first-parent", "-z", "--format=\(laneFormat)"] + selection)
-        var result: [(node: CommitNode, parent: String?)] = []
+    static func firstParentCommits(_ selection: [String], runner: GitRunning) async throws -> [(commit: RepoGraph.Commit, parent: String?)] {
+        let out = try await runner.runChecked(["log", "--first-parent", "-z", "--format=\(commitFormat)"] + selection)
+        var result: [(commit: RepoGraph.Commit, parent: String?)] = []
         for record in (out.stdoutString ?? "").split(separator: "\0", omittingEmptySubsequences: true) {
-            let f = record.split(separator: "\u{1f}", maxSplits: 5, omittingEmptySubsequences: false).map(String.init)
-            guard f.count == 6 else { continue }
-            let parent = f[4].split(separator: " ").first.map(String.init)
-            result.append((CommitNode(sha: f[0], shortSHA: f[1], author: f[2], date: f[3], subject: f[5]), parent))
+            let f = record.split(separator: "\u{1f}", maxSplits: 3, omittingEmptySubsequences: false).map(String.init)
+            guard f.count == 4, let seconds = TimeInterval(f[1]) else { continue }
+            let parent = f[2].split(separator: " ").first.map(String.init)
+            result.append((RepoGraph.Commit(sha: f[0], date: Date(timeIntervalSince1970: seconds), subject: f[3]), parent))
         }
         return result
     }

@@ -9,8 +9,8 @@ final class RepoGraphDerivationTests: XCTestCase {
     /// Half a year on, every branch is stale.
     private let later = ISO8601DateFormatter().date(from: "2026-07-01T00:00:00Z")!
 
-    private func lane(_ graph: HistoryGraph, _ branch: String) -> GraphSegment? {
-        graph.revealedLanes.first { $0.kind == .revealed(branch: branch) }
+    private func branch(_ graph: RepoGraph, _ name: String) -> RepoGraph.Branch? {
+        graph.branches.first { $0.name == name }
     }
 
     /// main: root, m1, m2, m3, m4.
@@ -27,11 +27,9 @@ final class RepoGraphDerivationTests: XCTestCase {
         let graph = try await Derivations.repoGraph(
             runner: repo.runner, options: RepoGraphOptions(trunkCommits: 3), now: soon)
 
-        XCTAssertEqual(graph.segments.map(\.kind), [.trunk(branch: "main")])
-        XCTAssertEqual(graph.segments.first?.commits.map(\.subject), ["m4", "m3"])
-        XCTAssertEqual(graph.meetingCommit?.subject, "m2", "the oldest spine commit anchors the bottom")
-        XCTAssertFalse(graph.segments[0].isTruncatable, "the trunk spine is never collapsed")
-        XCTAssertTrue(graph.revealedLanes.isEmpty)
+        XCTAssertEqual(graph.trunkName, "main")
+        XCTAssertEqual(graph.trunk.map(\.subject), ["m4", "m3", "m2"], "newest first; the oldest anchors the bottom")
+        XCTAssertTrue(graph.branches.isEmpty)
         XCTAssertEqual(graph.checkedOutBranches, ["main"])
     }
 
@@ -42,11 +40,11 @@ final class RepoGraphDerivationTests: XCTestCase {
 
         let graph = try await Derivations.repoGraph(runner: repo.runner, now: soon)
 
-        XCTAssertEqual(graph.segments.first?.kind, .trunk(branch: "main"), "trunk stays the spine")
-        XCTAssertEqual(graph.segments.first?.commits.first?.subject, "m4")
-        XCTAssertEqual(lane(graph, "feature")?.commits.map(\.subject), ["f1"])
+        XCTAssertEqual(graph.trunkName, "main", "trunk stays the spine")
+        XCTAssertEqual(graph.trunk.first?.subject, "m4")
+        XCTAssertEqual(branch(graph, "feature")?.commits.map(\.subject), ["f1"])
         let m2 = try await repo.sha("main~2")
-        XCTAssertEqual(lane(graph, "feature")?.forkBase, m2)
+        XCTAssertEqual(branch(graph, "feature")?.forkBase, m2)
         XCTAssertEqual(graph.checkedOutBranches, ["feature"])
     }
 
@@ -61,17 +59,11 @@ final class RepoGraphDerivationTests: XCTestCase {
 
         let graph = try await Derivations.repoGraph(runner: repo.runner, now: soon)
 
-        XCTAssertEqual(lane(graph, "feature/a")?.commits.map(\.subject), ["a2", "a1"])
+        XCTAssertEqual(branch(graph, "feature/a")?.commits.map(\.subject), ["a2", "a1"])
         let mainTip = try await repo.sha("main"), aTip = try await repo.sha("feature/a")
-        XCTAssertEqual(lane(graph, "feature/a")?.forkBase, mainTip)
-        XCTAssertEqual(lane(graph, "feature/b")?.commits.map(\.subject), ["b1"], "b keeps only its own commit")
-        XCTAssertEqual(lane(graph, "feature/b")?.forkBase, aTip)
-
-        // Laid out, b continues a's lane, and a forks off trunk's tip into its own lane.
-        let rows = GraphLayout.rows(for: graph, expanded: true)
-        let laneOf = { (subject: String) in rows.first { $0.commit?.subject == subject }?.lane }
-        XCTAssertEqual(laneOf("b1"), laneOf("a1"))
-        XCTAssertNotEqual(laneOf("a1"), laneOf("m4"), "a branch off trunk's tip forks; trunk doesn't continue into it")
+        XCTAssertEqual(branch(graph, "feature/a")?.forkBase, mainTip)
+        XCTAssertEqual(branch(graph, "feature/b")?.commits.map(\.subject), ["b1"], "b keeps only its own commit")
+        XCTAssertEqual(branch(graph, "feature/b")?.forkBase, aTip)
     }
 
     func testStaleBranchesAreLeftOutUnlessCheckedOut() async throws {
@@ -84,8 +76,8 @@ final class RepoGraphDerivationTests: XCTestCase {
 
         let graph = try await Derivations.repoGraph(runner: repo.runner, now: later)
 
-        XCTAssertNil(lane(graph, "old"))
-        XCTAssertNotNil(lane(graph, "current"))
+        XCTAssertNil(branch(graph, "old"))
+        XCTAssertNotNil(branch(graph, "current"))
     }
 
     func testBranchCapKeepsTheMostRecent() async throws {
@@ -100,10 +92,10 @@ final class RepoGraphDerivationTests: XCTestCase {
         let graph = try await Derivations.repoGraph(
             runner: repo.runner, options: RepoGraphOptions(maxBranches: 2), now: soon)
 
-        XCTAssertEqual(Set(graph.revealedLanes.compactMap(\.branchLabel)), ["two", "three"])
+        XCTAssertEqual(Set(graph.branches.map(\.name)), ["two", "three"])
     }
 
-    func testBranchWithNoOwnCommitsIsAPillOnlyWhenItsTipIsDrawn() async throws {
+    func testBranchWithNoOwnCommitsIsABudOnlyWhenItsTipIsDrawn() async throws {
         let repo = try await trunkRepo()
         try await repo.git(["branch", "parked", "main~1"])   // on the spine
         try await repo.git(["branch", "ancient", "main~4"])  // below a 3-commit window
@@ -112,8 +104,8 @@ final class RepoGraphDerivationTests: XCTestCase {
             runner: repo.runner, options: RepoGraphOptions(trunkCommits: 3), now: soon)
 
         let parked = try await repo.sha("main~1")
-        XCTAssertEqual(graph.revealedPointers[parked], ["parked"])
-        XCTAssertFalse(graph.revealedPointers.values.contains { $0.contains("ancient") })
+        XCTAssertEqual(graph.buds[parked], ["parked"])
+        XCTAssertFalse(graph.buds.values.contains { $0.contains("ancient") })
     }
 
     func testPrefersTheLocalTrunkOverItsRemote() async throws {
@@ -123,8 +115,8 @@ final class RepoGraphDerivationTests: XCTestCase {
 
         let graph = try await Derivations.repoGraph(runner: repo.runner, now: soon)
 
-        XCTAssertEqual(graph.segments.first?.kind, .trunk(branch: "main"))
-        XCTAssertEqual(graph.segments.first?.commits.first?.subject, "m4")
+        XCTAssertEqual(graph.trunkName, "main")
+        XCTAssertEqual(graph.trunk.first?.subject, "m4")
     }
 
     func testEmptyRepository() async throws {
@@ -132,5 +124,13 @@ final class RepoGraphDerivationTests: XCTestCase {
         try await repo.initRepo()
         let graph = try await Derivations.repoGraph(runner: repo.runner, now: soon)
         XCTAssertTrue(graph.isEmpty)
+    }
+
+    func testCommitsCarryTheirCommitterDate() async throws {
+        let repo = try await trunkRepo()
+        let graph = try await Derivations.repoGraph(runner: repo.runner, now: soon)
+        let committed = try await repo.git(["log", "-1", "--format=%ct"])
+        let seconds = try XCTUnwrap(TimeInterval(committed))
+        XCTAssertEqual(graph.trunk.first?.date, Date(timeIntervalSince1970: seconds))
     }
 }

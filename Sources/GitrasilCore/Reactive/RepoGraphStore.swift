@@ -18,7 +18,7 @@ import Observation
 public final class RepoGraphStore {
 
     /// The latest graph, or nil before the first successful derive.
-    public private(set) var graph: HistoryGraph?
+    public private(set) var graph: RepoGraph?
 
     /// A human-readable message from the last failed derive, or nil.
     public private(set) var lastError: String?
@@ -77,7 +77,7 @@ public final class RepoGraphStore {
     public func refresh() async {
         let options = self.options
         let known = graph == nil ? nil : fingerprint
-        let task = await executor.read(.graph) { runner -> (fingerprint: String, graph: HistoryGraph?) in
+        let task = await executor.read(.graph) { runner -> (fingerprint: String, graph: RepoGraph?) in
             let print = try await Derivations.refFingerprint(runner: runner)
             if print == known { return (print, nil) }
             return (print, try await Derivations.repoGraph(runner: runner, options: options))
