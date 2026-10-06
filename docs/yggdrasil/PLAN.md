@@ -88,7 +88,7 @@ that grew animate from the old count to the new (the tip extends, new leaves unf
 from their fork point. It runs 1.8 s (eased) at ≤30 fps in the existing paused-clock `TimelineView`, then
 stops. Anything else (a limb shrinking, a fork moving) snaps.
 
-## Multiple pins: a grove
+## Multiple pins: a grove (round 1; now the orchard, see round 2)
 
 The panes stay side by side, but they share one ground line drawn across the whole screen, so the
 pinned repos read as a grove of trees on one horizon rather than separate tiles. Each tree's size
@@ -126,3 +126,55 @@ Findings:
 - `dnd-app`'s trunk resolves to `origin/master` (its `origin/HEAD`), so local `main` is drawn as a
   limb. That's the existing trunk detection, unchanged here.
 - `GraphLayout` is no longer used by the background; it stays in Core (with its tests) for now.
+
+## Round 2: an orchard or a single tree
+
+Daniel (via Arbor): "I want an option to display all pinned repos as a single tree or as an
+orchard. Otherwise, this direction seems pretty neat."
+
+**The setting.** The menu-bar menu, where the pins are, gains an *Arrange As* section: **Orchard**
+(the default) and **Single Tree**, with a check by the current one. It's saved next to the pins
+(`arrangement` in the same defaults suite) and switching redraws at once, without a restart. With
+one repository pinned, both draw that repository's own tree.
+
+**Orchard.** A tree per repository, each in its own plot along the shared ground:
+
+- All the trees share one scale, set only by the screen and the number of plots, so each stands as
+  tall as its own history makes it: a sapling beside a full-grown tree. A tree only shrinks when it
+  outgrows the screen's height or spills well past its plot (its crown may reach into the next
+  plot a little).
+- Each is planted a seeded touch off its plot's centre, so the row isn't ruled, and casts a faint
+  shade on the ground. The repo's name stays the plate caption under it.
+- The whole screen is now one canvas, so names at the tips avoid each other across trees too.
+
+**Single tree** (`YggdrasilLayout`, Core). One shared trunk rises from the ground to a crotch; from
+there a bough per repository fans out, left to right in pin order.
+
+- Each bough is that repository's own `TreeLayout`, *planted* in the crotch: its trunk (the
+  default branch) leaves leaning out and straightens as it rises, and its branches grow off it
+  exactly as they would off a tree of their own. The outer boughs send most of their limbs to the
+  outside, so the crowns interleave less.
+- The shared trunk carries all the boughs (pipe model: width² adds up) and has no leaves of its own.
+  The boughs grow out of it: each foot is sunk into the trunk's rounded top.
+- A repository's name is written once, at the foot of its bough (under a leaning bough, beside an
+  upright one), in the branch-label hand font and plain ink, as quiet as a branch name.
+- Inks, leaves, ageing, blossoms, the grow-in and draw-only-on-change are the same code as the
+  orchard.
+
+**Stability.** A bough's place and lean come from the number of boughs, its position and its name,
+never from another repository's history. A commit in one repository grows only its own bough; the
+shared trunk thickens a hair. Unit-tested, and checked on screen: three commits and a new branch in
+`ash` redrew once, grew in, and the rest of the tree (rowan's whole bough) stayed pixel-identical;
+the only changed pixels were ash's own limbs, the trunk and the ground shade.
+
+**Also fixed.** Wood is drawn over a paper underpaint, so where wood overlaps wood (a limb's base on
+its parent, a bough on the trunk) there's no darker seam. That was visible in dark mode.
+
+Screenshots (the app's own windows only; three throwaway repos: `ash` 144 trunk commits and 13
+branches, `elm` 50 and 5, the sapling `rowan` 9 and 3):
+
+- `orchard-light.jpg`, `orchard-dark.jpg`: the orchard on the 1440×900 display.
+- `single-tree-light.jpg`, `single-tree-dark.jpg`: the single tree on the 1440×900 display.
+- `orchard-wide-light.jpg`, `single-tree-wide-light.jpg`: both on the 3440×1440 display.
+
+Idle after a growth was 0.0% CPU, as before.
