@@ -154,6 +154,22 @@ final class RepoGraphStoreTests: XCTestCase {
         XCTAssertTrue(derived, "a commit after the tick is picked up")
     }
 
+    func testATickInFlightWhenStoppedWatchesNothing() async throws {
+        let parent = try FixtureRepo()
+        let store = RepoGraphStore(repositoryURL: parent.url.appendingPathComponent("later"), options: options)
+        await store.start()
+        try await parent.git(["init", "-q", "-b", "main", "later"])
+        try await parent.git(["-C", "later", "commit", "-q", "--allow-empty", "-m", "root"])
+
+        let ticking = Task { await store.tick() }
+        await Task.yield()   // the tick is under way, waiting on git
+        store.stop()
+        await ticking.value
+        XCTAssertFalse(store.isWatching, "a stopped store stays unwatched")
+        await store.tick()
+        XCTAssertFalse(store.isWatching)
+    }
+
     func testABranchAgeingPastTheCutoffGoesOnTheNextDay() async throws {
         let repo = try await repo()
         try await repo.createBranch("feature")

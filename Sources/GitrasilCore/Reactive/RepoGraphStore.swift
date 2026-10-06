@@ -49,6 +49,10 @@ public final class RepoGraphStore {
     private var settleTask: Task<Void, Never>?
     private var fingerprint: String?
     private var missedChange = false
+    private var isStopped = false
+
+    /// Whether the repository's refs are being watched. For tests.
+    var isWatching: Bool { watcher != nil }
 
     /// - Parameters:
     ///   - settle: the quiet period a burst of ref changes must end with before one derive runs.
@@ -74,6 +78,7 @@ public final class RepoGraphStore {
     /// The hourly check: start watching if the repository couldn't be watched before (it was missing
     /// or not yet a repository), and refresh, which re-derives on a new day for the age cutoff.
     public func tick() async {
+        guard !isStopped else { return }
         if isPaused {
             missedChange = true
             return
@@ -82,8 +87,10 @@ public final class RepoGraphStore {
         await installWatcher()
     }
 
-    /// Stop watching and drop any pending derive.
+    /// Stop watching and drop any pending derive, for good: a tick or install in flight finds the
+    /// store stopped and starts nothing.
     public func stop() {
+        isStopped = true
         watcher?.stop()
         watcher = nil
         settleTask?.cancel()
@@ -148,9 +155,11 @@ public final class RepoGraphStore {
     }
 
     private func installWatcher() async {
-        guard watcher == nil,
+        guard !isStopped, watcher == nil,
               let common = try? await runner.runChecked(["rev-parse", "--git-common-dir"]).trimmedStdout,
-              !common.isEmpty else { return }
+              !common.isEmpty,
+              // Stopped, or another install (a tick, a resume) won, while git ran.
+              !isStopped, watcher == nil else { return }
         // Relative to the repository itself, whether or not its URL ends in a slash (it doesn't when
         // the folder was missing as the URL was made).
         let commonURL = (common.hasPrefix("/") ? URL(fileURLWithPath: common)
