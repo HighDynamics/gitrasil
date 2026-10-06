@@ -60,6 +60,9 @@ derived values — no mocking of git.
 scripts/run-wallpaper.sh [--quit-after <seconds>]
 ```
 
+It builds and runs the release build (`.build/out/Products/Release/GitrasilWallpaper`): placing
+the banners over a dense crown is slow in a debug build.
+
 Pin repositories from the menu-bar item (the small tree), or a folder of them: a pinned folder
 stands for every repository in it (one or two folders down), as they come and go. Pins are a
 checklist in the menu; untick several in one visit. The background grows the first four (a folder
