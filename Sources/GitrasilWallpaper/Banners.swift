@@ -190,6 +190,7 @@ final class Breeze {
     @ObservationIgnored private var count = 0
     @ObservationIgnored private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     @ObservationIgnored private var power: PowerSourceWatcher?
+    @ObservationIgnored private var wakeCheck: Task<Void, Never>?
 
     init(environment: [String: String] = ProcessInfo.processInfo.environment) {
         isTurnedOff = environment["GITRASIL_BACKGROUND_BREEZE"] == "off"
@@ -202,8 +203,12 @@ final class Breeze {
         let workspace = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.screensDidSleepNotification, NSWorkspace.screensDidWakeNotification,
                      NSWorkspace.didWakeNotification] {
+            let isWake = name != NSWorkspace.screensDidSleepNotification
             observers.append((workspace, workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.update() }
+                MainActor.assumeIsolated {
+                    self?.update()
+                    if isWake { self?.updateAfterWake() }
+                }
             }))
         }
         observers.append((.default, NotificationCenter.default.addObserver(
@@ -239,6 +244,16 @@ final class Breeze {
             timer?.invalidate()
             timer = nil
             gustStart = nil
+        }
+    }
+
+    /// Right after a wake a display can still read as asleep, so look again once it's up.
+    private func updateAfterWake() {
+        wakeCheck?.cancel()
+        wakeCheck = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            self?.update()
         }
     }
 
