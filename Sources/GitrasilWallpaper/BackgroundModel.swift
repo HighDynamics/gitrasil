@@ -2,8 +2,8 @@ import Foundation
 import Observation
 import GitrasilCore
 
-/// The whole background: one pane per pinned repository (the first `maxPanes`), kept in step with
-/// the pins as they're added and removed, and how to arrange them (an orchard or a single tree).
+/// The whole background: one pane per repository the pins show (`PinnedRepositories.shown`, at most
+/// `maxPanes`), kept in step with them as pins and pinned folders change, and how to arrange them (an orchard or a single tree).
 @MainActor
 @Observable
 final class BackgroundModel {
@@ -52,14 +52,18 @@ final class BackgroundModel {
         reconcile()
         breeze.start()
         clock = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.now = Date() }
+            MainActor.assumeIsolated {
+                self?.now = Date()
+                // A pinned folder with more repositories than fit shows the most recently active.
+                self?.pins.refresh()
+            }
         }
     }
 
-    /// Re-arm Observation tracking on the pin list (one-shot, so re-armed on every change).
+    /// Re-arm Observation tracking on the shown repositories (one-shot, so re-armed on every change).
     private func observePins() {
         withObservationTracking {
-            _ = pins.urls
+            _ = pins.shown
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
@@ -83,10 +87,10 @@ final class BackgroundModel {
         }
     }
 
-    /// Match the panes to the pins: keep the stores of repos still pinned, start new ones, stop
+    /// Match the panes to the repositories shown: keep the stores of repos still pinned, start new ones, stop
     /// the rest.
     private func reconcile() {
-        let wanted = Array(pins.urls.prefix(Self.maxPanes))
+        let wanted = pins.shown
         var existing = Dictionary(panes.map { ($0.repoURL, $0) }, uniquingKeysWith: { a, _ in a })
         let next = wanted.map { url in
             existing.removeValue(forKey: url) ?? {

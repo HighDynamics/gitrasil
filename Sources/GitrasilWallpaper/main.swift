@@ -28,10 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let suite = PinnedRepositories.appSuiteName()
         let defaults = UserDefaults(suiteName: suite) ?? .standard
-        let pins = PinnedRepositories(storage: defaults)
+        let pins = PinnedRepositories(storage: defaults, limit: BackgroundModel.maxPanes)
         let arrangement = ArrangementSetting(storage: defaults)
         let background = BackgroundModel(pins: pins, arrangement: arrangement)
-        background.log("defaults \(suite), \(pins.urls.count) pinned, \(arrangement.value.rawValue)")
+        background.log("defaults \(suite), \(pins.pins.count) pinned (\(pins.shown.count) shown), \(arrangement.value.rawValue)")
 
         // Follows the system's light/dark mode; GITRASIL_BACKGROUND_APPEARANCE=light|dark pins one,
         // to preview the other mode without changing the system setting.

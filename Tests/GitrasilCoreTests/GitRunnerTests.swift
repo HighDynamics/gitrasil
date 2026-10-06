@@ -36,14 +36,14 @@ final class GitRunnerTests: XCTestCase {
         XCTAssertEqual(URL(fileURLWithPath: top).resolvingSymlinksInPath(), a.url.resolvingSymlinksInPath())
 
         final class MemoryPins: PinStorage {
-            var paths: [String] = []
-            func loadPins() -> [String] { paths }
-            func savePins(_ paths: [String]) { self.paths = paths }
+            var pins: [Pin] = []
+            func loadPins() -> [Pin] { pins }
+            func savePins(_ pins: [Pin]) { self.pins = pins }
         }
         let pins = PinnedRepositories(storage: MemoryPins())
         let pinnedA = try await pins.add(a.url)
         let pinnedB = try await pins.add(b.url)   // failed as "already pinned" before the fix
-        XCTAssertEqual(pinnedA, a.url.resolvingSymlinksInPath())
-        XCTAssertEqual(pinnedB, b.url.resolvingSymlinksInPath())
+        XCTAssertEqual(pinnedA.url, a.url.resolvingSymlinksInPath())
+        XCTAssertEqual(pinnedB.url, b.url.resolvingSymlinksInPath())
     }
 }
