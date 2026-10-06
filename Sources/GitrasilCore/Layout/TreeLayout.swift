@@ -45,6 +45,28 @@ public struct TreeLayout: Sendable {
         public var tip: Node? { nodes.last }
     }
 
+    /// Where and how a tree stands. Upright at the origin on its own; as a bough of a single shared
+    /// tree (`YggdrasilLayout`), its trunk leaves the shared trunk's crotch leaning out and bends back
+    /// up as it rises, and more of its limbs grow to the outside.
+    public struct Planting: Sendable, Equatable {
+        /// The trunk's foot.
+        public var foot: CGPoint
+        /// The trunk's lean at its foot: radians from straight up, positive leaning right.
+        public var heading: Double
+        /// Which side limbs off the trunk favour: -1 left, 1 right, 0 balanced.
+        public var outward: Double
+
+        public init(foot: CGPoint = .zero, heading: Double = 0, outward: Double = 0) {
+            self.foot = foot
+            self.heading = heading
+            self.outward = outward
+        }
+
+        public static let upright = Planting()
+
+        var isUpright: Bool { self == .upright }
+    }
+
     /// The trunk first, then every limb after its parent.
     public let stems: [Stem]
     /// Every node's extent, widths included.
@@ -73,7 +95,8 @@ public struct TreeLayout: Sendable {
     ///   - seed: the repository's identity (its name): seeds the trunk's sway.
     ///   - grown: commits grown in so far, by stem name (`RepoTree.commitCounts` keys), for a stem
     ///     that's growing; a stem not in it is fully grown.
-    public init(tree: RepoTree, seed: String, grown: [String: Double] = [:]) {
+    ///   - planting: where the trunk stands and which way it leans (upright at the origin by default).
+    public init(tree: RepoTree, seed: String, grown: [String: Double] = [:], planting: Planting = .upright) {
         var stems: [Stem] = []
         let weights = Self.weights(tree)
 
@@ -83,9 +106,17 @@ public struct TreeLayout: Sendable {
         var rng = SeededRandom(seed, -1)
         let sway = (amplitude: rng.next(in: 0.015...0.04), waves: rng.next(in: 0.6...1.3),
                     phase: rng.next(in: 0...(2 * .pi)), lean: rng.next(in: -0.07...0.07))
+        // A leaning trunk (a bough) is walked out along its length, straightening as it rises.
+        let arc = planting.isUpright ? [] : Self.bough(heading: planting.heading, length: height)
         func trunkPoint(_ h: Double) -> CGPoint {
             let t = h / max(height, 0.001)
-            return CGPoint(x: sway.amplitude * sin(t * .pi * 2 * sway.waves + sway.phase) * t + sway.lean * t * t, y: h)
+            let x = sway.amplitude * sin(t * .pi * 2 * sway.waves + sway.phase) * t + sway.lean * t * t
+            guard !arc.isEmpty else { return CGPoint(x: x, y: h) }
+            let at = min(max(h / Self.boughStep, 0), Double(arc.count - 1))
+            let i = min(Int(at), arc.count - 2), f = at - Double(i)
+            let a = arc[i], b = arc[i + 1]
+            return CGPoint(x: planting.foot.x + a.x + (b.x - a.x) * f + x * 0.5,
+                           y: planting.foot.y + a.y + (b.y - a.y) * f)
         }
         let trunkHeights = [0] + (0..<count).map { index in height * Self.trunkLift(Self.trunkPosition(index, of: count)) }
         // Remaining weight above each trunk node: its later commits plus every limb leaving at or above.
@@ -104,11 +135,12 @@ public struct TreeLayout: Sendable {
         }
         // The trunk's curve: its nodes, with points between any two far apart (the bare foot, say).
         var trunkCurve: [Node] = []
-        for (a, b) in zip(trunkNodes, trunkNodes.dropFirst()) {
-            let pieces = max(1, Int(ceil((b.point.y - a.point.y) / 0.03)))
+        for (index, (a, b)) in zip(trunkNodes, trunkNodes.dropFirst()).enumerated() {
+            let from = trunkHeights[index], to = trunkHeights[index + 1]
+            let pieces = max(1, Int(ceil((to - from) / 0.03)))
             for piece in 0..<pieces {
                 let t = Double(piece) / Double(pieces)
-                let p = trunkPoint(a.point.y + (b.point.y - a.point.y) * t)
+                let p = trunkPoint(from + (to - from) * t)
                 trunkCurve.append(Node(point: p, width: a.width + (b.width - a.width) * t, heading: a.heading))
             }
         }
@@ -120,7 +152,7 @@ public struct TreeLayout: Sendable {
 
         // The limbs, each grown from its parent's node.
         var limbStems: [Stem?] = []
-        let sides = Self.sides(tree)
+        let sides = Self.sides(tree, outward: planting.outward)
         for (index, limb) in tree.limbs.enumerated() {
             let base: Node, level: Int, scale: Double, lean: Double, parentGrown: Double
             var rng = SeededRandom(limb.name)
@@ -133,6 +165,7 @@ public struct TreeLayout: Sendable {
                 // Low limbs reach out nearly level and long; high ones rise steeply and stay short.
                 scale = 1.05 - 0.45 * u
                 lean = side * ((88 - 48 * u) + rng.next(in: -12...12)) * .pi / 180
+                    + (planting.isUpright ? 0 : base.heading * 0.7)
                 parentGrown = .infinity
             case .limb(let parentIndex, let node):
                 guard let parent = limbStems[parentIndex], !parent.nodes.isEmpty else { limbStems.append(nil); continue }
@@ -207,7 +240,10 @@ public struct TreeLayout: Sendable {
     /// keeps it stable where it matters — new branches mostly fork from recent trunk, at the top, so
     /// they never flip the limbs below them. (Limbs off limbs choose their own side as they grow:
     /// mostly outward.)
-    static func sides(_ tree: RepoTree) -> [Double] {
+    ///
+    /// A bough's limbs favour its outer side (`outward`): the tally starts that far behind on it, so
+    /// roughly the first half of the limbs go outward before the balancing begins.
+    static func sides(_ tree: RepoTree, outward: Double = 0) -> [Double] {
         var sides = tree.limbs.map { limb -> Double in
             var rng = SeededRandom(limb.name)
             return rng.next() < 0.5 ? -1 : 1
@@ -220,7 +256,7 @@ public struct TreeLayout: Sendable {
             if case .trunk(let node) = tree.limbs[index].parent { return (index, node) }
             return nil
         }.sorted { a, b in a.node != b.node ? a.node < b.node : tree.limbs[a.index].name < tree.limbs[b.index].name }
-        var lean = 0.0
+        var lean = -outward * max(1, Double(offTrunk.count) * 0.6)
         for (index, _) in offTrunk {
             if lean > 0 { sides[index] = -1 } else if lean < 0 { sides[index] = 1 }
             lean += sides[index] * branches[index]
@@ -275,4 +311,31 @@ public struct TreeLayout: Sendable {
 
     /// Sub-steps per commit step in a limb's curve.
     static let substeps = 4
+
+    /// A bough's centreline, from its foot, a point every `boughStep` of its length: it leaves at
+    /// `heading` and straightens toward its tip, to about a third of its lean.
+    static func bough(heading: Double, length: Double) -> [CGPoint] {
+        var points = [CGPoint.zero]
+        var point = CGPoint.zero
+        let count = Int(ceil((length + 0.05) / boughStep))
+        for i in 1...max(count, 1) {
+            let t = min(Double(i) / max(length / boughStep, 1), 1)
+            let h = heading * (1 - 0.65 * t)
+            point = CGPoint(x: point.x + sin(h) * boughStep, y: point.y + cos(h) * boughStep)
+            points.append(point)
+        }
+        return points
+    }
+
+    static let boughStep = 0.005
+
+    /// The trunk's width at its foot, before it's grown: what a shared trunk has to carry for it.
+    public static func footWidth(_ tree: RepoTree) -> Double {
+        let weights = weights(tree)
+        let limbs = tree.limbs.indices.reduce(0.0) { total, index in
+            if case .trunk = tree.limbs[index].parent { return total + weights[index] }
+            return total
+        }
+        return width(weight: limbs + Double(tree.trunk.count) * trunkCommitWeight + 1)
+    }
 }
