@@ -13,7 +13,8 @@ struct WallpaperView: View {
         let style = WallpaperStyle.inkOnCream(dark: colorScheme == .dark)
         let panes = background.panes
         let arrangement = background.settings.arrangement
-        let showsBanners = background.settings.showsBanners
+        let showsBranchNames = background.settings.showsBranchNames
+        let showsRepoNames = background.settings.showsRepoNames
         let now = background.now
         // Read each pane here so Observation redraws when one publishes a new tree or growth.
         let growing = background.isGrowingIn || panes.contains { pane in
@@ -45,11 +46,11 @@ struct WallpaperView: View {
                             }
                         }
                     }
-                    if showsBanners {
+                    if showsBranchNames || showsRepoNames {
                         // The names hang where the full-grown trees put them, planned only when a tree changes.
                         let plan = Landscape(style: style, now: now, size: proxy.size, trunkGrowIn: nil).plan(
                             panes.map { Pane(name: $0.repoName, tree: $0.tree, problem: $0.problem, grown: [:], growIn: nil) },
-                            arrangement: arrangement)
+                            arrangement: arrangement, branchNames: showsBranchNames, repoNames: showsRepoNames)
                         BannerLayer(plan: plan, hidden: hiddenBanners(plan), style: style, breeze: background.breeze)
                     }
                 }

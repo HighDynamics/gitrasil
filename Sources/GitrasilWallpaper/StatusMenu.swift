@@ -6,7 +6,7 @@ import GitrasilCore
 /// listed, unticked, until the menu closes, so ticking it again puts it back in its place), each with
 /// a button to reveal it in Finder; a pinned folder lists its repositories under it, ticked where
 /// they're shown. Adds repositories or folders through an open panel, holds the settings (how several
-/// are arranged, whether names hang on banners and sway in gusts), and quits.
+/// are arranged, which names hang on banners and whether they sway in gusts), and quits.
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
 
@@ -92,10 +92,15 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         }
         menu.addItem(.separator())
         menu.addItem(.sectionHeader(title: "Banners"))
-        let banners = action("Show Banners", #selector(toggleBanners), nil)
-        banners.state = settings.showsBanners ? .on : .off
-        banners.toolTip = "Branch names hang on banners from their tips; in a single tree, each repository’s name hangs from its bough"
-        menu.addItem(banners)
+        let branches = action("Branch Names", #selector(toggleBranchNames), nil)
+        branches.state = settings.showsBranchNames ? .on : .off
+        branches.toolTip = "Each branch’s name hangs on a pennant from its tip"
+        menu.addItem(branches)
+        let repos = action("Repository Names", #selector(toggleRepoNames), nil)
+        repos.state = settings.showsRepoNames ? .on : .off
+        repos.toolTip = "In a single tree, each repository’s name hangs on a ribbon from its bough "
+            + "(an orchard always writes it under its tree)"
+        menu.addItem(repos)
         let gusts = action("Sway in Gusts", #selector(toggleGusts), nil)
         gusts.state = settings.gusts && !gustsOverridden ? .on : .off
         gusts.toolTip = gustsOverridden
@@ -118,17 +123,22 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         settings.arrangement = choice
     }
 
-    @objc private func toggleBanners() {
-        settings.showsBanners.toggle()
+    @objc private func toggleBranchNames() {
+        settings.showsBranchNames.toggle()
+    }
+
+    @objc private func toggleRepoNames() {
+        settings.showsRepoNames.toggle()
     }
 
     @objc private func toggleGusts() {
         settings.gusts.toggle()
     }
 
-    /// Gusts sway banners, so with none shown (or the breeze turned off from outside) there's nothing to set.
+    /// Gusts sway banners, so with none hanging (or the breeze turned off from outside) there's nothing
+    /// to set.
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        menuItem.action != #selector(toggleGusts) || (settings.showsBanners && !gustsOverridden)
+        menuItem.action != #selector(toggleGusts) || (settings.hasBanners && !gustsOverridden)
     }
 
     func menuDidClose(_ menu: NSMenu) {

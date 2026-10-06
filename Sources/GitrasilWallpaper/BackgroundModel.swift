@@ -78,9 +78,9 @@ final class BackgroundModel {
     /// from the ground, and the breeze follows the banners and gusts.
     private func observeSettings() {
         let arrangement = settings.arrangement
-        let banners = (settings.showsBanners, settings.gusts)
+        let names = (settings.showsBranchNames, settings.showsRepoNames, settings.gusts)
         withObservationTracking {
-            _ = (settings.arrangement, settings.showsBanners, settings.gusts)
+            _ = (settings.arrangement, settings.showsBranchNames, settings.showsRepoNames, settings.gusts)
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
@@ -88,10 +88,12 @@ final class BackgroundModel {
                     logEvent("arrangement: \(self.settings.arrangement.rawValue)")
                     self.growInFromTheGround()
                 }
-                if (self.settings.showsBanners, self.settings.gusts) != banners {
-                    logEvent("banners \(self.settings.showsBanners ? "shown" : "hidden"), gusts \(self.settings.gusts ? "on" : "off")")
-                    self.updateBreeze()
+                if (self.settings.showsBranchNames, self.settings.showsRepoNames, self.settings.gusts) != names {
+                    logEvent("branch names \(self.settings.showsBranchNames ? "shown" : "hidden"), "
+                             + "repository names \(self.settings.showsRepoNames ? "shown" : "hidden"), "
+                             + "gusts \(self.settings.gusts ? "on" : "off")")
                 }
+                self.updateBreeze()
                 self.observeSettings()
             }
         }
@@ -99,7 +101,7 @@ final class BackgroundModel {
 
     /// Gusts blow only while there are banners to sway and they're wanted.
     private func updateBreeze() {
-        breeze.isEnabled = settings.gusts && settings.showsBanners
+        breeze.isEnabled = settings.gustsBlow
     }
 
     /// Match the panes to the repositories shown: keep the stores of repos still pinned, start new ones, stop

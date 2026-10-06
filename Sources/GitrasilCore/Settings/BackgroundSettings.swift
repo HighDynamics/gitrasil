@@ -18,23 +18,29 @@ public protocol SettingsStorage: AnyObject {
 extension UserDefaults: SettingsStorage {}
 
 /// The background's settings from the menu, saved between launches next to the pins. Unset (or
-/// unreadable) values take their defaults: an orchard, banners shown, gusts blowing.
+/// unreadable) values take their defaults: an orchard, every name shown, gusts blowing.
 @MainActor
 @Observable
 public final class BackgroundSettings {
 
     static let arrangementKey = "arrangement"
-    static let bannersKey = "showsBanners"
+    static let branchNamesKey = "showsBranchNames"
+    static let repoNamesKey = "showsRepoNames"
     static let gustsKey = "gusts"
 
     public var arrangement: Arrangement {
         didSet { if arrangement != oldValue { storage.set(arrangement.rawValue, forKey: Self.arrangementKey) } }
     }
 
-    /// Whether names hang on banners: branches at their tips, and in the single tree each repository
-    /// on its bough.
-    public var showsBanners: Bool {
-        didSet { if showsBanners != oldValue { storage.set(showsBanners, forKey: Self.bannersKey) } }
+    /// Whether branch names hang on pennants from their tips.
+    public var showsBranchNames: Bool {
+        didSet { if showsBranchNames != oldValue { storage.set(showsBranchNames, forKey: Self.branchNamesKey) } }
+    }
+
+    /// Whether, in the single tree, each repository's name hangs on a ribbon from its bough. The
+    /// orchard always writes a repository's name under its tree.
+    public var showsRepoNames: Bool {
+        didSet { if showsRepoNames != oldValue { storage.set(showsRepoNames, forKey: Self.repoNamesKey) } }
     }
 
     /// Whether a gust now and then sways the banners; off, they hang still.
@@ -42,12 +48,21 @@ public final class BackgroundSettings {
         didSet { if gusts != oldValue { storage.set(gusts, forKey: Self.gustsKey) } }
     }
 
+    /// Whether anything hangs that a gust could sway: branch pennants, or ribbons in the single tree.
+    public var hasBanners: Bool {
+        showsBranchNames || showsRepoNames && arrangement == .singleTree
+    }
+
+    /// Whether gusts blow: wanted, and with banners to sway.
+    public var gustsBlow: Bool { gusts && hasBanners }
+
     private let storage: SettingsStorage
 
     public init(storage: SettingsStorage) {
         self.storage = storage
         arrangement = (storage.object(forKey: Self.arrangementKey) as? String).flatMap(Arrangement.init(rawValue:)) ?? .orchard
-        showsBanners = storage.object(forKey: Self.bannersKey) as? Bool ?? true
+        showsBranchNames = storage.object(forKey: Self.branchNamesKey) as? Bool ?? true
+        showsRepoNames = storage.object(forKey: Self.repoNamesKey) as? Bool ?? true
         gusts = storage.object(forKey: Self.gustsKey) as? Bool ?? true
     }
 }

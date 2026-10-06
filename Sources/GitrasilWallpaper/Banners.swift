@@ -41,8 +41,9 @@ struct BannerPlan {
 
 extension Landscape {
 
-    /// Where the names hang over the trees as they stand (`panes` with their full trees).
-    func plan(_ panes: [Pane], arrangement: Arrangement) -> BannerPlan {
+    /// Where the names hang over the trees as they stand (`panes` with their full trees): the branches'
+    /// pennants and, in the single tree, the repositories' ribbons, each only if shown.
+    func plan(_ panes: [Pane], arrangement: Arrangement, branchNames: Bool, repoNames: Bool) -> BannerPlan {
         var plan = BannerPlan()
         var trees: [(pane: String, stems: [TreeLayout.Stem], frame: TreeFrame)] = []
         var obstacles: [CGRect] = []
@@ -54,15 +55,19 @@ extension Landscape {
                 trees.append((bough.name, bough.layout.stems, frame))
                 obstacles += crown(bough.layout.stems, frame: frame)
             }
-            // The repositories' ribbons first: the branches' pennants keep off them.
-            plan.ribbons = ribbons(full.boughs, frame: frame, obstacles: obstacles)
-            taken = plan.ribbons.map(\.ribbon.footprint)
+            // The repositories' ribbons first, so they hang in the same places whether or not the
+            // branches' pennants are shown; the pennants keep off them.
+            if repoNames {
+                plan.ribbons = ribbons(full.boughs, frame: frame, obstacles: obstacles)
+                taken = plan.ribbons.map(\.ribbon.footprint)
+            }
         } else {
             for planted in orchard(panes) {
                 trees.append((panes[planted.index].name, planted.full.stems, planted.frame))
                 obstacles += crown(planted.full.stems, frame: planted.frame)
             }
         }
+        guard branchNames else { return plan }
 
         var requests: [(request: BannerLayout.Request, rank: (Bool, Bool, Date), hanging: (BannerLayout.Banner) -> BannerPlan.Hanging)] = []
         for tree in trees {
@@ -161,7 +166,7 @@ final class Breeze {
     /// The pause between gusts, before its seeded jitter of up to a third either way.
     static let pause: TimeInterval = 45
 
-    /// Whether gusts blow (the menu's setting, while banners are shown). Turning it off stills them
+    /// Whether gusts blow (the menu's setting, while banners hang). Turning it off stills them
     /// at once.
     var isEnabled = false {
         didSet {
