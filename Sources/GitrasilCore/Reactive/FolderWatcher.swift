@@ -8,12 +8,20 @@ public final class FolderWatcher {
     public let paths: [String]
     private var sources: [DispatchSourceFileSystemObject] = []
     private var pending: DispatchWorkItem?
+    /// Each path's folder as it was opened (nil where there was none), to notice one replaced.
+    private var identities: [Identity?] = []
 
     public init(paths: [String], delay: TimeInterval = 0.3, onChange: @escaping () -> Void) {
         self.paths = paths
         for path in paths {
             let descriptor = open(path, O_EVTONLY)
-            guard descriptor >= 0 else { continue }
+            var info = stat()
+            guard descriptor >= 0, fstat(descriptor, &info) == 0 else {
+                if descriptor >= 0 { close(descriptor) }
+                identities.append(nil)
+                continue
+            }
+            identities.append(Identity(info))
             let source = DispatchSource.makeFileSystemObjectSource(
                 fileDescriptor: descriptor, eventMask: [.write, .rename, .delete], queue: .main)
             source.setEventHandler { [weak self] in
@@ -26,6 +34,21 @@ public final class FolderWatcher {
             source.resume()
             sources.append(source)
         }
+    }
+
+    /// Whether every path is still the folder that was opened. A folder deleted and made again (or
+    /// one made where there was none) is a new folder, which this watcher can't see into.
+    public var isCurrent: Bool {
+        zip(paths, identities).allSatisfy { path, identity in
+            var info = stat()
+            return (stat(path, &info) == 0 ? Identity(info) : nil) == identity
+        }
+    }
+
+    private struct Identity: Equatable {
+        let device: dev_t
+        let inode: ino_t
+        init(_ info: stat) { device = info.st_dev; inode = info.st_ino }
     }
 
     public func stop() {

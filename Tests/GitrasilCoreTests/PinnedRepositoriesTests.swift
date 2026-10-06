@@ -186,6 +186,28 @@ final class PinnedRepositoriesTests: XCTestCase {
         XCTAssertEqual(pins.shown.map(\.lastPathComponent), ["birch", "elm", "oak"], "seen by watching, without a refresh")
     }
 
+    func testAPinnedFolderMadeAgainIsWatchedAgain() async throws {
+        let root = try folder(["ash": nil])
+        storage.pins = [Pin(.folder, root)]
+        let pins = PinnedRepositories(storage: storage)
+        XCTAssertEqual(pins.shown.map(\.lastPathComponent), ["ash"])
+
+        // Deleted and made again (a re-clone, a restore): the old watcher saw the folder go, but
+        // can't see into the new one.
+        try FileManager.default.removeItem(at: root)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("elm/.git"), withIntermediateDirectories: true)
+        pins.refresh()   // the hourly refresh, or the menu opening
+        XCTAssertEqual(pins.shown.map(\.lastPathComponent), ["elm"])
+        try await Task.sleep(for: .seconds(1))   // the old watcher's last events have settled
+
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("oak/.git"), withIntermediateDirectories: true)
+        let deadline = Date().addingTimeInterval(5)
+        while pins.shown.map(\.lastPathComponent) != ["elm", "oak"], Date() < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(pins.shown.map(\.lastPathComponent), ["elm", "oak"], "the new folder is watched")
+    }
+
     func testAnUnpinnedPinGoesBackInItsPlace() {
         let a = Pin(.repository, URL(fileURLWithPath: "/a")), b = Pin(.folder, URL(fileURLWithPath: "/b")),
             c = Pin(.repository, URL(fileURLWithPath: "/c"))

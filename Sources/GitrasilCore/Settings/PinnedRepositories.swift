@@ -173,12 +173,12 @@ public final class PinnedRepositories {
     }
 
     /// Watch each pinned folder and its plain subfolders (not the repositories' insides), re-armed
-    /// as those come and go.
+    /// as those come and go, or are deleted and made again.
     private func watch() {
         var next: [URL: FolderWatcher] = [:]
         for pin in pins where pin.kind == .folder {
             let directories = [pin.url] + Self.plainSubfolders(of: pin.url)
-            if let existing = watchers[pin.url], existing.paths == directories.map(\.path) {
+            if let existing = watchers[pin.url], existing.paths == directories.map(\.path), existing.isCurrent {
                 next[pin.url] = existing
             } else {
                 next[pin.url] = FolderWatcher(paths: directories.map(\.path)) { [weak self] in
