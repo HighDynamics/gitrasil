@@ -1,7 +1,9 @@
 # Gitrasil
 
-A live macOS desktop background drawn from your git branch graph. It sits behind the desktop icons
-and redraws as your repositories change. See `docs/live-background/DESIGN.md`.
+A live macOS desktop background that grows each pinned repository as a tree: the default branch is
+the trunk, branches and worktrees are limbs (sub-branches where history forks again), commits are
+leaves, and only branch names are written, at the tips. It sits behind the desktop icons and grows
+as your repositories change. See `docs/live-background/DESIGN.md` and `docs/yggdrasil/PLAN.md`.
 
 Gitrasil started as a worktree GUI (one window per repository, one tab per worktree). That app was
 removed; it remains in git history up to the `Drop the worktree GUI` commit.
@@ -22,7 +24,8 @@ layer on top.
   wins), so a burst of filesystem events collapses to one re-derive.
 - **`Derive/`** — pure, git-backed derivations (trunk detection, graph topology), tested directly
   against real fixture repos.
-- **`Layout/GraphLayout`** — turns a graph into lanes and rows, independent of any renderer.
+- **`Layout/TreeLayout`** — turns a `RepoTree` (trunk, limbs, buds) into seeded, stable tree
+  geometry, independent of any renderer. `GraphLayout` (lanes and rows) is no longer drawn.
 - **`Reactive/`** — FSEvents watching and `RepoGraphStore`, which keeps one repository's graph live
   (ref changes only, settled, fingerprint-gated).
 - **`Settings/`** — `PinnedRepositories`, the saved list of repositories the background draws.
@@ -49,8 +52,8 @@ derived values — no mocking of git.
 scripts/run-wallpaper.sh [--quit-after <seconds>]
 ```
 
-Pin repositories from the menu-bar item (the branch icon). The background draws the first four side
-by side, in a desktop-level window behind the icons on every display, and redraws as they change. Pins are saved between launches in the `com.gitrasil.background` defaults
+Pin repositories from the menu-bar item (the branch icon). The background grows the first four as a grove
+on one ground line, in a desktop-level window behind the icons on every display, and redraws as they change. Pins are saved between launches in the `com.gitrasil.background` defaults
 (`GITRASIL_BACKGROUND_DEFAULTS_SUITE` names another suite, e.g. for a test run).
 `GITRASIL_BACKGROUND_APPEARANCE=light|dark` previews a mode without changing the system's. Ctrl-C or
 the menu's Quit removes it; nothing is installed and the system wallpaper is never changed.
