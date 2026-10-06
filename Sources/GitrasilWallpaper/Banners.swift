@@ -295,7 +295,8 @@ final class Breeze {
     }
 }
 
-/// Calls back on the main run loop when the power source changes (plugged in, on battery).
+/// Calls back on the main run loop when the power source changes (plugged in, on battery), also
+/// while a menu is open.
 private final class PowerSourceWatcher {
     private let changed: () -> Void
     private var source: CFRunLoopSource?
@@ -307,11 +308,11 @@ private final class PowerSourceWatcher {
             guard let context else { return }
             Unmanaged<PowerSourceWatcher>.fromOpaque(context).takeUnretainedValue().changed()
         }, context)?.takeRetainedValue()
-        if let source { CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode) }
+        if let source { CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes) }
     }
 
     deinit {
-        if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .defaultMode) }
+        if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
     }
 }
 
