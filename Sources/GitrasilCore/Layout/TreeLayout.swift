@@ -214,9 +214,12 @@ public struct TreeLayout: Sendable {
                 starts.append(Self.trunkShare * trunkHeights[min(node, count)] / max(height, 1e-9))
             case .limb(let parentIndex, let node):
                 let parentStart = parentIndex < starts.count ? starts[parentIndex] : 1
-                let parentCount = Double(max(tree.limbs[parentIndex].commits.count, 1))
+                let parentCount = Double(max(tree.limbs.indices.contains(parentIndex) ? tree.limbs[parentIndex].commits.count : 0, 1))
                 starts.append(parentStart + (1 - parentStart) * min(Double(node) / parentCount, 1))
-                guard let parent = limbStems[parentIndex], !parent.nodes.isEmpty else { limbStems.append(nil); continue }
+                // `RepoTree` puts a limb's parent before it; a limb whose parent isn't laid out yet
+                // (or at all) is left out rather than crashing.
+                guard limbStems.indices.contains(parentIndex), let parent = limbStems[parentIndex], !parent.nodes.isEmpty
+                else { limbStems.append(nil); continue }
                 base = parent.nodes[min(node, parent.nodes.count - 1)]
                 level = parent.level + 1
                 scale = parent.scale * Self.childScale

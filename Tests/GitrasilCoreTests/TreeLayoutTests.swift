@@ -24,6 +24,19 @@ final class TreeLayoutTests: XCTestCase {
 
     private func points(_ stem: TreeLayout.Stem?) -> [CGPoint] { stem?.nodes.map(\.point) ?? [] }
 
+    func testALimbWhoseParentComesAfterItIsLeftOut() {
+        let limbs = [
+            RepoTree.Limb(name: "early-sub", commits: commits("s", 2), parent: .limb(index: 1, node: 1), isCheckedOut: false),
+            RepoTree.Limb(name: "feature", commits: commits("f", 3), parent: .trunk(node: 10), isCheckedOut: false),
+            RepoTree.Limb(name: "stray", commits: commits("x", 2), parent: .limb(index: 9, node: 0), isCheckedOut: false),
+        ]
+        let layout = TreeLayout(tree: RepoTree(trunkName: "main", trunk: commits("t", 20), limbs: limbs,
+                                               isTrunkCheckedOut: false), seed: "ash")
+        XCTAssertNotNil(stem(layout, "feature"))
+        XCTAssertNil(stem(layout, "early-sub"))
+        XCTAssertNil(stem(layout, "stray"))
+    }
+
     func testTheSameTreeGrowsTheSameEveryTime() {
         let a = TreeLayout(tree: tree(), seed: "ash"), b = TreeLayout(tree: tree(), seed: "ash")
         XCTAssertEqual(a.stems.map(\.nodes), b.stems.map(\.nodes))
