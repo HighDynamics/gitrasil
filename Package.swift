@@ -13,11 +13,11 @@ let package = Package(
     ],
     targets: [
         .target(name: "GitrasilCore"),
-        // The history graph drawn as a live desktop background (docs/live-background).
-        .executableTarget(name: "GitrasilWallpaper", dependencies: ["GitrasilCore"]),
-        // Fixture-repo harness and topology scenario builders that stand up real git repos in
-        // temp dirs, so derivations are asserted against actual git output (architecture
-        // decision #13).
+        // The pinned repositories grown as trees on a live desktop background (docs/yggdrasil).
+        .executableTarget(name: "GitrasilWallpaper", dependencies: ["GitrasilCore"],
+                          resources: [.copy("Resources/MenuBarIcon.pdf")]),
+        // Fixture-repo harness that stands up real git repos in temp dirs, so derivations are
+        // asserted against actual git output (architecture decision #13).
         .target(name: "GitrasilTestSupport", dependencies: ["GitrasilCore"]),
         .testTarget(
             name: "GitrasilCoreTests",
