@@ -34,6 +34,9 @@ final class WallpaperModel {
         return tree == nil && store.lastError != nil ? "Git can’t read this repository." : nil
     }
 
+    /// Whether its first read is done: it has a tree, or a problem to show instead.
+    var isSettled: Bool { tree != nil || problem != nil }
+
     static let growthDuration: TimeInterval = 1.8
 
     /// What a tree draws: a long stretch of trunk, so fork heights spread out, and enough branches to
@@ -54,6 +57,10 @@ final class WallpaperModel {
     /// background can grow it in.
     var onFirstTree: (() -> Void)?
 
+    /// Called when the first read finds a problem instead of a tree (the folder is missing, or git
+    /// can't read it), so a scene waiting for every tree stops waiting for this one.
+    var onFirstProblem: (() -> Void)?
+
     private let store: RepoGraphStore
     private var redraws = 0
 
@@ -66,6 +73,7 @@ final class WallpaperModel {
     func start() async {
         observe()
         await store.start()
+        if tree == nil, problem != nil { onFirstProblem?() }
     }
 
     func stop() {
@@ -115,11 +123,16 @@ final class WallpaperModel {
         return growth
     }
 
+    /// How far the running growth is at `date` (eased, 0…1); nil when idle.
+    func growthProgress(at date: Date) -> Double? {
+        guard let growthStart else { return nil }
+        let t = min(max(date.timeIntervalSince(growthStart) / Self.growthDuration, 0), 1)
+        return 1 - pow(1 - t, 3)
+    }
+
     /// Commits grown in so far, by stem, at `date` in the running growth (eased); empty when idle.
     func grown(at date: Date) -> [String: Double] {
-        guard let growthStart else { return [:] }
-        let t = min(max(date.timeIntervalSince(growthStart) / Self.growthDuration, 0), 1)
-        let eased = 1 - pow(1 - t, 3)
+        guard let eased = growthProgress(at: date) else { return [:] }
         return growth.mapValues { $0.from + ($0.to - $0.from) * eased }
     }
 

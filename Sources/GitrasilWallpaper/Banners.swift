@@ -17,6 +17,8 @@ struct BannerPlan {
         /// The repository (its pane's id) and the stem (`RepoTree.commitCounts` key) it names.
         let pane: String
         let stem: String
+        /// Its stem's stretch of a grow-in (`TreeLayout.schedule`): it fades in as the stem finishes.
+        let stretch: TreeLayout.Stretch
         let name: String
         let ink: Color
         let alpha: Double
@@ -32,6 +34,8 @@ struct BannerPlan {
         let pane: String
         let name: String
         let seed: String
+        /// Its bough's stretch of a grow-in: it fades in as the bough finishes.
+        let stretch: TreeLayout.Stretch
         let fontSize: CGFloat
 
         var id: String { ribbon.id }
@@ -48,7 +52,7 @@ extension Landscape {
     func plan(_ panes: [Pane], arrangement: Arrangement, branchNames: Bool, repoNames: Bool) -> BannerPlan {
         var plan = BannerPlan()
         // Each tree by its pane's id.
-        var trees: [(pane: String, stems: [TreeLayout.Stem], frame: TreeFrame)] = []
+        var trees: [(pane: String, stems: [TreeLayout.Stem], schedule: TreeLayout.GrowInSchedule, frame: TreeFrame)] = []
         var obstacles: [CGRect] = []
         var taken: [CGRect] = []
         if isSingleTree(panes, arrangement: arrangement) {
@@ -56,7 +60,7 @@ extension Landscape {
             let (full, frame) = singleTree(ready)
             obstacles += crown([full.trunk], frame: frame)
             for (pane, bough) in zip(ready, full.boughs) {
-                trees.append((pane.id, bough.layout.stems, frame))
+                trees.append((pane.id, bough.layout.stems, bough.layout.schedule, frame))
                 obstacles += crown(bough.layout.stems, frame: frame)
             }
             // The repositories' ribbons first, so they hang in the same places whether or not the
@@ -67,7 +71,7 @@ extension Landscape {
             }
         } else {
             for planted in orchard(panes) {
-                trees.append((panes[planted.index].id, planted.full.stems, planted.frame))
+                trees.append((panes[planted.index].id, planted.full.stems, planted.full.schedule, planted.frame))
                 obstacles += crown(planted.full.stems, frame: planted.frame)
             }
         }
@@ -90,10 +94,11 @@ extension Landscape {
                 let outward: Double = abs(dx) > 8 ? (dx > 0 ? 1 : -1) : (rng.next() < 0.5 ? -1 : 1)
                 let id = "\(tree.pane)\u{1F}\(name)"
                 let ink = drawing.ink(stem), alpha = max(0.6, drawing.freshness(stem.commits.last))
+                let stretch = tree.schedule.stretch(of: name) ?? tree.schedule.trunk
                 requests.append((BannerLayout.Request(id: id, tip: point, outward: outward, size: size),
                                  (stem.isTrunk, stem.isCheckedOut, stem.commits.last?.date ?? .distantPast),
-                                 { BannerPlan.Hanging(banner: $0, pane: tree.pane, stem: name, name: name, ink: ink,
-                                                      alpha: alpha, fontSize: fontSize) }))
+                                 { BannerPlan.Hanging(banner: $0, pane: tree.pane, stem: name, stretch: stretch, name: name,
+                                                      ink: ink, alpha: alpha, fontSize: fontSize) }))
             }
         }
         // The trunk and checked-out branches first, then the most recently active.
@@ -137,7 +142,7 @@ extension Landscape {
                          obstacles: [CGRect]) -> [BannerPlan.Ribbon] {
         let fontSize = max(18, (style.ribbonSize * frame.detail).rounded())
         var requests: [BannerLayout.RibbonRequest] = []
-        var panes: [String: Pane] = [:]
+        var panes: [String: (pane: Pane, stretch: TreeLayout.Stretch)] = [:]
         for (pane, bough) in boughs {
             guard let stem = bough.layout.stems.first, stem.curve.count > 2 else { continue }
             let anchors = [0.14, 0.2, 0.26, 0.32, 0.4, 0.48, 0.56].map { fraction -> CGPoint in
@@ -146,11 +151,14 @@ extension Landscape {
                 return CGPoint(x: point.x, y: point.y + node.width * frame.scale / 2)
             }
             let id = "ribbon\u{1F}\(pane.id)"
-            panes[id] = pane
+            panes[id] = (pane, bough.layout.schedule.trunk)
             requests.append(.init(id: id, anchors: anchors, size: RibbonShape.size(pane.name, fontSize: fontSize, style: style)))
         }
         return BannerLayout.hang(requests, obstacles: obstacles, bounds: bounds).compactMap { ribbon in
-            panes[ribbon.id].map { BannerPlan.Ribbon(ribbon: ribbon, pane: $0.id, name: $0.name, seed: $0.seed, fontSize: fontSize) }
+            panes[ribbon.id].map {
+                BannerPlan.Ribbon(ribbon: ribbon, pane: $0.pane.id, name: $0.pane.name, seed: $0.pane.seed, stretch: $0.stretch,
+                                  fontSize: fontSize)
+            }
         }
     }
 }
@@ -229,6 +237,13 @@ final class Breeze {
         let t = date.timeIntervalSince(gustStart) / Self.gustLength
         guard t > 0, t < 1 else { return 0 }
         return pow(sin(.pi * t), 2)
+    }
+
+    /// A gust at once (gusts were just turned on), if gusts may blow; the timer takes over after it.
+    func blowNow() {
+        guard mayBlow else { return }
+        timer?.invalidate()
+        gust()
     }
 
     /// Whether gusts may blow now.
@@ -324,8 +339,8 @@ private final class PowerSourceWatcher {
 /// so a frame of wind only turns layers.
 struct BannerLayer: View {
     let plan: BannerPlan
-    /// Banners whose wood is growing in: hidden until it's grown, then fading in.
-    let hidden: Set<String>
+    /// How far each banner has faded in (0…1) while its wood grows in; one not listed is shown.
+    let shown: [String: Double]
     let style: WallpaperStyle
     let breeze: Breeze
 
@@ -336,20 +351,16 @@ struct BannerLayer: View {
             let seconds = timeline.date.timeIntervalSinceReferenceDate
             ZStack(alignment: .topLeading) {
                 ForEach(plan.ribbons) { ribbon in
-                    let isHidden = hidden.contains(ribbon.id)
                     // Heavier: it swings less, and the wind doesn't lift it.
                     RibbonView(ribbon: ribbon, style: style,
                                angle: Self.sway(ribbon.id, side: 1, lift: 0, strength: strength * 0.35, seconds: seconds))
-                        .opacity(isHidden ? 0 : 1)
-                        .animation(isHidden ? nil : .easeIn(duration: 0.7), value: isHidden)
+                        .opacity(shown[ribbon.id] ?? 1)
                 }
                 ForEach(plan.banners) { hanging in
-                    let isHidden = hidden.contains(hanging.id)
                     BannerView(hanging: hanging, style: style,
                                angle: Self.sway(hanging.id, side: hanging.banner.side, lift: 1.8, strength: strength,
                                                 seconds: seconds))
-                        .opacity(isHidden ? 0 : 1)
-                        .animation(isHidden ? nil : .easeIn(duration: 0.7), value: isHidden)
+                        .opacity(shown[hanging.id] ?? 1)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

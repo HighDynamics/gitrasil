@@ -95,6 +95,9 @@ public struct TreeLayout: Sendable {
     public let stems: [Stem]
     /// Every node's extent, widths included.
     public let bounds: CGRect
+    /// When each stem grows during a grow-in (the same whether or not this layout is growing in), so a
+    /// stem's banner can fade in as its wood finishes.
+    public let schedule: GrowInSchedule
 
     // MARK: Shape constants
 
@@ -122,15 +125,18 @@ public struct TreeLayout: Sendable {
     ///   - planting: where the trunk stands and which way it leans (upright at the origin by default).
     ///   - growIn: while the whole tree grows in from nothing, how far along it is (0…1; `growIn(…)`);
     ///     it overrides `grown`. Nil for the tree as it stands.
+    ///   - shuffle: a layout seed mixed into the trunk's sway and each limb's side, lean and turns
+    ///     (`SeededRandom.key(_:shuffle:)`); 0 for the shape the names alone give. The same seed always
+    ///     gives the same shape, and the branching (which limb leaves where) never changes with it.
     public init(tree: RepoTree, seed: String, grown: [String: Double] = [:], planting: Planting = .upright,
-                growIn: Double? = nil) {
+                growIn: Double? = nil, shuffle: Int = 0) {
         var stems: [Stem] = []
         let weights = Self.weights(tree)
 
         // The trunk: a gentle seeded sway, its commits spaced on a log scale from the tip down.
         let count = tree.trunk.count
         let height = Self.trunkHeight(commits: count)
-        var rng = SeededRandom(seed, -1)
+        var rng = SeededRandom(SeededRandom.key(seed, shuffle: shuffle), -1)
         let sway = (amplitude: rng.next(in: 0.015...0.04), waves: rng.next(in: 0.6...1.3),
                     phase: rng.next(in: 0...(2 * .pi)), lean: rng.next(in: -0.07...0.07))
         // A leaning trunk (a bough) is walked out along its length, straightening as it rises.
@@ -176,8 +182,11 @@ public struct TreeLayout: Sendable {
         curveHeights += trunkHeights.suffix(1)
         let trunkName = tree.trunkName ?? ""
         var trunkGrown = grown[trunkName] ?? Double(count)
-        // Growing in, the trunk rises from its foot first; it's cut off at the height reached so far.
-        let trunkReach = growIn.map { min(max($0 / Self.trunkShare, 0), 1) * height }
+        // Growing in, each stem grows over its own stretch (`growInSchedule`): the trunk rises from its
+        // foot first, cut off at the height reached so far.
+        let plans = Self.limbPlans(tree)
+        let schedule = Self.growInSchedule(tree, plans: plans)
+        let trunkReach = growIn.map { schedule.trunk.progress(at: $0) * height }
         var shownTrunk = trunkNodes, shownCurve = trunkCurve
         if let reach = trunkReach {
             shownTrunk = Self.cut(trunkNodes, heights: trunkHeights, at: reach)
@@ -193,38 +202,34 @@ public struct TreeLayout: Sendable {
         // The limbs, each grown from its parent's node.
         var limbStems: [Stem?] = []
         var stemIndex: [Int: Int] = [:]
-        // Growing in, when each limb starts: as the trunk (or its parent limb) reaches its fork.
-        var starts: [Double] = []
-        let sides = Self.sides(tree, outward: planting.outward)
+        let sides = Self.sides(tree, outward: planting.outward, shuffle: shuffle)
         for (index, limb) in tree.limbs.enumerated() {
             let base: Node, level: Int, scale: Double, lean: Double, parentGrown: Double, fork: Fork
-            var rng = SeededRandom(limb.name)
+            let key = SeededRandom.key(limb.name, shuffle: shuffle)
+            var rng = SeededRandom(key)
             let side = sides[index]
             switch limb.parent {
             case .trunk(let node):
                 base = trunkNodes[min(node, trunkNodes.count - 1)]
-                let u = node == 0 ? 0 : Self.trunkPosition(node - 1, of: count)
+                let u = plans[index]?.up ?? 0
                 level = 1
-                // Low limbs reach out nearly level and long; high ones rise steeply and stay short.
-                scale = 1.05 - 0.45 * u
+                // Low limbs reach out nearly level and long; high ones rise steeply and stay short
+                // (`limbPlans`).
+                scale = plans[index]?.scale ?? 1
                 lean = side * ((88 - 48 * u) + rng.next(in: -12...12)) * .pi / 180
                     + (planting.isUpright ? 0 : base.heading * 0.7)
                 parentGrown = .infinity
                 fork = Fork(parent: 0, node: min(node, trunkNodes.count - 1), width: base.width, heading: base.heading)
-                starts.append(Self.trunkShare * trunkHeights[min(node, count)] / max(height, 1e-9))
             case .limb(let parentIndex, let node):
-                let parentStart = parentIndex < starts.count ? starts[parentIndex] : 1
-                let parentCount = Double(max(tree.limbs.indices.contains(parentIndex) ? tree.limbs[parentIndex].commits.count : 0, 1))
-                starts.append(parentStart + (1 - parentStart) * min(Double(node) / parentCount, 1))
                 // `RepoTree` puts a limb's parent before it; a limb whose parent isn't laid out yet
                 // (or at all) is left out rather than crashing.
                 guard limbStems.indices.contains(parentIndex), let parent = limbStems[parentIndex], !parent.nodes.isEmpty
                 else { limbStems.append(nil); continue }
                 base = parent.nodes[min(node, parent.nodes.count - 1)]
                 level = parent.level + 1
-                scale = parent.scale * Self.childScale
+                scale = plans[index]?.scale ?? parent.scale * Self.childScale
                 // Mostly outward, away from the trunk, like a real crown; sometimes back in.
-                var pick = SeededRandom(limb.name, -2)
+                var pick = SeededRandom(key, -2)
                 let outward: Double = base.heading >= 0 ? 1 : -1
                 let childSide = pick.next() < 0.7 ? outward : -outward
                 lean = base.heading + childSide * rng.next(in: 28...50) * .pi / 180
@@ -235,11 +240,9 @@ public struct TreeLayout: Sendable {
             let full = Double(max(limb.commits.count, 1))
             var shown = min(full, grown[limb.name] ?? full, parentGrown)
             if let growIn {
-                // Each limb grows from its start to the end, so they all finish together.
-                let start = starts[index]
-                shown = full * min(max((growIn - start) / max(1 - start, 1e-9), 0), 1)
+                shown = full * schedule.limbs[index].progress(at: growIn)
             }
-            let (nodes, curve) = Self.grow(limb, from: base, lean: lean, scale: scale, shown: shown,
+            let (nodes, curve) = Self.grow(limb, from: base, lean: lean, scale: scale, shown: shown, shuffle: shuffle,
                                            weight: { k in Self.remainingWeight(limb, index: index, tree: tree, weights: weights, beyond: k) })
             let stem = Stem(name: limb.name, level: level, nodes: nodes, curve: curve, commits: limb.commits, grown: shown,
                             isBud: limb.isBud, isCheckedOut: limb.isCheckedOut, scale: scale, fork: fork)
@@ -249,6 +252,7 @@ public struct TreeLayout: Sendable {
         }
 
         self.stems = stems
+        self.schedule = schedule
         var bounds = CGRect.null
         for stem in stems {
             for node in stem.curve {
@@ -261,8 +265,112 @@ public struct TreeLayout: Sendable {
 
     // MARK: - Pieces
 
-    /// The share of a grow-in spent raising the trunk; limbs start as it reaches their forks.
-    static let trunkShare = 0.45
+    /// A stem's stretch of a grow-in, as fractions of it (0…1).
+    public struct Stretch: Equatable, Sendable {
+        public let start: Double
+        public let end: Double
+
+        /// How far through its stretch the stem is at grow-in progress `growIn`: 0 before it, 1 after.
+        public func progress(at growIn: Double) -> Double {
+            min(max((growIn - start) / max(end - start, 1e-9), 0), 1)
+        }
+
+        /// How far the stem's name (its banner) has faded in at `growIn`: over the last of its
+        /// stretch (`nameFade` of the grow-in, or all of it when it's shorter), whole as the stem
+        /// reaches its tip.
+        public func nameShown(at growIn: Double) -> Double {
+            let fade = min(Self.nameFade, end - start)
+            guard growIn < end else { return 1 }
+            guard fade > 0 else { return 0 }
+            return min(max((growIn - (end - fade)) / fade, 0), 1)
+        }
+
+        public static let nameFade = 0.08
+    }
+
+    /// When each stem grows during a grow-in.
+    public struct GrowInSchedule: Equatable, Sendable {
+        public let trunk: Stretch
+        /// By limb, in `RepoTree.limbs` order.
+        public let limbs: [Stretch]
+        let names: [String: Int]
+
+        /// The stretch of the stem named `name` (a `RepoTree.commitCounts` key), or nil.
+        public func stretch(of name: String) -> Stretch? {
+            names[name].map { $0 < 0 ? trunk : limbs[$0] }
+        }
+    }
+
+    /// Each limb grows at the pace the trunk rises: a full-height trunk's height in one unit of time,
+    /// a limb over its own length (at least this long, so a bud still opens).
+    static let shortestLimbTime = 0.12
+
+    /// Where a limb leaves and how it grows, worked out from the tree alone before anything is laid
+    /// out, so the layout and its grow-in schedule can't disagree: for a limb off the trunk, how far up
+    /// the trunk it leaves (0…1, `trunkPosition`); the scale it's drawn at; and its stretch of a
+    /// grow-in, in units of the trunk's rise, before scaling.
+    struct LimbPlan {
+        let up: Double?
+        let scale: Double
+        let start: Double
+        let end: Double
+    }
+
+    /// Each limb's plan, in `RepoTree.limbs` order; nil for one that's left out (its parent comes
+    /// after it, or is left out too). A limb off the trunk starts growing when the trunk rises past
+    /// its fork, a limb off a limb when its parent reaches its fork, and each grows out over its own
+    /// length at the pace the trunk rose (at least `shortestLimbTime`).
+    static func limbPlans(_ tree: RepoTree) -> [LimbPlan?] {
+        let count = tree.trunk.count
+        // A stem's length in units of its trunk's height.
+        let height = trunkHeight(commits: count)
+        var plans: [LimbPlan?] = []
+        for limb in tree.limbs {
+            let up: Double?, scale: Double, start: Double
+            switch limb.parent {
+            case .trunk(let node):
+                let u = node == 0 ? 0 : trunkPosition(min(node, count) - 1, of: count)
+                up = u
+                scale = 1.05 - 0.45 * u
+                start = node == 0 ? 0 : trunkLift(u)
+            case .limb(let parentIndex, let node):
+                guard plans.indices.contains(parentIndex), let parent = plans[parentIndex] else { plans.append(nil); continue }
+                let parentCount = Double(max(tree.limbs[parentIndex].commits.count, 1))
+                up = nil
+                scale = parent.scale * childScale
+                start = parent.start + (parent.end - parent.start) * min(Double(node) / parentCount, 1)
+            }
+            let length = length(commits: max(limb.commits.count, 1), scale: scale, bud: limb.isBud)
+            plans.append(LimbPlan(up: up, scale: scale, start: start, end: start + max(length / height, shortestLimbTime)))
+        }
+        return plans
+    }
+
+    /// When each stem of `tree` grows during a grow-in: the trunk rises first, from its foot; then
+    /// each limb over its stretch (`limbPlans`), so the low limbs finish first and the outermost twigs
+    /// last. Scaled so the last stem finishes at 1. A limb that's left out gets an empty stretch at
+    /// the end.
+    static func growInSchedule(_ tree: RepoTree, plans: [LimbPlan?]? = nil) -> GrowInSchedule {
+        let plans = plans ?? limbPlans(tree)
+        let total = max(plans.compactMap { $0?.end }.max() ?? 1, 1)
+        var names = [tree.trunkName ?? "": -1]
+        for (index, limb) in tree.limbs.enumerated() { names[limb.name] = index }
+        return GrowInSchedule(trunk: Stretch(start: 0, end: 1 / total),
+                              limbs: plans.map { plan in
+                                  plan.map { Stretch(start: $0.start / total, end: $0.end / total) } ?? Stretch(start: 1, end: 1)
+                              },
+                              names: names)
+    }
+
+    /// How long a limb of `commits` grows (`grow`'s steps), in tree units, at `scale`.
+    static func length(commits: Int, scale: Double, bud: Bool) -> Double {
+        var length = (bud ? 0.35 : 1) * firstStep * scale, total = 0.0
+        for k in 1...max(commits, 1) {
+            total += length
+            length = k == 1 ? step * scale : length * stepDecay
+        }
+        return total
+    }
 
     /// Eased grow-in progress for the time since it began, as a fraction of its duration.
     public static func growIn(_ fraction: Double) -> Double {
@@ -329,9 +437,9 @@ public struct TreeLayout: Sendable {
     ///
     /// A bough's limbs favour its outer side (`outward`): the tally starts that far behind on it, so
     /// roughly the first half of the limbs go outward before the balancing begins.
-    static func sides(_ tree: RepoTree, outward: Double = 0) -> [Double] {
+    static func sides(_ tree: RepoTree, outward: Double = 0, shuffle: Int = 0) -> [Double] {
         var sides = tree.limbs.map { limb -> Double in
-            var rng = SeededRandom(limb.name)
+            var rng = SeededRandom(SeededRandom.key(limb.name, shuffle: shuffle))
             return rng.next() < 0.5 ? -1 : 1
         }
         var branches = [Double](repeating: 1, count: tree.limbs.count)
@@ -364,7 +472,7 @@ public struct TreeLayout: Sendable {
     /// long step curves too. `shown` commits are grown, the last one part-way. Returns the commit
     /// nodes and the finer curve through them.
     static func grow(_ limb: RepoTree.Limb, from base: Node, lean: Double, scale: Double, shown: Double,
-                     weight: (Int) -> Double) -> (nodes: [Node], curve: [Node]) {
+                     shuffle: Int = 0, weight: (Int) -> Double) -> (nodes: [Node], curve: [Node]) {
         let steps = Int(ceil(shown))
         guard steps > 0 else { return ([], []) }
         var nodes = [Node(point: base.point, width: min(base.width, width(weight: weight(0))), heading: lean)]
@@ -374,7 +482,7 @@ public struct TreeLayout: Sendable {
         var length = (limb.isBud ? 0.35 : 1) * firstStep * scale
         let bendPerSubstep = 1 - pow(1 - tropism, 1 / Double(substeps))
         for k in 1...steps {
-            var rng = SeededRandom(limb.name, k)
+            var rng = SeededRandom(SeededRandom.key(limb.name, shuffle: shuffle), k)
             let turn = rng.next(in: -11...11) * .pi / 180
             let fraction = min(1, shown - Double(k - 1))
             let from = curve[curve.count - 1].width, to = width(weight: weight(k))

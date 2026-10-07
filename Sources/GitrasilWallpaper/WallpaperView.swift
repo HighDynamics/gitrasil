@@ -18,8 +18,11 @@ struct WallpaperView: View {
         let showsBranchNames = background.settings.showsBranchNames
         let showsRepoNames = background.settings.showsRepoNames
         let now = background.now
+        let shuffle = background.settings.layoutSeed
         let seeds = PinnedRepositories.seeds(panes.map(\.repoURL))
-        // Read each pane here so Observation redraws when one publishes a new tree or growth.
+        // Read each pane here so Observation redraws when one publishes a new tree or growth, and
+        // when the scene stops waiting for its trees.
+        let _ = background.isAwaitingTrees
         let growing = background.isGrowingIn || panes.contains { pane in
             let _ = (pane.tree, pane.growth, pane.problem)
             return pane.growthStart != nil
@@ -41,7 +44,7 @@ struct WallpaperView: View {
                         }
                         let trunkGrowIn = background.trunkGrowIn(at: date)
                         Canvas { context, size in
-                            Landscape(style: style, now: now, size: size, trunkGrowIn: trunkGrowIn)
+                            Landscape(style: style, now: now, size: size, shuffle: shuffle, trunkGrowIn: trunkGrowIn)
                                 .draw(panes, arrangement: arrangement, in: &context)
                         }
                     }
@@ -49,14 +52,19 @@ struct WallpaperView: View {
                         // The names hang where the full-grown trees put them, planned only when a tree or
                         // what's shown changes, not on every redraw.
                         let key = PlanCache.Key(dark: colorScheme == .dark, medium: medium, size: proxy.size, now: now,
-                                                arrangement: arrangement, branchNames: showsBranchNames,
+                                                shuffle: shuffle, arrangement: arrangement, branchNames: showsBranchNames,
                                                 repoNames: showsRepoNames, trees: panes.map { .init(id: $0.repoURL.path, tree: $0.tree) })
                         let plan = plans.plan(for: key) {
-                            Landscape(style: style, now: now, size: proxy.size, trunkGrowIn: nil).plan(
+                            Landscape(style: style, now: now, size: proxy.size, shuffle: shuffle, trunkGrowIn: nil).plan(
                                 zip(panes, seeds).map { Pane($0, seed: $1) },
                                 arrangement: arrangement, branchNames: showsBranchNames, repoNames: showsRepoNames)
                         }
-                        BannerLayer(plan: plan, hidden: hiddenBanners(plan), style: style, breeze: background.breeze)
+                        // Each name fades in as its wood finishes growing, on the trees' clock.
+                        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !growing)) { timeline in
+                            BannerLayer(plan: plan, shown: Self.shownBanners(plan, panes: panes, at: timeline.date,
+                                                                             growIn: background.growIn),
+                                        style: style, breeze: background.breeze)
+                        }
                     }
                 }
             }
@@ -64,19 +72,34 @@ struct WallpaperView: View {
         .ignoresSafeArea()
     }
 
-    /// Banners on wood that's growing in: hidden until it has grown, then fading in. A repository's
-    /// ribbon waits for its whole bough.
-    private func hiddenBanners(_ plan: BannerPlan) -> Set<String> {
-        let panes = Dictionary(background.panes.map { ($0.repoURL.path, $0) }, uniquingKeysWith: { a, _ in a })
-        func growingIn(_ id: String) -> Bool {
-            guard let pane = panes[id] else { return false }
-            return background.trunkGrowIn != nil || background.growIns[pane.repoURL] != nil
+    /// How far each banner on growing wood has faded in at `date`: a pennant as its stem reaches its
+    /// tip (`TreeLayout.Stretch.nameShown`), a ribbon as its bough does; on a limb growing new
+    /// commits, over the end of the growth. Banners on still wood aren't listed (they're shown).
+    /// `growIn` is how far a pane's tree is in growing in at a date (`BackgroundModel.growIn`). Each
+    /// banner carries its stretch from the plan, so a frame only looks up a progress or two per pane.
+    static func shownBanners(_ plan: BannerPlan, panes: [WallpaperModel], at date: Date,
+                             growIn: (URL, Date) -> Double?) -> [String: Double] {
+        var growingIn: [String: Double] = [:], growing: [String: (pane: WallpaperModel, progress: Double)] = [:]
+        for pane in panes {
+            if let progress = growIn(pane.repoURL, date) {
+                growingIn[pane.repoURL.path] = progress
+            } else if let progress = pane.growthProgress(at: date) {
+                growing[pane.repoURL.path] = (pane, progress)
+            }
         }
-        let banners = plan.banners.filter { hanging in
-            guard let pane = panes[hanging.pane] else { return false }
-            return growingIn(hanging.pane) || pane.growthStart != nil && pane.growth[hanging.stem] != nil
+        guard !growingIn.isEmpty || !growing.isEmpty else { return [:] }
+        var shown: [String: Double] = [:]
+        for hanging in plan.banners {
+            if let progress = growingIn[hanging.pane] {
+                shown[hanging.id] = hanging.stretch.nameShown(at: progress)
+            } else if let (pane, progress) = growing[hanging.pane], pane.growth[hanging.stem] != nil {
+                shown[hanging.id] = min(max((progress - 0.85) / 0.15, 0), 1)
+            }
         }
-        return Set(banners.map(\.id) + plan.ribbons.filter { growingIn($0.pane) }.map(\.id))
+        for ribbon in plan.ribbons {
+            if let progress = growingIn[ribbon.pane] { shown[ribbon.id] = ribbon.stretch.nameShown(at: progress) }
+        }
+        return shown
     }
 
     /// The paper, and the ground when there are trees to stand on it.
@@ -165,6 +188,8 @@ final class PlanCache {
         let medium: Medium
         let size: CGSize
         let now: Date
+        /// The trees' layout seed: a reshuffle moves every limb, and its banner with it.
+        let shuffle: Int
         let arrangement: Arrangement
         let branchNames: Bool
         let repoNames: Bool
@@ -229,6 +254,8 @@ struct Landscape {
     let style: WallpaperStyle
     let now: Date
     let size: CGSize
+    /// The trees' layout seed (`BackgroundSettings.layoutSeed`), as `TreeLayout` takes it.
+    let shuffle: Int
     /// How far the single tree's shared trunk has risen, while it's rising.
     let trunkGrowIn: Double?
 
@@ -266,8 +293,8 @@ struct Landscape {
         let shared = min(tall / Composition.nominalHeight, plot / Composition.plotWidth)
         return panes.enumerated().compactMap { index, pane in
             guard let tree = pane.tree else { return nil }
-            let full = TreeLayout(tree: tree, seed: pane.seed)
-            var rng = SeededRandom(pane.seed, -9)
+            let full = TreeLayout(tree: tree, seed: pane.seed, shuffle: shuffle)
+            var rng = SeededRandom(SeededRandom.key(pane.seed, shuffle: shuffle), -9)
             let x = plot * (CGFloat(index) + 0.5) + (panes.count > 1 ? plot * rng.next(in: -0.05...0.05) : 0)
             let frame = TreeFrame(size: size, bounds: full.bounds, nominalHeight: Composition.nominalHeight,
                                   scale: shared, maxWidth: min(plot * 1.45, size.width - 2 * TreeFrame.margin), x: x)
@@ -284,11 +311,14 @@ struct Landscape {
         }
         for planted in orchard(panes) {
             let pane = panes[planted.index], tree = pane.tree!
-            let layout = pane.growIn.map { TreeLayout(tree: tree, seed: pane.seed, growIn: $0) }
-                ?? (pane.grown.isEmpty ? planted.full : TreeLayout(tree: tree, seed: pane.seed, grown: pane.grown))
+            let layout = pane.growIn.map { TreeLayout(tree: tree, seed: pane.seed, growIn: $0, shuffle: shuffle) }
+                ?? (pane.grown.isEmpty ? planted.full : TreeLayout(tree: tree, seed: pane.seed, grown: pane.grown, shuffle: shuffle))
             let drawing = TreeDrawing(style: style, now: now, frame: planted.frame)
-            drawing.shadow(width: planted.full.bounds.width, in: &context)
-            drawing.plate(pane.name, in: &context)
+            // Its shadow and name come with it, not before it starts to grow.
+            if pane.growIn != 0 {
+                drawing.shadow(width: planted.full.bounds.width, in: &context)
+                drawing.plate(pane.name, in: &context)
+            }
             drawing.draw(layout.stems, seeds: layout.stems.map { _ in pane.seed }, parents: layout.stems.map { $0.fork?.parent },
                          rootedAt: layout.stems.isEmpty ? nil : 0, rootSeed: pane.seed, in: &context)
             if let problem = pane.problem {
@@ -301,7 +331,7 @@ struct Landscape {
     /// pin order, and where it stands.
     func singleTree(_ ready: [Pane]) -> (full: YggdrasilLayout, frame: TreeFrame) {
         // A bough's name is its seed: it sets the bough's lean.
-        let full = YggdrasilLayout(repos: ready.map { .init(name: $0.seed, tree: $0.tree!) })
+        let full = YggdrasilLayout(repos: ready.map { .init(name: $0.seed, tree: $0.tree!) }, shuffle: shuffle)
         let tall = Composition.groundY(size.height) - Composition.top - TreeFrame.margin
         // Its boughs lean, so it's rarely as tall as its trees would be on their own.
         let nominal = YggdrasilLayout.crotchHeight + Composition.nominalHeight * 0.82
@@ -317,7 +347,7 @@ struct Landscape {
         let still = trunkGrowIn == nil && ready.allSatisfy { $0.grown.isEmpty && $0.growIn == nil }
         let layout = still ? full : YggdrasilLayout(repos: ready.map {
             .init(name: $0.seed, tree: $0.tree!, grown: $0.grown, growIn: $0.growIn)
-        }, trunkGrowIn: trunkGrowIn)
+        }, trunkGrowIn: trunkGrowIn, shuffle: shuffle)
         let drawing = TreeDrawing(style: style, now: now, frame: frame)
         let stems = [layout.trunk] + layout.boughs.flatMap(\.layout.stems)
         // Each bough's stems are seeded from its repository, as an orchard tree's are.

@@ -5,8 +5,9 @@ import UniformTypeIdentifiers
 import GitrasilCore
 
 /// Test aids that draw the background offscreen, from the pinned repositories, with no window or
-/// menu: `--benchmark` times redraws, `--snapshot <folder>` renders it to images. Both wait for the
-/// trees to arrive and finish growing in first, and draw exactly what a window would. The settings
+/// menu: `--benchmark` times redraws, `--snapshot <folder>` renders it to images, `--frames <folder>`
+/// renders the whole scene growing in, frame by frame. Each waits for the trees to arrive and finish
+/// growing in first, and draws exactly what a window would. The settings
 /// they change as they go are a copy (`MemorySettings`, made in `main.swift`): a run never writes the
 /// saved ones.
 @MainActor
@@ -26,8 +27,8 @@ enum Offscreen {
 
     /// Times each part of a redraw, rendered to a bitmap (`ImageRenderer`, so on the CPU), `runs`
     /// times after a warm-up, and prints the median: the tree canvas (what redraws when a tree
-    /// changes, and every frame of a growth), the paper under it, and the banners (each drawn once
-    /// into its own layer; a gust only turns them).
+    /// changes), one frame of it growing in (every tree halfway, a shared trunk risen), the paper
+    /// under it, and the banners (each drawn once into its own layer; a gust only turns them).
     static func benchmark(_ background: BackgroundModel, runs: Int) async {
         await settle(background)
         print("redraw, median of \(runs) (ms):")
@@ -39,11 +40,13 @@ enum Offscreen {
                     for dark in [false, true] {
                         let style = WallpaperStyle.make(medium, dark: dark)
                         let trees = median(runs) { render(treeCanvas(background, style: style), screen: screen, dark: dark) }
+                        let frame = median(runs) { render(treeCanvas(background, style: style, growIn: 0.5), screen: screen, dark: dark) }
                         let paper = median(runs) { render(paperCanvas(background, style: style), screen: screen, dark: dark) }
                         let banners = median(runs) { render(bannerLayer(background, style: style, size: screen.size),
                                                             screen: screen, dark: dark) }
-                        print(String(format: "  %@ %@ %@ %@: trees %.1f, paper %.1f, banners %.1f", medium.rawValue,
-                                     arrangement.rawValue, screen.name, dark ? "dark" : "light", trees, paper, banners))
+                        print(String(format: "  %@ %@ %@ %@: trees %.1f, grow-in frame %.1f, paper %.1f, banners %.1f",
+                                     medium.rawValue, arrangement.rawValue, screen.name, dark ? "dark" : "light",
+                                     trees, frame, paper, banners))
                     }
                 }
             }
@@ -72,16 +75,66 @@ enum Offscreen {
         }
     }
 
+    /// Grows the whole scene again (as Watch Gitrasil Grow does) and renders it `fps` times a second
+    /// of its clock, from the bare ground to a moment after the last name, as `frame-NNN.jpg` in
+    /// `folder`, for the first screen, in the saved arrangement and medium. The frames are drawn at
+    /// their own pace, so the clock is kept (`GrowInClock`) rather than read live.
+    static func frames(_ background: BackgroundModel, to folder: URL, fps: Double = 20) async {
+        await settle(background)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        background.regrow()
+        let clock = background.growInClock
+        guard let span = clock.span else { return print("nothing to grow") }
+        let screen = screens[0], dark = NSApp.appearance?.name == .darkAqua
+        let style = WallpaperStyle.make(background.settings.medium, dark: dark)
+        let plan = Landscape(style: style, now: background.now, size: screen.size, shuffle: background.settings.layoutSeed,
+                             trunkGrowIn: nil)
+            .plan(panes(background), arrangement: background.settings.arrangement,
+                  branchNames: background.settings.showsBranchNames, repoNames: background.settings.showsRepoNames)
+        let count = Int(ceil(span.upperBound.timeIntervalSince(span.lowerBound) * fps)) + Int(fps / 2)
+        for index in 0...count {
+            let date = span.lowerBound.addingTimeInterval(Double(index) / fps)
+            let shown = WallpaperView.shownBanners(plan, panes: background.panes, at: date, growIn: clock.growIn)
+            let view = ZStack {
+                paperCanvas(background, style: style)
+                treeCanvas(background, style: style, clock: clock, at: date)
+                BannerLayer(plan: plan, shown: shown, style: style, breeze: background.breeze)
+            }
+            guard let image = render(view, screen: screen, dark: dark) else { continue }
+            write(image, to: folder.appendingPathComponent(String(format: "frame-%03d.jpg", index)))
+        }
+        print("wrote \(count + 1) frames (\(Int(fps)) fps) to \(folder.path)")
+    }
+
     // MARK: Parts
 
     private static func panes(_ background: BackgroundModel) -> [Pane] {
         zip(background.panes, PinnedRepositories.seeds(background.panes.map(\.repoURL))).map { Pane($0, seed: $1) }
     }
 
-    private static func treeCanvas(_ background: BackgroundModel, style: WallpaperStyle) -> some View {
-        let panes = panes(background), arrangement = background.settings.arrangement, now = background.now
+    /// The trees, as they stand or `growIn` of the way through growing in.
+    private static func treeCanvas(_ background: BackgroundModel, style: WallpaperStyle, growIn: Double? = nil) -> some View {
+        let panes = zip(background.panes, PinnedRepositories.seeds(background.panes.map(\.repoURL))).map {
+            Pane($0, seed: $1, growIn: growIn)
+        }
+        let arrangement = background.settings.arrangement, now = background.now, shuffle = background.settings.layoutSeed
         return Canvas { context, size in
-            Landscape(style: style, now: now, size: size, trunkGrowIn: nil).draw(panes, arrangement: arrangement, in: &context)
+            Landscape(style: style, now: now, size: size, shuffle: shuffle, trunkGrowIn: growIn.map { _ in 1 })
+                .draw(panes, arrangement: arrangement, in: &context)
+        }
+    }
+
+    /// The trees at `date` of a grow-in.
+    private static func treeCanvas(_ background: BackgroundModel, style: WallpaperStyle, clock: BackgroundModel.GrowInClock,
+                                   at date: Date) -> some View {
+        let panes = zip(background.panes, PinnedRepositories.seeds(background.panes.map(\.repoURL))).map {
+            Pane($0, seed: $1, growIn: clock.growIn($0.repoURL, at: date))
+        }
+        let arrangement = background.settings.arrangement, now = background.now, shuffle = background.settings.layoutSeed
+        let trunkGrowIn = clock.trunkGrowIn(at: date)
+        return Canvas { context, size in
+            Landscape(style: style, now: now, size: size, shuffle: shuffle, trunkGrowIn: trunkGrowIn)
+                .draw(panes, arrangement: arrangement, in: &context)
         }
     }
 
@@ -92,10 +145,11 @@ enum Offscreen {
     }
 
     private static func bannerLayer(_ background: BackgroundModel, style: WallpaperStyle, size: CGSize) -> some View {
-        let plan = Landscape(style: style, now: background.now, size: size, trunkGrowIn: nil)
+        let plan = Landscape(style: style, now: background.now, size: size, shuffle: background.settings.layoutSeed,
+                             trunkGrowIn: nil)
             .plan(panes(background), arrangement: background.settings.arrangement,
                   branchNames: background.settings.showsBranchNames, repoNames: background.settings.showsRepoNames)
-        return BannerLayer(plan: plan, hidden: [], style: style, breeze: background.breeze)
+        return BannerLayer(plan: plan, shown: [:], style: style, breeze: background.breeze)
     }
 
     // MARK: Rendering
@@ -133,7 +187,8 @@ enum Offscreen {
         try? await Task.sleep(for: .milliseconds(300))
         for _ in 0..<600 {
             let ready = background.panes.allSatisfy { $0.tree != nil || $0.problem != nil }
-            if ready, !background.isGrowingIn, background.panes.allSatisfy({ $0.growthStart == nil }) { break }
+            if ready, !background.isAwaitingTrees, !background.isGrowingIn,
+               background.panes.allSatisfy({ $0.growthStart == nil }) { break }
             try? await Task.sleep(for: .milliseconds(100))
         }
         try? await Task.sleep(for: .milliseconds(200))

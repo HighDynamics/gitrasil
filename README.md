@@ -68,12 +68,14 @@ scripts/run-wallpaper.sh [--quit-after <seconds>]
 It builds and runs the release build (`.build/out/Products/Release/GitrasilWallpaper`): placing
 the banners over a dense crown is slow in a debug build.
 
-The same binary has two offscreen aids, which draw the pinned repositories without a window and
+The same binary has three offscreen aids, which draw the pinned repositories without a window and
 quit:
 
-- `--benchmark [runs]` prints the median time (ms) to draw the trees, the paper and the banners,
-  for each arrangement, medium, screen size and mode;
-- `--snapshot <folder>` writes `<medium>-<arrangement>-<mode>.jpg` at 1440×900@2x.
+- `--benchmark [runs]` prints the median time (ms) to draw the trees, a frame of them growing in,
+  the paper and the banners, for each arrangement, medium, screen size and mode;
+- `--snapshot <folder>` writes `<medium>-<arrangement>-<mode>.jpg` at 1440×900@2x;
+- `--frames <folder>` grows the whole scene again, as Watch Gitrasil Grow does, and writes it as
+  `frame-NNN.jpg`, 20 a second of its clock, at 1440×900@2x in the saved arrangement and medium.
 
 Pin repositories from the menu-bar item (the small tree), or a folder of them: a pinned folder
 stands for every repository in it (one or two folders down), as they come and go. Pins are a
@@ -93,7 +95,13 @@ The same menu holds the settings:
   near-black one in dark), the default. Every medium draws by hand: lines wobble and vary in width.
 - **Sway in Gusts** — now and then a gust sways the banners for a few seconds, only on mains power
   with the display awake and the background uncovered. Off by default: the banners hang still until
-  it's turned on.
+  it's turned on, and turning it on blows the first gust at once.
+- **Watch Gitrasil Grow** — grows every tree again from the ground, just to watch. The scene also
+  grows again on its own when a repository is dropped.
+- **Reshuffle Branches** — grows every tree again with its branches leaning and curving a new way.
+  The branching itself (which branch leaves where) still comes from the history, the hand-drawn
+  wobble stays as it was, and the new shape is kept between launches. Until the first reshuffle the
+  trees take the shape their names alone give.
 
 Pins and settings are saved between launches in the `com.gitrasil.background` defaults. For a
 test run or a preview:
