@@ -398,3 +398,60 @@ suite against the throwaway repos `ash`, `elm` and `rowan` (screenshots above, t
 only, on the 1440×900 display). Turning each setting on and off from the menu took effect at once and
 was saved to the suite; with both names off, *Sway in Gusts* greyed out as above. The icon showed
 in the menu bar as a template, in the bar's own tint.
+
+## Round 5 (spike): a hand-drawn look, and charcoal and chalk beside the ink
+
+Daniel (via Arbor): every border and edge is very precise; he'd like the look more hand-drawn,
+and to see the ink on cream as charcoal or chalk. An exploration: build both so he can compare
+them with the ink, then he picks. Branch `spike/hand-drawn`, cut from `main` (97d243f).
+
+Kept as decided: a distinct colour per branch, the organic shapes, names at the tips, older commits
+fading, the orchard and the single tree, the gusts.
+
+**1. A *Medium* setting.** A *Medium* section in the menu, under *Arrange As*: **Ink** (the default),
+**Charcoal** and **Chalk**, with a check by the current one. Saved next to the other settings
+(`medium` in the same suite, in `BackgroundSettings`, tested) and switching at once, without a
+grow-in. Each medium is a `WallpaperStyle` value, as the README promised a restyle would be; the
+drawing code gains a few style fields (grain, sketch passes, how the wood is laid down), all of them
+off in the ink.
+
+**2. Hand-drawn lines, in all three media.** Nothing is ruled any more:
+- *Wood*: each edge of a limb or the trunk strays a little from the smooth taper, and its width
+  swells and thins along it, from a slow seeded wobble of the distance along the stem.
+- *Leaves*: each is a touch lopsided (its tip and sides nudged), seeded per leaf.
+- *Banner frames, the ribbon's rules, threads and cords*: drawn as wobbling lines of varying width
+  that overshoot their corners a hair; charcoal and chalk go over each line twice, as a sketch does.
+- *Stable*: every wobble is a pure function of a seed (the branch or banner name, the leaf's commit
+  and place) and of the distance along the line, never of time or of anything else on screen. So a
+  stroke keeps its shape between redraws, a limb that grows by a commit keeps the wobble it had (only
+  its new stretch is new), and a banner swaying in a gust only turns its layer, as before. The noise
+  and the displacement are in Core (`HandDrawn`), unit-tested for exactly that.
+- Easy to turn off: `GITRASIL_BACKGROUND_WOBBLE=off` sets it to zero, and the ink is then drawn as
+  on `main`, pixel for pixel (checked).
+
+**3. Charcoal.** Warm paper with a tooth to it. The wood is laid down stroke by stroke, so it's
+darker where strokes overlap (a limb's collar over its parent), with pressure rising and falling
+along each stem, a dark soft contour, streaks along the grain and a faint smudge beside it. Branch
+colours become coloured charcoal and pastel, muted from the inks. Everything on the canvas then
+loses pigment in the paper's valleys (the same tooth the paper shows), so the strokes are grainy and
+their edges soft. In dark mode it's white charcoal and pastel on a dark toned paper.
+
+**4. Chalk.** Always on a board: chalk on a light ground reads as a smudged drawing, not as chalk,
+so the light mode gets a green-grey classroom slate and the dark mode a near-black slate, each with
+a faint haze of old erasing. White chalk for the wood, laid on lightly with strong edges and dry
+streaks; coloured chalks for the branches; the board's grain breaks every stroke more than
+charcoal's paper does. Names in Chalkboard SE on the pennants, Chalkduster on the ribbons and
+plates; the banners are chalk outlines on the board.
+
+**5. Texture once, not per frame.** The paper tooth, the chalk board's speckle and the grain that
+breaks the strokes are seeded noise tiles, generated once per medium and display scale and cached,
+then tiled. A redraw of the tree adds one pass over the canvas (the grain), nothing per stroke.
+
+**6. Measured.** A `--benchmark` mode renders the tree canvas offscreen (ImageRenderer, release
+build, the throwaway pins) and reports the median time per redraw. It goes in first, so the same
+harness measures `main`'s drawing and then each medium. Numbers in "What was built".
+
+**Checks.** Unit tests for the setting and the wobble's stability; screenshots, light and dark, of
+each medium in both arrangements and one side by side, in `docs/yggdrasil/hand-drawn/`; `swift
+build` and `swift test` on the final commit. Run only from this worktree, with a throwaway defaults
+suite and a few of `~/repos` pinned read-only.
