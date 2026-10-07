@@ -5,8 +5,9 @@ import UniformTypeIdentifiers
 import GitrasilCore
 
 /// Test aids that draw the background offscreen, from the pinned repositories, with no window or
-/// menu: `--benchmark` times redraws, `--snapshot <folder>` renders it to images. Both wait for the
-/// trees to arrive and finish growing in first, and draw exactly what a window would. The settings
+/// menu: `--benchmark` times redraws, `--snapshot <folder>` renders it to images, `--frames <folder>`
+/// renders the whole scene growing in, frame by frame. Each waits for the trees to arrive and finish
+/// growing in first, and draws exactly what a window would. The settings
 /// they change as they go are a copy (`MemorySettings`, made in `main.swift`): a run never writes the
 /// saved ones.
 @MainActor
@@ -74,6 +75,37 @@ enum Offscreen {
         }
     }
 
+    /// Grows the whole scene again (as Watch Gitrasil Grow does) and renders it `fps` times a second
+    /// of its clock, from the bare ground to a moment after the last name, as `frame-NNN.jpg` in
+    /// `folder`, for the first screen, in the saved arrangement and medium. The frames are drawn at
+    /// their own pace, so the clock is kept (`GrowInClock`) rather than read live.
+    static func frames(_ background: BackgroundModel, to folder: URL, fps: Double = 20) async {
+        await settle(background)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        background.regrow()
+        let clock = background.growInClock
+        guard let span = clock.span else { return print("nothing to grow") }
+        let screen = screens[0], dark = NSApp.appearance?.name == .darkAqua
+        let style = WallpaperStyle.make(background.settings.medium, dark: dark)
+        let plan = Landscape(style: style, now: background.now, size: screen.size, shuffle: background.settings.layoutSeed,
+                             trunkGrowIn: nil)
+            .plan(panes(background), arrangement: background.settings.arrangement,
+                  branchNames: background.settings.showsBranchNames, repoNames: background.settings.showsRepoNames)
+        let count = Int(ceil(span.upperBound.timeIntervalSince(span.lowerBound) * fps)) + Int(fps / 2)
+        for index in 0...count {
+            let date = span.lowerBound.addingTimeInterval(Double(index) / fps)
+            let shown = WallpaperView.shownBanners(plan, panes: background.panes, at: date, growIn: clock.growIn)
+            let view = ZStack {
+                paperCanvas(background, style: style)
+                treeCanvas(background, style: style, clock: clock, at: date)
+                BannerLayer(plan: plan, shown: shown, style: style, breeze: background.breeze)
+            }
+            guard let image = render(view, screen: screen, dark: dark) else { continue }
+            write(image, to: folder.appendingPathComponent(String(format: "frame-%03d.jpg", index)))
+        }
+        print("wrote \(count + 1) frames (\(Int(fps)) fps) to \(folder.path)")
+    }
+
     // MARK: Parts
 
     private static func panes(_ background: BackgroundModel) -> [Pane] {
@@ -88,6 +120,20 @@ enum Offscreen {
         let arrangement = background.settings.arrangement, now = background.now, shuffle = background.settings.layoutSeed
         return Canvas { context, size in
             Landscape(style: style, now: now, size: size, shuffle: shuffle, trunkGrowIn: growIn.map { _ in 1 })
+                .draw(panes, arrangement: arrangement, in: &context)
+        }
+    }
+
+    /// The trees at `date` of a grow-in.
+    private static func treeCanvas(_ background: BackgroundModel, style: WallpaperStyle, clock: BackgroundModel.GrowInClock,
+                                   at date: Date) -> some View {
+        let panes = zip(background.panes, PinnedRepositories.seeds(background.panes.map(\.repoURL))).map {
+            Pane($0, seed: $1, growIn: clock.growIn($0.repoURL, at: date))
+        }
+        let arrangement = background.settings.arrangement, now = background.now, shuffle = background.settings.layoutSeed
+        let trunkGrowIn = clock.trunkGrowIn(at: date)
+        return Canvas { context, size in
+            Landscape(style: style, now: now, size: size, shuffle: shuffle, trunkGrowIn: trunkGrowIn)
                 .draw(panes, arrangement: arrangement, in: &context)
         }
     }

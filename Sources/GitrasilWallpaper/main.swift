@@ -5,7 +5,7 @@ import GitrasilCore
 // Gitrasil: the pinned repositories grown as trees on a live desktop background (docs/yggdrasil).
 //
 // Usage: GitrasilWallpaper [--quit-after <seconds>]
-//        GitrasilWallpaper --benchmark [runs] | --snapshot <folder>
+//        GitrasilWallpaper --benchmark [runs] | --snapshot <folder> | --frames <folder>
 //
 // Opens a desktop-level window on every display and grows the pinned repositories as trees (an
 // orchard, or one tree with a bough each) behind the desktop icons, redrawing when they change. A
@@ -14,14 +14,15 @@ import GitrasilCore
 // GITRASIL_BACKGROUND_DEFAULTS_SUITE names). Nothing is installed and the system wallpaper setting is
 // never touched.
 //
-// --benchmark and --snapshot are test aids (`Offscreen`): they draw the pinned repositories offscreen,
-// with no window or menu, print the redraw times or write images, and quit.
+// --benchmark, --snapshot and --frames are test aids (`Offscreen`): they draw the pinned repositories
+// offscreen, with no window or menu, print the redraw times or write images, and quit.
 
 /// What a launch does: run the background, or one of the offscreen test aids.
 enum Mode {
     case background(quitAfter: TimeInterval?)
     case benchmark(runs: Int)
     case snapshot(URL)
+    case frames(URL)
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -67,6 +68,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return offscreen(background) { await Offscreen.benchmark($0, runs: runs) }
         case .snapshot(let folder):
             return offscreen(background) { await Offscreen.snapshot($0, to: folder) }
+        case .frames(let folder):
+            return offscreen(background) { await Offscreen.frames($0, to: folder) }
         }
         let windows = DesktopWindows(background: background)
         windows.start()
@@ -106,11 +109,14 @@ if arguments.first == "--benchmark" {
 } else if arguments.first == "--snapshot", arguments.count > 1 {
     mode = .snapshot(URL(fileURLWithPath: arguments[1]))
     arguments.removeFirst(2)
+} else if arguments.first == "--frames", arguments.count > 1 {
+    mode = .frames(URL(fileURLWithPath: arguments[1]))
+    arguments.removeFirst(2)
 }
 guard arguments.isEmpty else {
     FileHandle.standardError.write(Data("""
         usage: GitrasilWallpaper [--quit-after <seconds>]
-               GitrasilWallpaper --benchmark [runs] | --snapshot <folder>
+               GitrasilWallpaper --benchmark [runs] | --snapshot <folder> | --frames <folder>
         Pin repositories from the menu-bar item; they're saved between launches.
 
         """.utf8))

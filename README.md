@@ -68,12 +68,14 @@ scripts/run-wallpaper.sh [--quit-after <seconds>]
 It builds and runs the release build (`.build/out/Products/Release/GitrasilWallpaper`): placing
 the banners over a dense crown is slow in a debug build.
 
-The same binary has two offscreen aids, which draw the pinned repositories without a window and
+The same binary has three offscreen aids, which draw the pinned repositories without a window and
 quit:
 
 - `--benchmark [runs]` prints the median time (ms) to draw the trees, a frame of them growing in,
   the paper and the banners, for each arrangement, medium, screen size and mode;
-- `--snapshot <folder>` writes `<medium>-<arrangement>-<mode>.jpg` at 1440×900@2x.
+- `--snapshot <folder>` writes `<medium>-<arrangement>-<mode>.jpg` at 1440×900@2x;
+- `--frames <folder>` grows the whole scene again, as Watch Gitrasil Grow does, and writes it as
+  `frame-NNN.jpg`, 20 a second of its clock, at 1440×900@2x in the saved arrangement and medium.
 
 Pin repositories from the menu-bar item (the small tree), or a folder of them: a pinned folder
 stands for every repository in it (one or two folders down), as they come and go. Pins are a
