@@ -7,6 +7,7 @@ final class BackgroundSettingsTests: XCTestCase {
     func testDefaultsUntilChosenOtherwise() {
         let settings = BackgroundSettings(storage: MemorySettings())
         XCTAssertEqual(settings.arrangement, .orchard)
+        XCTAssertEqual(settings.medium, .ink)
         XCTAssertTrue(settings.showsBranchNames)
         XCTAssertTrue(settings.showsRepoNames)
         XCTAssertTrue(settings.gusts)
@@ -14,9 +15,10 @@ final class BackgroundSettingsTests: XCTestCase {
 
     func testUnreadableValuesTakeTheirDefaults() {
         let storage = MemorySettings()
-        storage.saved = ["arrangement": "hedge", "showsBranchNames": "no", "showsRepoNames": [1], "gusts": 3]
+        storage.saved = ["arrangement": "hedge", "medium": "crayon", "showsBranchNames": "no", "showsRepoNames": [1], "gusts": 3]
         let settings = BackgroundSettings(storage: storage)
         XCTAssertEqual(settings.arrangement, .orchard)
+        XCTAssertEqual(settings.medium, .ink)
         XCTAssertTrue(settings.showsBranchNames)
         XCTAssertTrue(settings.showsRepoNames)
         XCTAssertTrue(settings.gusts)
@@ -54,6 +56,31 @@ final class BackgroundSettingsTests: XCTestCase {
         XCTAssertFalse(relaunched.showsBranchNames)
         XCTAssertTrue(relaunched.showsRepoNames)
         XCTAssertFalse(relaunched.gusts)
+    }
+
+    func testTheMediumIsSavedBetweenLaunches() {
+        let storage = MemorySettings()
+        let settings = BackgroundSettings(storage: storage)
+        settings.medium = .chalk
+        XCTAssertEqual(storage.saved["medium"] as? String, "chalk")
+        XCTAssertNil(storage.saved["arrangement"], "only what changed is written")
+        XCTAssertEqual(BackgroundSettings(storage: storage).medium, .chalk)
+
+        settings.medium = .charcoal
+        XCTAssertEqual(BackgroundSettings(storage: storage).medium, .charcoal)
+        settings.medium = .ink
+        XCTAssertEqual(BackgroundSettings(storage: storage).medium, .ink)
+    }
+
+    func testTheMediumIsSavedUnderAStableName() {
+        // What's in a user's defaults must keep reading back after a rename in code.
+        XCTAssertEqual(Medium.allCases.map(\.rawValue), ["ink", "charcoal", "chalk"])
+        let suite = "gitrasil-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        BackgroundSettings(storage: defaults).medium = .charcoal
+        XCTAssertEqual(defaults.string(forKey: "medium"), "charcoal")
+        XCTAssertEqual(BackgroundSettings(storage: defaults).medium, .charcoal)
     }
 
     func testBranchAndRepositoryNamesAreSetApart() {

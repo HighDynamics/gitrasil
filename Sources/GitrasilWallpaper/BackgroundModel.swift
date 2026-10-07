@@ -80,10 +80,10 @@ final class BackgroundModel {
     /// Follow the settings (the view redraws on its own; it reads them): a new arrangement grows in
     /// from the ground, and the breeze follows the banners and gusts.
     private func observeSettings() {
-        let arrangement = settings.arrangement
+        let arrangement = settings.arrangement, medium = settings.medium
         let names = (settings.showsBranchNames, settings.showsRepoNames, settings.gusts)
         withObservationTracking {
-            _ = (settings.arrangement, settings.showsBranchNames, settings.showsRepoNames, settings.gusts)
+            _ = (settings.arrangement, settings.medium, settings.showsBranchNames, settings.showsRepoNames, settings.gusts)
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
@@ -91,6 +91,8 @@ final class BackgroundModel {
                     logEvent("arrangement: \(self.settings.arrangement.rawValue)")
                     self.growInFromTheGround()
                 }
+                // A new medium just redraws (the view reads it); the trees don't grow again.
+                if self.settings.medium != medium { logEvent("medium: \(self.settings.medium.rawValue)") }
                 if (self.settings.showsBranchNames, self.settings.showsRepoNames, self.settings.gusts) != names {
                     logEvent("branch names \(self.settings.showsBranchNames ? "shown" : "hidden"), "
                              + "repository names \(self.settings.showsRepoNames ? "shown" : "hidden"), "

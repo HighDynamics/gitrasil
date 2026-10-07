@@ -6,7 +6,8 @@ import GitrasilCore
 /// listed, unticked, until the menu closes, so ticking it again puts it back in its place), each with
 /// a button to reveal it in Finder; a pinned folder lists its repositories under it, ticked where
 /// they're shown. Adds repositories or folders through an open panel, holds the settings (how several
-/// are arranged, which names hang on banners and whether they sway in gusts), and quits.
+/// are arranged, what they're drawn in, which names hang on banners and whether they sway in gusts),
+/// and quits.
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
 
@@ -91,6 +92,20 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
             menu.addItem(entry)
         }
         menu.addItem(.separator())
+        menu.addItem(.sectionHeader(title: "Medium"))
+        for (choice, title, tip) in [
+            (Medium.ink, "Ink", "Brush ink on cream paper"),
+            (.charcoal, "Charcoal", "Charcoal and coloured pastel on paper with a tooth"),
+            (.chalk, "Chalk", "Coloured chalk on a slate board, in light and dark mode alike"),
+        ] {
+            let entry = NSMenuItem(title: title, action: #selector(draw(in:)), keyEquivalent: "")
+            entry.target = self
+            entry.representedObject = choice.rawValue
+            entry.toolTip = tip
+            entry.state = settings.medium == choice ? .on : .off
+            menu.addItem(entry)
+        }
+        menu.addItem(.separator())
         menu.addItem(.sectionHeader(title: "Banners"))
         let branches = action("Branch Names", #selector(toggleBranchNames), nil)
         branches.state = settings.showsBranchNames ? .on : .off
@@ -121,6 +136,11 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
     @objc private func arrange(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let choice = Arrangement(rawValue: raw) else { return }
         settings.arrangement = choice
+    }
+
+    @objc private func draw(in sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let choice = Medium(rawValue: raw) else { return }
+        settings.medium = choice
     }
 
     @objc private func toggleBranchNames() {
