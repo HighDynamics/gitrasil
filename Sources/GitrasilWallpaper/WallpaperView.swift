@@ -289,8 +289,8 @@ struct Landscape {
             let drawing = TreeDrawing(style: style, now: now, frame: planted.frame)
             drawing.shadow(width: planted.full.bounds.width, in: &context)
             drawing.plate(pane.name, in: &context)
-            drawing.draw(layout.stems, seeds: layout.stems.map { _ in pane.seed }, groundStem: layout.stems.first,
-                         rootSeed: pane.seed, in: &context)
+            drawing.draw(layout.stems, seeds: layout.stems.map { _ in pane.seed }, parents: layout.stems.map { $0.fork?.parent },
+                         groundStem: layout.stems.first, rootSeed: pane.seed, in: &context)
             if let problem = pane.problem {
                 problemText(problem, at: CGPoint(x: planted.frame.origin.x, y: size.height / 2), in: &context)
             }
@@ -322,8 +322,15 @@ struct Landscape {
         let stems = [layout.trunk] + layout.boughs.flatMap(\.layout.stems)
         // Each bough's stems are seeded from its repository, as an orchard tree's are.
         let seeds = ["yggdrasil"] + layout.boughs.flatMap { bough in bough.layout.stems.map { _ in bough.name } }
+        // A stem's fork names its parent among its own bough's stems; a bough's foot grows out of the
+        // shared trunk.
+        var parents: [Int?] = [nil]
+        for bough in layout.boughs {
+            let offset = parents.count
+            parents += bough.layout.stems.map { stem in stem.fork.map { $0.parent.map { $0 + offset } ?? 0 } }
+        }
         drawing.shadow(width: full.bounds.width, in: &context)
-        drawing.draw(stems, seeds: seeds, groundStem: layout.trunk, rootSeed: "yggdrasil", in: &context)
+        drawing.draw(stems, seeds: seeds, parents: parents, groundStem: layout.trunk, rootSeed: "yggdrasil", in: &context)
         let problems = panes.compactMap { pane in pane.problem.map { "\(pane.name): \($0)" } }
         if !problems.isEmpty {
             problemText(problems.joined(separator: "   "),
@@ -384,8 +391,9 @@ struct TreeDrawing {
 
     /// The wood and foliage of `stems` (names hang on banners over the canvas: `BannerLayer`),
     /// with roots spreading from `groundStem`'s foot. `seeds` are each stem's repository's seed
-    /// (`Pane.seed`), and `rootSeed` the roots'.
-    func draw(_ stems: [TreeLayout.Stem], seeds: [String], groundStem: TreeLayout.Stem?, rootSeed: String,
+    /// (`Pane.seed`), and `rootSeed` the roots'. `parents` are each stem's parent, as an index into
+    /// `stems` (before it), or nil for one standing on the ground.
+    func draw(_ stems: [TreeLayout.Stem], seeds: [String], parents: [Int?], groundStem: TreeLayout.Stem?, rootSeed: String,
               in context: inout GraphicsContext) {
         for stem in stems { canopy(stem, in: &context) }
         let outlines = stems.map(outline)
@@ -408,7 +416,7 @@ struct TreeDrawing {
         }
         for (stem, samples) in zip(stems, outlines) { bark(stem, samples, in: &context) }
         for (stem, samples) in zip(stems, outlines) { ridge(stem, samples, in: &context) }
-        tint(stems, outlines, shapes, in: &context)
+        tint(stems, outlines, shapes, parents: parents, in: &context)
         if style.contour > 0 { contours(stems, outlines, tapers, woodSeeds, roots: roots, rootSeed: rootSeed, in: &context) }
         for (stem, seed) in zip(stems, seeds) { leaves(stem, repo: seed, in: &context) }
         for (stem, seed) in zip(stems, seeds) where stem.isCheckedOut { blossom(stem, repo: seed, in: &context) }
@@ -697,14 +705,14 @@ struct TreeDrawing {
     /// ink at the tip: a wash of paper, then the ink, both rising along it. Parents first, so a
     /// sub-branch picks up where its parent's shading had got to.
     private func tint(_ stems: [TreeLayout.Stem], _ outlines: [[(point: CGPoint, width: CGFloat)]], _ shapes: [Path],
-                      in context: inout GraphicsContext) {
+                      parents: [Int?], in context: inout GraphicsContext) {
         // Per stem: the base and tip of its gradient, where it starts and with what, and its ink.
         var ramps: [(base: CGPoint, tip: CGPoint, from: Double, start: Double, ink: Color, alpha: Double)?] = []
         for (index, stem) in stems.enumerated() {
             guard !stem.isTrunk, let base = outlines[index].first, let tip = outlines[index].last else { ramps.append(nil); continue }
             let alpha = 0.55 + 0.4 * vigour(tipCommit(stem))
             var from = 0.0, fromInk = ink(stem), fromAlpha = alpha
-            if let parent = stem.fork?.parent, parent < ramps.count, let ramp = ramps[parent] {
+            if let parent = parents[index], parent < ramps.count, let ramp = ramps[parent] {
                 let d = CGPoint(x: ramp.tip.x - ramp.base.x, y: ramp.tip.y - ramp.base.y)
                 let u = ((base.point.x - ramp.base.x) * d.x + (base.point.y - ramp.base.y) * d.y) / max(d.x * d.x + d.y * d.y, 0.001)
                 from = Self.rampValue(u, from: ramp.from, start: ramp.start)
