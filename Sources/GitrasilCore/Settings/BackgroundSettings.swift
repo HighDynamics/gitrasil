@@ -41,7 +41,8 @@ public final class MemorySettings: SettingsStorage {
 }
 
 /// The background's settings from the menu, saved between launches next to the pins. Unset (or
-/// unreadable) values take their defaults: an orchard in chalk, every name shown, the banners still.
+/// unreadable) values take their defaults: an orchard in chalk, every name shown, the banners still,
+/// the trees in their first shape.
 @MainActor
 @Observable
 public final class BackgroundSettings {
@@ -51,6 +52,7 @@ public final class BackgroundSettings {
     static let repoNamesKey = "showsRepoNames"
     static let gustsKey = "gusts"
     static let mediumKey = "medium"
+    static let layoutSeedKey = "layoutSeed"
 
     public var arrangement: Arrangement {
         didSet { if arrangement != oldValue { storage.set(arrangement.rawValue, forKey: Self.arrangementKey) } }
@@ -77,6 +79,20 @@ public final class BackgroundSettings {
         didSet { if gusts != oldValue { storage.set(gusts, forKey: Self.gustsKey) } }
     }
 
+    /// What the trees' shapes are seeded with besides the repositories' and branches' names
+    /// (`TreeLayout`'s `shuffle`): 0, the default, draws them as they've always been; Reshuffle
+    /// Branches picks another, so the same branches lean and curve differently.
+    public var layoutSeed: Int {
+        didSet { if layoutSeed != oldValue { storage.set(layoutSeed, forKey: Self.layoutSeedKey) } }
+    }
+
+    /// A new layout seed, never 0 or the one in use.
+    public func reshuffle() {
+        var next: Int
+        repeat { next = Int.random(in: 1...999_999) } while next == layoutSeed
+        layoutSeed = next
+    }
+
     /// Whether anything hangs that a gust could sway: branch pennants, or ribbons in the single tree.
     public var hasBanners: Bool {
         showsBranchNames || showsRepoNames && arrangement == .singleTree
@@ -94,5 +110,6 @@ public final class BackgroundSettings {
         showsBranchNames = storage.object(forKey: Self.branchNamesKey) as? Bool ?? true
         showsRepoNames = storage.object(forKey: Self.repoNamesKey) as? Bool ?? true
         gusts = storage.object(forKey: Self.gustsKey) as? Bool ?? false
+        layoutSeed = storage.object(forKey: Self.layoutSeedKey) as? Int ?? 0
     }
 }

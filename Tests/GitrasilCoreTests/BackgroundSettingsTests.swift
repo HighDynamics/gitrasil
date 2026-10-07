@@ -144,4 +144,33 @@ final class BackgroundSettingsTests: XCTestCase {
         defaults.set("singleTree", forKey: "arrangement")
         XCTAssertEqual(BackgroundSettings(storage: defaults).arrangement, .singleTree)
     }
+
+    func testTheTreesKeepTheirShapeUntilReshuffled() {
+        let storage = MemorySettings()
+        let settings = BackgroundSettings(storage: storage)
+        XCTAssertEqual(settings.layoutSeed, 0, "the first shape by default")
+        XCTAssertNil(storage.saved["layoutSeed"])
+        var seen: Set<Int> = [0]
+        for _ in 0..<20 {
+            let before = settings.layoutSeed
+            settings.reshuffle()
+            XCTAssertNotEqual(settings.layoutSeed, before, "a reshuffle always changes it")
+            XCTAssertNotEqual(settings.layoutSeed, 0)
+            XCTAssertEqual(storage.saved["layoutSeed"] as? Int, settings.layoutSeed)
+            seen.insert(settings.layoutSeed)
+        }
+        XCTAssertGreaterThan(seen.count, 10)
+        XCTAssertEqual(BackgroundSettings(storage: storage).layoutSeed, settings.layoutSeed, "kept between launches")
+    }
+
+    func testAnUnreadableLayoutSeedIsTheFirstShape() {
+        for saved: Any in ["7", 2.5, [7]] {
+            let storage = MemorySettings()
+            storage.saved = ["layoutSeed": saved]
+            XCTAssertEqual(BackgroundSettings(storage: storage).layoutSeed, 0, "\(saved)")
+        }
+        let storage = MemorySettings()
+        storage.saved = ["layoutSeed": 4242]
+        XCTAssertEqual(BackgroundSettings(storage: storage).layoutSeed, 4242)
+    }
 }
