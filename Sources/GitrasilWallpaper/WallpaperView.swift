@@ -26,8 +26,7 @@ struct WallpaperView: View {
         GeometryReader { proxy in
             ZStack {
                 Canvas { context, size in
-                    drawPaper(size: size, style: style, in: &context)
-                    if !panes.isEmpty { drawGround(size: size, style: style, in: &context) }
+                    Self.drawPaper(size: size, style: style, ground: !panes.isEmpty, in: &context)
                 }
                 if panes.isEmpty {
                     Text("Pin a repository from the menu bar to grow its tree here.")
@@ -41,12 +40,8 @@ struct WallpaperView: View {
                         }
                         let trunkGrowIn = background.trunkGrowIn(at: date)
                         Canvas { context, size in
-                            let landscape = Landscape(style: style, now: now, size: size, trunkGrowIn: trunkGrowIn)
-                            if landscape.isSingleTree(panes, arrangement: arrangement) {
-                                landscape.drawSingleTree(panes, in: &context)
-                            } else {
-                                landscape.drawOrchard(panes, in: &context)
-                            }
+                            Landscape(style: style, now: now, size: size, trunkGrowIn: trunkGrowIn)
+                                .draw(panes, arrangement: arrangement, in: &context)
                         }
                     }
                     if showsBranchNames || showsRepoNames {
@@ -83,7 +78,8 @@ struct WallpaperView: View {
         return Set(banners.map(\.id) + plan.ribbons.filter { growingIn($0.pane) }.map(\.id))
     }
 
-    private func drawPaper(size: CGSize, style: WallpaperStyle, in context: inout GraphicsContext) {
+    /// The paper, and the ground when there are trees to stand on it.
+    static func drawPaper(size: CGSize, style: WallpaperStyle, ground: Bool, in context: inout GraphicsContext) {
         let rect = CGRect(origin: .zero, size: size)
         context.fill(Path(rect), with: .linearGradient(
             Gradient(colors: style.paper), startPoint: .zero, endPoint: CGPoint(x: size.width, y: size.height)))
@@ -101,10 +97,11 @@ struct WallpaperView: View {
             fibres.addLine(to: CGPoint(x: x + cos(angle) * length, y: y + sin(angle) * length))
         }
         context.stroke(fibres, with: .color(style.fibre), lineWidth: 0.6)
+        if ground { drawGround(size: size, style: style, in: &context) }
     }
 
     /// One hand-drawn horizon across the whole screen, every tree standing on it, with sparse tufts.
-    private func drawGround(size: CGSize, style: WallpaperStyle, in context: inout GraphicsContext) {
+    private static func drawGround(size: CGSize, style: WallpaperStyle, in context: inout GraphicsContext) {
         let y = Composition.groundY(size.height)
         var line = Path()
         var rng = SeededRandom("ground")
@@ -214,6 +211,15 @@ struct Landscape {
         let index: Int
         let full: TreeLayout
         let frame: TreeFrame
+    }
+
+    /// The trees in `arrangement`.
+    func draw(_ panes: [Pane], arrangement: Arrangement, in context: inout GraphicsContext) {
+        if isSingleTree(panes, arrangement: arrangement) {
+            drawSingleTree(panes, in: &context)
+        } else {
+            drawOrchard(panes, in: &context)
+        }
     }
 
     /// The single tree takes two trees at least; with one it's that tree, in the orchard.
