@@ -254,6 +254,18 @@ final class TreeLayoutTests: XCTestCase {
         }
     }
 
+    func testANameFadesInAsItsStemReachesItsTip() {
+        let long = TreeLayout.Stretch(start: 0.2, end: 0.7)
+        XCTAssertEqual(long.nameShown(at: 0.5), 0, "hidden while the stem grows")
+        XCTAssertEqual(long.nameShown(at: 0.7 - TreeLayout.Stretch.nameFade / 2), 0.5, accuracy: 1e-12)
+        XCTAssertEqual(long.nameShown(at: 0.7), 1, "whole as the stem reaches its tip")
+        XCTAssertEqual(long.nameShown(at: 1), 1)
+        let short = TreeLayout.Stretch(start: 0.9, end: 0.92)
+        XCTAssertEqual(short.nameShown(at: 0.9), 0)
+        XCTAssertEqual(short.nameShown(at: 0.91), 0.5, accuracy: 1e-9, "a short stem's name fades over all of it")
+        XCTAssertEqual(short.nameShown(at: 0.92), 1)
+    }
+
     func testGrowInEasesInAndOut() {
         XCTAssertEqual(TreeLayout.growIn(0), 0)
         XCTAssertEqual(TreeLayout.growIn(1), 1)

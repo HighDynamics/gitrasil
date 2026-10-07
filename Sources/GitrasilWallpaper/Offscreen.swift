@@ -102,7 +102,7 @@ enum Offscreen {
         let plan = Landscape(style: style, now: background.now, size: size, trunkGrowIn: nil)
             .plan(panes(background), arrangement: background.settings.arrangement,
                   branchNames: background.settings.showsBranchNames, repoNames: background.settings.showsRepoNames)
-        return BannerLayer(plan: plan, hidden: [], style: style, breeze: background.breeze)
+        return BannerLayer(plan: plan, shown: [:], style: style, breeze: background.breeze)
     }
 
     // MARK: Rendering

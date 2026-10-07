@@ -270,6 +270,18 @@ public struct TreeLayout: Sendable {
         public func progress(at growIn: Double) -> Double {
             min(max((growIn - start) / max(end - start, 1e-9), 0), 1)
         }
+
+        /// How far the stem's name (its banner) has faded in at `growIn`: over the last of its
+        /// stretch (`nameFade` of the grow-in, or all of it when it's shorter), whole as the stem
+        /// reaches its tip.
+        public func nameShown(at growIn: Double) -> Double {
+            let fade = min(Self.nameFade, end - start)
+            guard growIn < end else { return 1 }
+            guard fade > 0 else { return 0 }
+            return min(max((growIn - (end - fade)) / fade, 0), 1)
+        }
+
+        public static let nameFade = 0.08
     }
 
     /// When each stem grows during a grow-in.

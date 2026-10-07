@@ -115,11 +115,16 @@ final class WallpaperModel {
         return growth
     }
 
+    /// How far the running growth is at `date` (eased, 0…1); nil when idle.
+    func growthProgress(at date: Date) -> Double? {
+        guard let growthStart else { return nil }
+        let t = min(max(date.timeIntervalSince(growthStart) / Self.growthDuration, 0), 1)
+        return 1 - pow(1 - t, 3)
+    }
+
     /// Commits grown in so far, by stem, at `date` in the running growth (eased); empty when idle.
     func grown(at date: Date) -> [String: Double] {
-        guard let growthStart else { return [:] }
-        let t = min(max(date.timeIntervalSince(growthStart) / Self.growthDuration, 0), 1)
-        let eased = 1 - pow(1 - t, 3)
+        guard let eased = growthProgress(at: date) else { return [:] }
         return growth.mapValues { $0.from + ($0.to - $0.from) * eased }
     }
 

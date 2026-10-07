@@ -56,7 +56,11 @@ struct WallpaperView: View {
                                 zip(panes, seeds).map { Pane($0, seed: $1) },
                                 arrangement: arrangement, branchNames: showsBranchNames, repoNames: showsRepoNames)
                         }
-                        BannerLayer(plan: plan, hidden: hiddenBanners(plan), style: style, breeze: background.breeze)
+                        // Each name fades in as its wood finishes growing, on the trees' clock.
+                        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !growing)) { timeline in
+                            BannerLayer(plan: plan, shown: shownBanners(plan, at: timeline.date), style: style,
+                                        breeze: background.breeze)
+                        }
                     }
                 }
             }
@@ -64,19 +68,33 @@ struct WallpaperView: View {
         .ignoresSafeArea()
     }
 
-    /// Banners on wood that's growing in: hidden until it has grown, then fading in. A repository's
-    /// ribbon waits for its whole bough.
-    private func hiddenBanners(_ plan: BannerPlan) -> Set<String> {
-        let panes = Dictionary(background.panes.map { ($0.repoURL.path, $0) }, uniquingKeysWith: { a, _ in a })
-        func growingIn(_ id: String) -> Bool {
-            guard let pane = panes[id] else { return false }
-            return background.trunkGrowIn != nil || background.growIns[pane.repoURL] != nil
+    /// How far each banner on growing wood has faded in at `date`: a pennant as its stem reaches its
+    /// tip (`TreeLayout.Stretch.nameShown`), a ribbon as its bough does; on a limb growing new
+    /// commits, over the end of the growth. Banners on still wood aren't listed (they're shown).
+    /// Each banner carries its stretch from the plan, so a frame only looks up a progress or two per
+    /// pane.
+    private func shownBanners(_ plan: BannerPlan, at date: Date) -> [String: Double] {
+        var growingIn: [String: Double] = [:], growing: [String: (pane: WallpaperModel, progress: Double)] = [:]
+        for pane in background.panes {
+            if let progress = background.growIn(pane.repoURL, at: date) {
+                growingIn[pane.repoURL.path] = progress
+            } else if let progress = pane.growthProgress(at: date) {
+                growing[pane.repoURL.path] = (pane, progress)
+            }
         }
-        let banners = plan.banners.filter { hanging in
-            guard let pane = panes[hanging.pane] else { return false }
-            return growingIn(hanging.pane) || pane.growthStart != nil && pane.growth[hanging.stem] != nil
+        guard !growingIn.isEmpty || !growing.isEmpty else { return [:] }
+        var shown: [String: Double] = [:]
+        for hanging in plan.banners {
+            if let progress = growingIn[hanging.pane] {
+                shown[hanging.id] = hanging.stretch.nameShown(at: progress)
+            } else if let (pane, progress) = growing[hanging.pane], pane.growth[hanging.stem] != nil {
+                shown[hanging.id] = min(max((progress - 0.85) / 0.15, 0), 1)
+            }
         }
-        return Set(banners.map(\.id) + plan.ribbons.filter { growingIn($0.pane) }.map(\.id))
+        for ribbon in plan.ribbons {
+            if let progress = growingIn[ribbon.pane] { shown[ribbon.id] = ribbon.stretch.nameShown(at: progress) }
+        }
+        return shown
     }
 
     /// The paper, and the ground when there are trees to stand on it.
