@@ -71,8 +71,8 @@ the banners over a dense crown is slow in a debug build.
 The same binary has two offscreen aids, which draw the pinned repositories without a window and
 quit:
 
-- `--benchmark [runs]` prints the median time (ms) to draw the trees, the paper and the banners,
-  for each arrangement, medium, screen size and mode;
+- `--benchmark [runs]` prints the median time (ms) to draw the trees, a frame of them growing in,
+  the paper and the banners, for each arrangement, medium, screen size and mode;
 - `--snapshot <folder>` writes `<medium>-<arrangement>-<mode>.jpg` at 1440×900@2x.
 
 Pin repositories from the menu-bar item (the small tree), or a folder of them: a pinned folder

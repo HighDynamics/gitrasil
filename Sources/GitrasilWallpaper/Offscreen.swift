@@ -26,8 +26,8 @@ enum Offscreen {
 
     /// Times each part of a redraw, rendered to a bitmap (`ImageRenderer`, so on the CPU), `runs`
     /// times after a warm-up, and prints the median: the tree canvas (what redraws when a tree
-    /// changes, and every frame of a growth), the paper under it, and the banners (each drawn once
-    /// into its own layer; a gust only turns them).
+    /// changes), one frame of it growing in (every tree halfway, a shared trunk risen), the paper
+    /// under it, and the banners (each drawn once into its own layer; a gust only turns them).
     static func benchmark(_ background: BackgroundModel, runs: Int) async {
         await settle(background)
         print("redraw, median of \(runs) (ms):")
@@ -39,11 +39,13 @@ enum Offscreen {
                     for dark in [false, true] {
                         let style = WallpaperStyle.make(medium, dark: dark)
                         let trees = median(runs) { render(treeCanvas(background, style: style), screen: screen, dark: dark) }
+                        let frame = median(runs) { render(treeCanvas(background, style: style, growIn: 0.5), screen: screen, dark: dark) }
                         let paper = median(runs) { render(paperCanvas(background, style: style), screen: screen, dark: dark) }
                         let banners = median(runs) { render(bannerLayer(background, style: style, size: screen.size),
                                                             screen: screen, dark: dark) }
-                        print(String(format: "  %@ %@ %@ %@: trees %.1f, paper %.1f, banners %.1f", medium.rawValue,
-                                     arrangement.rawValue, screen.name, dark ? "dark" : "light", trees, paper, banners))
+                        print(String(format: "  %@ %@ %@ %@: trees %.1f, grow-in frame %.1f, paper %.1f, banners %.1f",
+                                     medium.rawValue, arrangement.rawValue, screen.name, dark ? "dark" : "light",
+                                     trees, frame, paper, banners))
                     }
                 }
             }
@@ -78,10 +80,15 @@ enum Offscreen {
         zip(background.panes, PinnedRepositories.seeds(background.panes.map(\.repoURL))).map { Pane($0, seed: $1) }
     }
 
-    private static func treeCanvas(_ background: BackgroundModel, style: WallpaperStyle) -> some View {
-        let panes = panes(background), arrangement = background.settings.arrangement, now = background.now
+    /// The trees, as they stand or `growIn` of the way through growing in.
+    private static func treeCanvas(_ background: BackgroundModel, style: WallpaperStyle, growIn: Double? = nil) -> some View {
+        let panes = zip(background.panes, PinnedRepositories.seeds(background.panes.map(\.repoURL))).map {
+            Pane($0, seed: $1, growIn: growIn)
+        }
+        let arrangement = background.settings.arrangement, now = background.now
         return Canvas { context, size in
-            Landscape(style: style, now: now, size: size, trunkGrowIn: nil).draw(panes, arrangement: arrangement, in: &context)
+            Landscape(style: style, now: now, size: size, trunkGrowIn: growIn.map { _ in 1 })
+                .draw(panes, arrangement: arrangement, in: &context)
         }
     }
 
