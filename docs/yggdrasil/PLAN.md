@@ -626,3 +626,79 @@ per shape.
 
 **Gusts** are off unless turned on: with no `gusts` saved, the menu's *Sway in Gusts* shows unticked
 and no gust timer runs; a saved choice (on or off) is kept.
+
+## Round 7: the whole tree animated, re-growing on demand, reshuffled branches, a gust at once
+
+Daniel (Oct 7), via Arbor: "The tree(s) draw up to a certain point, and then the rest *pops* in. Can
+the whole thing be animated?" "When a repo is dropped from the selections, everything should be
+re-animated instead of just one tree or branch poofing away." "Add a 'Watch Gitrasil Grow' option
+that redraws the whole thing (just for fun)." "How deterministic/random is the structure of the tree?
+Is there room for a button to redraw it so it branches differently?" "When gusts are turned on, the
+first one should happen right away." Branch `grow-anim`, from `joins-and-gusts` (b2ac10d), rebased
+onto `main` once round 6 lands.
+
+**What pops.** Watched live (a throwaway suite of four repositories, the window captured as it
+grew), the grow-in's clock is smooth: every tree and bough reaches the end and the clock stops on
+time. What jumps is what the grow-in leaves out or restarts:
+
+- *Every name at once.* A grow-in times each limb to finish at the very end ("so they all finish
+  together"), and the banners and ribbons stay hidden until the last bough is done. So the crown
+  completes in one moment and then forty-odd pennants and the ribbons fade in together over 0.7 s,
+  after the wood has stopped: the rest of the picture appears in one go.
+- *Trees arriving one by one.* At launch each repository's tree arrives when its first read
+  finishes, a moment apart, and each arrival changes the picture: the first grows alone as an
+  orchard tree, the second replaces it with a single tree growing from the ground, a third and fourth
+  re-fan the boughs (each bough's place depends on how many there are) and start growing before the
+  shared trunk has reached the crotch.
+- *Blossoms* only show on wood that's fully grown, so a worktree's blossom appears at the end
+  (that stays: it is the last thing on its stem and small).
+
+**The fix.**
+
+1. *A grow-in that unfolds.* Each stem gets its own stretch of the grow-in (`TreeLayout`'s grow-in
+   schedule, pure and tested): the trunk rises first; a limb starts when its parent reaches its fork
+   and grows at a steady pace for its own stretch, so limbs low on the tree finish early and the
+   outermost twigs last, and the whole schedule is scaled to end at 1. The grow-in still lasts 2.2 s
+   a tree or bough (0.8 s more for a shared trunk), and the tree it ends on is exactly the tree as it
+   stands.
+2. *Names as their wood finishes.* A pennant fades in as its stem reaches its tip, a ribbon as its
+   bough finishes, frame by frame from the same clock as the trees (an opacity per banner, no
+   SwiftUI animation), so the names arrive through the grow-in rather than after it. A limb growing
+   new commits does the same with its own pennant.
+3. *One grow-in for the whole scene.* A whole-scene grow-in (at launch, and every time below) waits
+   until every pane has its tree or a problem, up to a couple of seconds, drawing only the ground,
+   and then grows everything together. A tree arriving later still grows in as today.
+
+**Re-growing on unpin.** Dropping a repository (unticking it, or a pinned folder's most recently
+active changing) grows the whole scene again from the ground, in either arrangement, instead of the
+others jumping to their new places.
+
+**Watch Gitrasil Grow.** A menu item that grows the whole scene again, the same whole-scene grow-in.
+
+**How the tree is seeded, and Reshuffle Branches.** Nothing in a tree is random at run time: it's a
+pure function of the repository's history (which branches there are, where they fork, how many
+commits) and seeds made from names. The repository's folder name seeds the trunk's sway, its place
+in an orchard plot and its bough's lean in the single tree; each branch's name seeds its limb's
+side, angle and the turn at every commit; "yggdrasil" seeds the shared trunk. The hand-drawn look
+(line wobble, leaves' lopsidedness, roots) is seeded from the same names. So the same repositories
+draw the same trees on every launch, and a tree changes only when its history does.
+
+There's room for a reshuffle: a *layout seed*, saved in the defaults (0, the default, draws exactly
+today's trees). Reshuffle Branches picks a new one and grows the scene again. It's mixed into what
+seeds the shape (the trunk's sway and place, each bough's lean, each limb's side, angle and turns,
+the shared trunk), never into the history, so the same branches fork from the same commits but lean
+and curve differently; for a given seed the trees are the same on every launch. The hand-drawn
+jitter stays keyed as it is (and a gust never redraws the trees), so lines don't shimmer. The banner
+plan's cache key gains the seed.
+
+**A gust at once.** Turning Sway in Gusts on (or turning the banners back on with it on) blows the
+first gust straight away, when gusts may blow at all (mains power, the display awake); the usual
+timer takes over from there.
+
+**Kept.** Draw only on change: the clocks run only while something grows (the banners' grow-in
+clock is the trees'), a gust still only turns the banners' layers, and the plan cache is keyed as
+before plus the seed. Release redraw and grow-in frame times against `main` (`--benchmark` gains a
+grow-in frame). A `--frames <folder>` aid renders a whole-scene grow-in frame by frame, offscreen,
+for a look at it outside the repo. Tests: the grow-in schedule (stems in order, smooth, ending on
+the tree as it stands), the layout seed (default, saved, kept, reshuffled; seed 0 unchanged, a new
+seed deterministic). `swift build -c release` (no warnings) and `swift test` on the final commit.
