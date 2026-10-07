@@ -501,3 +501,128 @@ redraw (the layered wood and the grain pass) and 2–4 ms to the banners.
 Daniel picked **chalk as the default**: with no `medium` saved (or an unreadable one), the
 background is chalk; a saved choice is kept, and ink and charcoal stay in the menu. No screenshots
 go in the repo: the media are described in words above.
+
+## Round 6: seamless joins in every medium, and gusts off by default
+
+Daniel (Oct 7), after a few days with the hand-drawn look in chalk: "finesse the connecting branches
+again in all of the aesthetics. It's obvious they are being stacked again with the opacity drop in
+some of the aesthetics." And gusts should be off unless he turns them on. Branch `joins-and-gusts`,
+from `main` (a54582c).
+
+**What's stacking.** Rounds 2 and 3 made the ink's wood one shape in one layer, so wood meeting wood
+shows no seam. The hand-drawn round brought back three ways for a join to be drawn twice:
+
+- *Charcoal and chalk lay the wood down stem by stem* (`strokes()`): each stem's shape is filled
+  straight onto the canvas with its own translucent pressure gradient, so where a collar lies on its
+  parent (or a bough on the trunk, or a root on the trunk's foot) the medium is laid twice: a darker
+  patch in charcoal on light paper, a lighter one in the dark modes and in chalk, with the limb's cut
+  end showing inside its parent. Round 5 called that overlap "as asked"; now it's the problem.
+  Their soft edge (a stroke round each shape) and smudge are drawn per piece too, so a limb's
+  outline shows *inside* its parent.
+- *The contours* (charcoal and chalk) run straight on across every join: the trunk's edge line
+  crosses each bough's foot, and a limb's own lines start inside its parent.
+- *The branch tint* (every medium, ink too): a sub-limb's paper wash and ink ramp are filled over
+  its parent's, where its collar lies on it, so a coloured fork doubles up. In the single tree it also
+  starts from the wrong stem's tone on all but the first bough: a stem's `fork.parent` is an index
+  into its own bough's stems, and the drawing read it as an index into all of them.
+
+**The fix: each tree's wood composed as one layer, a stem replacing what's under it.**
+
+1. *Dry wood in one layer.* Charcoal and chalk draw the wood into one transparency layer
+   (`drawLayer`), composited once at the wood's opacity. Inside it each piece is drawn with the
+   `copy` blend mode, parents first, so where a collar lies on its parent its strength *replaces*
+   the parent's rather than adding to it. For that to leave no edge, a limb's pressure starts at its
+   parent's strength at the fork and eases into its own over its collar; the roots take the trunk's
+   strength at its foot. The soft edge goes in the same layer, so only its outside part survives:
+   the halo round the whole tree's outline, not round each stem. The smudge is one layer too. The
+   rounded feet and the shared trunk's round top, which the ink already has, join the dry media's
+   wood, so no cut end shows.
+2. *One outline.* Each stem's contour is hidden where it lies inside the wood it joins: a limb's
+   lines inside its parent near the fork, a parent's lines under its limbs' collars, the trunk's
+   under the roots and the roots' under the trunk. What's left is the outline of the forked wood:
+   the trunk's edge turns into the bough's. The lines are still sketched (two passes, wobbling,
+   varying in width); only where they stop changes.
+3. *Tint in one layer.* The paper washes and the branch inks are each one layer, a limb replacing
+   its parent's tint where its collar lies on it; it starts from its parent's tone, so the fork
+   reads as one piece of wood changing colour. The drawing gets each stem's parent as an index into
+   all the stems (a bough's foot's parent is the shared trunk), so the single tree's sub-limbs start
+   from the right tone.
+
+Unchanged: the colours, media, wobble, grain, streaks (the parent's still carry past a join), the
+bark ridge in each crotch, and the layout. Nothing new is cached and no cache key changes (the
+banner plan and the textures are keyed as before); redraws still happen only on a change, a growth
+or a grow-in, never per gust. The layers are clipped to the wood's bounds. Redraw time measured with
+`--benchmark` in release against `main`.
+
+The pressure blend (a limb's strength along its collar, from its parent's to its own, at fixed
+distances from the fork so a growing limb keeps its shading) is a small pure function in Core,
+unit-tested.
+
+**Gusts off by default.** With no `gusts` saved (or an unreadable one) the banners hang still; a
+saved choice is kept either way. The menu's *Sway in Gusts* tick follows the setting, so it shows
+unticked. Tests and the README follow.
+
+**Checks.** Close crops of joins (trunk–bough, limb–limb, a collar) in each medium, light and dark,
+before (`main`) and after, plus a before/after side by side per medium, from `--snapshot` with a
+throwaway defaults suite: kept outside the repo. `swift build -c release` (no warnings) and
+`swift test` on the final commit.
+
+### What was built
+
+As planned. Each tree's wood is composed once: in charcoal and chalk it's one layer at the wood's
+opacity, every piece replacing what's under it (children first, then their parent, then the shared
+trunk's round top), with a limb's pressure starting at its parent's strength at the fork
+(`HandDrawn.pressure`, tested) and the roots at the trunk's foot. The soft edge and the smudge are
+layers too, so they only show round the whole tree. Each contour is clipped out where it lies in the
+wood it joins (a limb's inside its parent near the fork, a parent's under its limbs' collars and a
+sibling's at the same fork, the trunk's under the roots and back). The tint is one layer, a sub-limb's
+wash replacing its parent's tint under its collar, and in the single tree each stem now starts from its
+real parent's tone (a bough's stems were read with their own bough's indices).
+
+Looked at from `--snapshot`, close up at the single tree's crotch, trunk–limb and limb–limb forks,
+the roots and a crowded crown, in every medium and mode, before and after (kept out of the repo):
+
+- *Charcoal*: the dark squares inside the trunk at every limb's foot and the dark knot at the single
+  tree's crotch are gone; the trunk's outline turns into each limb's, and the grain, streaks, ridge and
+  pressure are as they were.
+- *Chalk*: the same in light, as bright patches; the boughs now leave the trunk as one piece of chalk.
+- *Ink*: the wood was already one layer; the sub-limb forks lose their tinted patch, and in the single
+  tree a sub-limb no longer starts as a dark stub of plain wood on a coloured parent.
+- One knock-on, consistent with the ink: where two unrelated limbs cross in the dry media, the later
+  one is now drawn over the other rather than building up with it.
+
+**Redraw times**, median of 9 offscreen renders (ms, release build, ImageRenderer on the CPU, the same
+throwaway pins), trees only (the paper and banners are unchanged), light / dark:
+
+| | Orchard 1440×900@2x | Orchard 3440×1440@1x | Single tree 1440×900@2x | Single tree 3440×1440@1x |
+|---|---|---|---|---|
+| Ink, `main` | 10.7 / 11.8 | 12.0 / 11.8 | 13.5 / 11.6 | 11.3 / 11.4 |
+| Ink, now | 10.6 / 11.4 | 11.8 / 11.7 | 14.0 / 11.5 | 11.5 / 11.4 |
+| Charcoal, `main` | 13.9 / 13.8 | 14.9 / 15.2 | 14.3 / 14.2 | 14.6 / 14.6 |
+| Charcoal, now | 12.6 / 14.0 | 16.5 / 16.5 | 16.0 / 15.9 | 16.2 / 16.1 |
+| Chalk, `main` | 13.7 / 13.7 | 15.1 / 15.0 | 14.3 / 14.1 | 13.7 / 14.6 |
+| Chalk, now | 14.9 / 15.1 | 16.5 / 16.5 | 15.8 / 15.8 | 16.1 / 16.1 |
+
+Ink costs what it did. Charcoal and chalk add about 1.5 ms a tree redraw (the wood's and the tint's
+layers, and the contours' clips), which is only paid on a change, a growth or a grow-in; a gust still
+turns the banners' layers and never redraws the trees, and nothing new is cached.
+
+Those pins make a single tree of three boughs. With four (the most there can be), median of 15:
+
+| | Orchard 1440×900@2x | Orchard 3440×1440@1x | Single tree 1440×900@2x | Single tree 3440×1440@1x |
+|---|---|---|---|---|
+| Ink, `main` | 16.3 / 16.4 | 16.9 / 16.9 | 16.8 / 16.7 | 16.8 / 16.7 |
+| Ink, now | 15.4 / 16.3 | 16.7 / 17.0 | 16.8 / 16.6 | 16.5 / 16.4 |
+| Charcoal, `main` | 19.5 / 19.8 | 21.0 / 21.1 | 21.2 / 21.1 | 21.7 / 20.8 |
+| Charcoal, now | 22.0 / 21.0 | 22.5 / 22.6 | 23.4 / 22.9 | 23.9 / 23.4 |
+| Chalk, `main` | 19.8 / 19.9 | 21.0 / 20.8 | 20.6 / 20.1 | 21.3 / 21.0 |
+| Chalk, now | 21.5 / 20.9 | 22.7 / 22.8 | 23.0 / 24.0 | 23.2 / 23.6 |
+
+The dry single tree adds about 2.4 ms, the orchard about 1.6: the trunk's contour is clipped round
+every bough's collar and every root. Clipping once to the hidden shapes merged into one path is wrong
+(where two of them overlap winding opposite ways the line shows through), and one mask layer filled
+with them saves about 0.9 ms, within the noise, and moves a few chalk edges, so the clips stay one
+per shape.
+
+**Gusts** are off unless turned on: with no `gusts` saved, the menu's *Sway in Gusts* shows unticked
+and no gust timer runs; a saved choice (on or off) is kept.

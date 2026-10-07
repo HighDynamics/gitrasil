@@ -10,7 +10,7 @@ final class BackgroundSettingsTests: XCTestCase {
         XCTAssertEqual(settings.medium, .chalk)
         XCTAssertTrue(settings.showsBranchNames)
         XCTAssertTrue(settings.showsRepoNames)
-        XCTAssertTrue(settings.gusts)
+        XCTAssertFalse(settings.gusts, "the banners hang still until gusts are turned on")
     }
 
     func testUnreadableValuesTakeTheirDefaults() {
@@ -21,7 +21,16 @@ final class BackgroundSettingsTests: XCTestCase {
         XCTAssertEqual(settings.medium, .chalk)
         XCTAssertTrue(settings.showsBranchNames)
         XCTAssertTrue(settings.showsRepoNames)
-        XCTAssertTrue(settings.gusts)
+        XCTAssertFalse(settings.gusts)
+    }
+
+    func testASavedGustsChoiceIsKept() {
+        // Saved before gusts were off by default, or chosen since: either way it stands.
+        for saved in [true, false] {
+            let storage = MemorySettings()
+            storage.saved = ["gusts": saved]
+            XCTAssertEqual(BackgroundSettings(storage: storage).gusts, saved)
+        }
     }
 
     func testACopyOfTheSavedSettingsChangesWithoutWritingThem() {
@@ -47,15 +56,16 @@ final class BackgroundSettingsTests: XCTestCase {
         let settings = BackgroundSettings(storage: storage)
         settings.arrangement = .singleTree
         settings.showsBranchNames = false
-        settings.gusts = false
+        settings.gusts = true
         XCTAssertEqual(storage.saved["arrangement"] as? String, "singleTree")
+        XCTAssertEqual(storage.saved["gusts"] as? Bool, true)
         XCTAssertNil(storage.saved["showsRepoNames"], "an untouched setting isn't written")
 
         let relaunched = BackgroundSettings(storage: storage)
         XCTAssertEqual(relaunched.arrangement, .singleTree)
         XCTAssertFalse(relaunched.showsBranchNames)
         XCTAssertTrue(relaunched.showsRepoNames)
-        XCTAssertFalse(relaunched.gusts)
+        XCTAssertTrue(relaunched.gusts)
     }
 
     func testTheMediumIsSavedBetweenLaunches() {
@@ -107,6 +117,8 @@ final class BackgroundSettingsTests: XCTestCase {
 
     func testGustsBlowOnlyWithBannersToSway() {
         let settings = BackgroundSettings(storage: MemorySettings())
+        XCTAssertFalse(settings.gustsBlow, "off until turned on")
+        settings.gusts = true
         XCTAssertTrue(settings.gustsBlow)
 
         // Only the repositories' ribbons: they hang in the single tree, not in the orchard.

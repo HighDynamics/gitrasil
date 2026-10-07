@@ -85,3 +85,53 @@ public enum HandDrawn {
 
     private static func smooth(_ t: Double) -> Double { t * t * (3 - 2 * t) }
 }
+
+extension HandDrawn {
+
+    /// One point of a dry medium's pressure along a stem: how far from the stem's base, and how strong
+    /// the medium is there, as a share of the wood's full strength.
+    public struct Pressure: Equatable, Sendable {
+        public let distance: Double
+        public let strength: Double
+
+        public init(distance: Double, strength: Double) {
+            self.distance = distance
+            self.strength = strength
+        }
+    }
+
+    /// The spacing of a stem's own pressure points.
+    public static let pressureSpacing = 90.0
+
+    /// How hard a hand presses along a stem `length` long (charcoal, chalk): its strength rising and
+    /// falling by up to `amount`, at fixed distances from the base, so a stem that grows keeps the
+    /// pressure it had along its old stretch. A limb forks off wood already drawn: given its parent's
+    /// strength where it leaves it and the length of its collar, it starts at its parent's strength and
+    /// eases into its own over its collar, so where the two meet there's no step in tone.
+    public static func pressure(seed: UInt64, amount: Double, length: Double,
+                                fork: (strength: Double, collar: Double)? = nil) -> [Pressure] {
+        let length = max(length, 1)
+        let own = (Array(stride(from: 0, to: length, by: pressureSpacing)) + [length]).map { distance in
+            Pressure(distance: distance, strength: 1 - amount * (1 + wobble(seed, at: distance / pressureSpacing)) / 2)
+        }
+        guard let fork, fork.collar > 0 else { return own }
+        let distances = (0...4).map { fork.collar * Double($0) / 4 }.filter { $0 < length }
+            + own.map(\.distance).filter { $0 > fork.collar }
+            + (length <= fork.collar ? [length] : [])
+        return distances.map { distance in
+            let ease = smooth(min(distance / fork.collar, 1))
+            return Pressure(distance: distance, strength: fork.strength + (strength(own, at: distance) - fork.strength) * ease)
+        }
+    }
+
+    /// The strength `distance` from a stem's base, between its `pressure` points.
+    public static func strength(_ pressure: [Pressure], at distance: Double) -> Double {
+        guard let first = pressure.first else { return 1 }
+        if distance <= first.distance { return first.strength }
+        for (a, b) in zip(pressure, pressure.dropFirst()) where distance <= b.distance {
+            let span = b.distance - a.distance
+            return span > 0 ? a.strength + (b.strength - a.strength) * (distance - a.distance) / span : b.strength
+        }
+        return pressure[pressure.count - 1].strength
+    }
+}
