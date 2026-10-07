@@ -25,8 +25,8 @@ final class BackgroundModel {
     private(set) var trunkGrowIn: Date?
 
     /// A tree, or a bough, grows in over this long; a shared trunk rises in `trunkDuration` first.
-    static let growInDuration: TimeInterval = 2.2
-    static let trunkDuration: TimeInterval = 0.8
+    nonisolated static let growInDuration: TimeInterval = 2.2
+    nonisolated static let trunkDuration: TimeInterval = 0.8
 
     /// A whole-scene grow-in waiting for trees still being read (`regrow`): only the ground is drawn
     /// until every pane has its tree or a problem, or `settleLimit` has passed.
@@ -150,17 +150,43 @@ final class BackgroundModel {
 
     // MARK: Growing in
 
+    /// The grow-in under way, as it stands: when each tree (or bough) and the shared trunk started.
+    /// It keeps answering after the model has moved on (`Offscreen.frames` draws slower than it runs).
+    struct GrowInClock {
+        let growIns: [URL: Date]
+        let trunk: Date?
+
+        /// How far along `url`'s tree (or bough) is at `date`, eased; nil when it isn't growing in.
+        func growIn(_ url: URL, at date: Date) -> Double? {
+            growIns[url].map { TreeLayout.growIn(date.timeIntervalSince($0) / BackgroundModel.growInDuration) }
+        }
+
+        /// How far the shared trunk has risen at `date`, eased; nil when it isn't rising.
+        func trunkGrowIn(at date: Date) -> Double? {
+            trunk.map { TreeLayout.growIn(date.timeIntervalSince($0) / BackgroundModel.trunkDuration) }
+        }
+
+        /// When it began and when everything in it has grown; nil when nothing is growing in.
+        var span: ClosedRange<Date>? {
+            let starts = Array(growIns.values) + [trunk].compactMap { $0 }
+            let ends = growIns.values.map { $0.addingTimeInterval(BackgroundModel.growInDuration) }
+                + [trunk?.addingTimeInterval(BackgroundModel.trunkDuration)].compactMap { $0 }
+            guard let start = starts.min(), let end = ends.max() else { return nil }
+            return start...end
+        }
+    }
+
+    var growInClock: GrowInClock { GrowInClock(growIns: growIns, trunk: trunkGrowIn) }
+
     /// How far along `url`'s tree (or bough) is in growing in at `date`, eased; nil when it isn't.
     /// Waiting for the scene's trees, nothing has grown.
     func growIn(_ url: URL, at date: Date) -> Double? {
-        if isAwaitingTrees { return 0 }
-        return growIns[url].map { TreeLayout.growIn(date.timeIntervalSince($0) / Self.growInDuration) }
+        isAwaitingTrees ? 0 : growInClock.growIn(url, at: date)
     }
 
     /// How far the single tree's shared trunk has risen at `date`, eased; nil when it isn't rising.
     func trunkGrowIn(at date: Date) -> Double? {
-        if isAwaitingTrees { return 0 }
-        return trunkGrowIn.map { TreeLayout.growIn(date.timeIntervalSince($0) / Self.trunkDuration) }
+        isAwaitingTrees ? 0 : growInClock.trunkGrowIn(at: date)
     }
 
     var isGrowingIn: Bool { !growIns.isEmpty || trunkGrowIn != nil }
@@ -227,9 +253,7 @@ final class BackgroundModel {
 
     /// Once every grow-in has run, back to drawing only on change.
     private func finishGrowingIn() {
-        let ends = growIns.values.map { $0.addingTimeInterval(Self.growInDuration) }
-            + [trunkGrowIn?.addingTimeInterval(Self.trunkDuration)].compactMap { $0 }
-        guard let last = ends.max() else { return }
+        guard let last = growInClock.span?.upperBound else { return }
         Task {
             try? await Task.sleep(for: .seconds(max(last.timeIntervalSinceNow, 0) + 0.05))
             let now = Date()

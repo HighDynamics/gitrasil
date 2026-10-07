@@ -61,8 +61,9 @@ struct WallpaperView: View {
                         }
                         // Each name fades in as its wood finishes growing, on the trees' clock.
                         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !growing)) { timeline in
-                            BannerLayer(plan: plan, shown: shownBanners(plan, at: timeline.date), style: style,
-                                        breeze: background.breeze)
+                            BannerLayer(plan: plan, shown: Self.shownBanners(plan, panes: panes, at: timeline.date,
+                                                                             growIn: background.growIn),
+                                        style: style, breeze: background.breeze)
                         }
                     }
                 }
@@ -74,12 +75,13 @@ struct WallpaperView: View {
     /// How far each banner on growing wood has faded in at `date`: a pennant as its stem reaches its
     /// tip (`TreeLayout.Stretch.nameShown`), a ribbon as its bough does; on a limb growing new
     /// commits, over the end of the growth. Banners on still wood aren't listed (they're shown).
-    /// Each banner carries its stretch from the plan, so a frame only looks up a progress or two per
-    /// pane.
-    private func shownBanners(_ plan: BannerPlan, at date: Date) -> [String: Double] {
+    /// `growIn` is how far a pane's tree is in growing in at a date (`BackgroundModel.growIn`). Each
+    /// banner carries its stretch from the plan, so a frame only looks up a progress or two per pane.
+    static func shownBanners(_ plan: BannerPlan, panes: [WallpaperModel], at date: Date,
+                             growIn: (URL, Date) -> Double?) -> [String: Double] {
         var growingIn: [String: Double] = [:], growing: [String: (pane: WallpaperModel, progress: Double)] = [:]
-        for pane in background.panes {
-            if let progress = background.growIn(pane.repoURL, at: date) {
+        for pane in panes {
+            if let progress = growIn(pane.repoURL, date) {
                 growingIn[pane.repoURL.path] = progress
             } else if let progress = pane.growthProgress(at: date) {
                 growing[pane.repoURL.path] = (pane, progress)
