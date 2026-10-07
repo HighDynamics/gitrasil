@@ -86,7 +86,8 @@ final class BackgroundModel {
     }
 
     /// Follow the settings (the view redraws on its own; it reads them): a new arrangement or layout
-    /// seed grows in from the ground, and the breeze follows the banners and gusts.
+    /// seed grows in from the ground, and the breeze follows the banners and gusts (turning gusts on
+    /// blows one at once, so it shows what it does).
     private func observeSettings() {
         let arrangement = settings.arrangement, medium = settings.medium, layoutSeed = settings.layoutSeed
         let names = (settings.showsBranchNames, settings.showsRepoNames, settings.gusts)
@@ -112,6 +113,7 @@ final class BackgroundModel {
                              + "gusts \(self.settings.gusts ? "on" : "off")")
                 }
                 self.updateBreeze()
+                if self.settings.gusts, !names.2 { self.breeze.blowNow() }
                 self.observeSettings()
             }
         }

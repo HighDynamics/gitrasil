@@ -239,6 +239,13 @@ final class Breeze {
         return pow(sin(.pi * t), 2)
     }
 
+    /// A gust at once (gusts were just turned on), if gusts may blow; the timer takes over after it.
+    func blowNow() {
+        guard mayBlow else { return }
+        timer?.invalidate()
+        gust()
+    }
+
     /// Whether gusts may blow now.
     private var mayBlow: Bool {
         isEnabled && !isTurnedOff && isVisible && Self.isCheapToAnimate()
