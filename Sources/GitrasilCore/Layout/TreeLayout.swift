@@ -414,6 +414,11 @@ public struct TreeLayout: Sendable {
         parentWidth / 2 / max(abs(sin(angle)), 0.35)
     }
 
+    /// How far along a stem leaving at `angle` its collar has eased back to its own width.
+    public static func collarEnd(own: Double, parentWidth: Double, angle: Double) -> Double {
+        collarExit(parentWidth: parentWidth, angle: angle) + own * collarLength
+    }
+
     static let collarFlare = 2.0
     static let collarLength = 2.4
 
