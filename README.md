@@ -94,6 +94,8 @@ The same menu holds the settings:
 - **Sway in Gusts** — now and then a gust sways the banners for a few seconds, only on mains power
   with the display awake and the background uncovered. Off by default: the banners hang still until
   it's turned on.
+- **Watch Gitrasil Grow** — grows every tree again from the ground, just to watch. The scene also
+  grows again on its own when a repository is dropped.
 
 Pins and settings are saved between launches in the `com.gitrasil.background` defaults. For a
 test run or a preview:

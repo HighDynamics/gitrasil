@@ -72,7 +72,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windows.start()
         self.windows = windows
         self.background = background
-        self.menu = StatusMenu(pins: pins, settings: settings, gustsOverridden: background.breeze.isTurnedOff)
+        self.menu = StatusMenu(pins: pins, settings: settings, gustsOverridden: background.breeze.isTurnedOff,
+                               regrow: { [weak background] in background?.regrow() })
 
         background.start()
 

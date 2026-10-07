@@ -161,9 +161,9 @@ final class BackgroundModel {
     /// Panes with a tree to draw.
     private var ready: [WallpaperModel] { panes.filter { $0.tree != nil } }
 
-    /// The whole scene grows again from the ground (at launch, and when a repository is dropped), all
-    /// together, once every pane has its tree or a problem, or after `settleLimit` with the trees
-    /// there are. Meanwhile only the ground shows.
+    /// The whole scene grows again from the ground (at launch, when a repository is dropped, and from
+    /// the menu's Watch Gitrasil Grow), all together, once every pane has its tree or a problem, or
+    /// after `settleLimit` with the trees there are. Meanwhile only the ground shows.
     func regrow() {
         guard isVisible else { return }
         switch wait.start(allSettled: panes.allSatisfy(\.isSettled)) {

@@ -7,7 +7,7 @@ import GitrasilCore
 /// a button to reveal it in Finder; a pinned folder lists its repositories under it, ticked where
 /// they're shown. Adds repositories or folders through an open panel, holds the settings (how several
 /// are arranged, what they're drawn in, which names hang on banners and whether they sway in gusts),
-/// and quits.
+/// grows the trees again on request, and quits.
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
 
@@ -15,6 +15,8 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
     private let settings: BackgroundSettings
     /// GITRASIL_BACKGROUND_BREEZE=off: the gusts setting is shown off and can't be turned on.
     private let gustsOverridden: Bool
+    /// Grows the whole scene again (Watch Gitrasil Grow).
+    private let regrow: () -> Void
     private let item: NSStatusItem
     /// While the menu is open: the pins as listed when it opened (unticked ones too), their rows, and
     /// each listed repository of a pinned folder.
@@ -22,10 +24,11 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
     private var rows: [PinRow] = []
     private var folderEntries: [(entry: NSMenuItem, repo: URL)] = []
 
-    init(pins: PinnedRepositories, settings: BackgroundSettings, gustsOverridden: Bool) {
+    init(pins: PinnedRepositories, settings: BackgroundSettings, gustsOverridden: Bool, regrow: @escaping () -> Void) {
         self.pins = pins
         self.settings = settings
         self.gustsOverridden = gustsOverridden
+        self.regrow = regrow
         self.item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
         item.button?.image = MenuBarIcon.image()
@@ -123,6 +126,10 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
             : "Now and then a gust sways the banners for a few seconds (on mains power only); off, they hang still"
         menu.addItem(gusts)
         menu.addItem(.separator())
+        let watch = action("Watch Gitrasil Grow", #selector(watchGrow), nil)
+        watch.toolTip = "Grows every tree again from the ground"
+        menu.addItem(watch)
+        menu.addItem(.separator())
         menu.addItem(action("Quit Gitrasil Background", #selector(quit), nil, key: "q"))
     }
 
@@ -155,10 +162,18 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         settings.gusts.toggle()
     }
 
+    @objc private func watchGrow() {
+        regrow()
+    }
+
     /// Gusts sway banners, so with none hanging (or the breeze turned off from outside) there's nothing
-    /// to set.
+    /// to set; with nothing pinned there's nothing to grow.
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        menuItem.action != #selector(toggleGusts) || (settings.hasBanners && !gustsOverridden)
+        switch menuItem.action {
+        case #selector(toggleGusts): settings.hasBanners && !gustsOverridden
+        case #selector(watchGrow): !pins.shown.isEmpty
+        default: true
+        }
     }
 
     func menuDidClose(_ menu: NSMenu) {
