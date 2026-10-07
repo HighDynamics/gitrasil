@@ -43,6 +43,25 @@ final class TreeLayoutTests: XCTestCase {
         XCTAssertEqual(a.bounds, b.bounds)
     }
 
+    func testAReshuffleMovesTheLimbsButKeepsTheBranching() {
+        let first = TreeLayout(tree: tree(), seed: "ash")
+        XCTAssertEqual(TreeLayout(tree: tree(), seed: "ash", shuffle: 0).stems.map(\.nodes), first.stems.map(\.nodes),
+                       "seed 0 is the shape the names alone give")
+        let a = TreeLayout(tree: tree(), seed: "ash", shuffle: 4242), b = TreeLayout(tree: tree(), seed: "ash", shuffle: 4242)
+        XCTAssertEqual(a.stems.map(\.nodes), b.stems.map(\.nodes), "the same seed, the same shape")
+        let c = TreeLayout(tree: tree(), seed: "ash", shuffle: 77)
+        for other in [a, c] {
+            XCTAssertEqual(other.stems.map(\.name), first.stems.map(\.name))
+            XCTAssertEqual(other.stems.map(\.nodes.count), first.stems.map(\.nodes.count))
+            XCTAssertEqual(other.stems.map(\.fork?.node), first.stems.map(\.fork?.node), "each limb leaves where it did")
+            XCTAssertNotEqual(points(stem(other, "main")), points(stem(first, "main")), "the trunk sways differently")
+            XCTAssertNotEqual(points(stem(other, "feature/low")), points(stem(first, "feature/low")))
+        }
+        XCTAssertNotEqual(points(stem(a, "feature/low")), points(stem(c, "feature/low")))
+        XCTAssertEqual(TreeLayout(tree: tree(), seed: "ash", growIn: 1, shuffle: 77).stems.map(\.nodes), c.stems.map(\.nodes),
+                       "it grows in to the shape it settles in")
+    }
+
     func testEveryStemHasANodePerCommitAfterItsBase() {
         let layout = TreeLayout(tree: tree(), seed: "ash")
         XCTAssertEqual(layout.stems.map(\.name), ["main", "feature/low", "feature/low-sub", "feature/high"])

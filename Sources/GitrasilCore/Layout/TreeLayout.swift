@@ -125,15 +125,18 @@ public struct TreeLayout: Sendable {
     ///   - planting: where the trunk stands and which way it leans (upright at the origin by default).
     ///   - growIn: while the whole tree grows in from nothing, how far along it is (0…1; `growIn(…)`);
     ///     it overrides `grown`. Nil for the tree as it stands.
+    ///   - shuffle: a layout seed mixed into the trunk's sway and each limb's side, lean and turns
+    ///     (`SeededRandom.key(_:shuffle:)`); 0 for the shape the names alone give. The same seed always
+    ///     gives the same shape, and the branching (which limb leaves where) never changes with it.
     public init(tree: RepoTree, seed: String, grown: [String: Double] = [:], planting: Planting = .upright,
-                growIn: Double? = nil) {
+                growIn: Double? = nil, shuffle: Int = 0) {
         var stems: [Stem] = []
         let weights = Self.weights(tree)
 
         // The trunk: a gentle seeded sway, its commits spaced on a log scale from the tip down.
         let count = tree.trunk.count
         let height = Self.trunkHeight(commits: count)
-        var rng = SeededRandom(seed, -1)
+        var rng = SeededRandom(SeededRandom.key(seed, shuffle: shuffle), -1)
         let sway = (amplitude: rng.next(in: 0.015...0.04), waves: rng.next(in: 0.6...1.3),
                     phase: rng.next(in: 0...(2 * .pi)), lean: rng.next(in: -0.07...0.07))
         // A leaning trunk (a bough) is walked out along its length, straightening as it rises.
@@ -199,10 +202,11 @@ public struct TreeLayout: Sendable {
         // The limbs, each grown from its parent's node.
         var limbStems: [Stem?] = []
         var stemIndex: [Int: Int] = [:]
-        let sides = Self.sides(tree, outward: planting.outward)
+        let sides = Self.sides(tree, outward: planting.outward, shuffle: shuffle)
         for (index, limb) in tree.limbs.enumerated() {
             let base: Node, level: Int, scale: Double, lean: Double, parentGrown: Double, fork: Fork
-            var rng = SeededRandom(limb.name)
+            let key = SeededRandom.key(limb.name, shuffle: shuffle)
+            var rng = SeededRandom(key)
             let side = sides[index]
             switch limb.parent {
             case .trunk(let node):
@@ -225,7 +229,7 @@ public struct TreeLayout: Sendable {
                 level = parent.level + 1
                 scale = plans[index]?.scale ?? parent.scale * Self.childScale
                 // Mostly outward, away from the trunk, like a real crown; sometimes back in.
-                var pick = SeededRandom(limb.name, -2)
+                var pick = SeededRandom(key, -2)
                 let outward: Double = base.heading >= 0 ? 1 : -1
                 let childSide = pick.next() < 0.7 ? outward : -outward
                 lean = base.heading + childSide * rng.next(in: 28...50) * .pi / 180
@@ -238,7 +242,7 @@ public struct TreeLayout: Sendable {
             if let growIn {
                 shown = full * schedule.limbs[index].progress(at: growIn)
             }
-            let (nodes, curve) = Self.grow(limb, from: base, lean: lean, scale: scale, shown: shown,
+            let (nodes, curve) = Self.grow(limb, from: base, lean: lean, scale: scale, shown: shown, shuffle: shuffle,
                                            weight: { k in Self.remainingWeight(limb, index: index, tree: tree, weights: weights, beyond: k) })
             let stem = Stem(name: limb.name, level: level, nodes: nodes, curve: curve, commits: limb.commits, grown: shown,
                             isBud: limb.isBud, isCheckedOut: limb.isCheckedOut, scale: scale, fork: fork)
@@ -433,9 +437,9 @@ public struct TreeLayout: Sendable {
     ///
     /// A bough's limbs favour its outer side (`outward`): the tally starts that far behind on it, so
     /// roughly the first half of the limbs go outward before the balancing begins.
-    static func sides(_ tree: RepoTree, outward: Double = 0) -> [Double] {
+    static func sides(_ tree: RepoTree, outward: Double = 0, shuffle: Int = 0) -> [Double] {
         var sides = tree.limbs.map { limb -> Double in
-            var rng = SeededRandom(limb.name)
+            var rng = SeededRandom(SeededRandom.key(limb.name, shuffle: shuffle))
             return rng.next() < 0.5 ? -1 : 1
         }
         var branches = [Double](repeating: 1, count: tree.limbs.count)
@@ -468,7 +472,7 @@ public struct TreeLayout: Sendable {
     /// long step curves too. `shown` commits are grown, the last one part-way. Returns the commit
     /// nodes and the finer curve through them.
     static func grow(_ limb: RepoTree.Limb, from base: Node, lean: Double, scale: Double, shown: Double,
-                     weight: (Int) -> Double) -> (nodes: [Node], curve: [Node]) {
+                     shuffle: Int = 0, weight: (Int) -> Double) -> (nodes: [Node], curve: [Node]) {
         let steps = Int(ceil(shown))
         guard steps > 0 else { return ([], []) }
         var nodes = [Node(point: base.point, width: min(base.width, width(weight: weight(0))), heading: lean)]
@@ -478,7 +482,7 @@ public struct TreeLayout: Sendable {
         var length = (limb.isBud ? 0.35 : 1) * firstStep * scale
         let bendPerSubstep = 1 - pow(1 - tropism, 1 / Double(substeps))
         for k in 1...steps {
-            var rng = SeededRandom(limb.name, k)
+            var rng = SeededRandom(SeededRandom.key(limb.name, shuffle: shuffle), k)
             let turn = rng.next(in: -11...11) * .pi / 180
             let fraction = min(1, shown - Double(k - 1))
             let from = curve[curve.count - 1].width, to = width(weight: weight(k))

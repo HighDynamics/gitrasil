@@ -47,12 +47,15 @@ public struct YggdrasilLayout: Sendable {
     /// How high the boughs leave the shared trunk.
     public static let crotchHeight = 0.34
 
-    /// - Parameter trunkGrowIn: while the shared trunk rises from the ground, how far along it is
-    ///   (0…1); its boughs wait for it (their own `growIn`).
-    public init(repos: [Repo], trunkGrowIn: Double? = nil) {
+    /// - Parameters:
+    ///   - trunkGrowIn: while the shared trunk rises from the ground, how far along it is (0…1); its
+    ///     boughs wait for it (their own `growIn`).
+    ///   - shuffle: a layout seed mixed into the shared trunk's sway, each bough's place and lean, and
+    ///     its tree (`TreeLayout`'s `shuffle`); 0 for the shape the names alone give.
+    public init(repos: [Repo], trunkGrowIn: Double? = nil, shuffle: Int = 0) {
         // The shared trunk carries all of them: the pipe model again, width² adds up.
         let carried = sqrt(repos.reduce(0) { $0 + pow(TreeLayout.footWidth($1.tree), 2) })
-        var rng = SeededRandom("yggdrasil", -1)
+        var rng = SeededRandom(SeededRandom.key("yggdrasil", shuffle: shuffle), -1)
         let lean = rng.next(in: -0.03...0.03), phase = rng.next(in: 0...(2 * .pi))
         func trunkPoint(_ h: Double) -> CGPoint {
             let t = h / Self.crotchHeight
@@ -73,11 +76,12 @@ public struct YggdrasilLayout: Sendable {
 
         let crotch = nodes[count].point
         boughs = repos.enumerated().map { index, repo in
-            var planting = Self.planting(index: index, of: repos.count, name: repo.name, crotch: crotch)
+            var planting = Self.planting(index: index, of: repos.count, name: SeededRandom.key(repo.name, shuffle: shuffle),
+                                         crotch: crotch)
             planting.fork = TreeLayout.Fork(parent: nil, node: count, width: nodes[count].width, heading: nodes[count].heading)
             return Bough(name: repo.name,
                          layout: TreeLayout(tree: repo.tree, seed: repo.name, grown: repo.grown, planting: planting,
-                                            growIn: repo.growIn),
+                                            growIn: repo.growIn, shuffle: shuffle),
                          planting: planting)
         }
 

@@ -12,6 +12,12 @@ public struct SeededRandom {
         state = Self.hash(key) ^ (UInt64(bitPattern: Int64(index)) &* 0x9E3779B97F4A7C15)
     }
 
+    /// `key` reshuffled by a layout seed (`BackgroundSettings.layoutSeed`): `key` itself for 0, so
+    /// shapes keep the seeds they've always had until reshuffled; another key for any other seed.
+    public static func key(_ key: String, shuffle: Int) -> String {
+        shuffle == 0 ? key : "\(key)\u{1F}\(shuffle)"
+    }
+
     /// The next value in 0..<1.
     public mutating func next() -> Double {
         state &+= 0x9E3779B97F4A7C15

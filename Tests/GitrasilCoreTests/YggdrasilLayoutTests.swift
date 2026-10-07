@@ -62,6 +62,24 @@ final class YggdrasilLayoutTests: XCTestCase {
         XCTAssertEqual(after.boughs[0].layout.stems[1].nodes.count, 6, "ash's limb grew a step")
     }
 
+    func testAReshuffleMovesTheBoughsButKeepsThemInPinOrder() {
+        let repos: [YggdrasilLayout.Repo] = [.init(name: "ash", tree: tree("a")), .init(name: "elm", tree: tree("e", trunk: 12)),
+                                             .init(name: "oak", tree: tree("o", trunk: 60))]
+        let first = layout()
+        XCTAssertEqual(YggdrasilLayout(repos: repos, shuffle: 0).trunk.nodes, first.trunk.nodes)
+        let a = YggdrasilLayout(repos: repos, shuffle: 4242), b = YggdrasilLayout(repos: repos, shuffle: 4242)
+        XCTAssertEqual(a.trunk.nodes, b.trunk.nodes)
+        for bough in 0..<3 { XCTAssertEqual(points(a, bough: bough), points(b, bough: bough), "the same seed, the same shape") }
+        XCTAssertNotEqual(a.trunk.nodes.map(\.point), first.trunk.nodes.map(\.point), "the shared trunk sways differently")
+        XCTAssertEqual(a.boughs.map(\.name), ["ash", "elm", "oak"])
+        let headings = a.boughs.map(\.planting.heading)
+        XCTAssertEqual(headings, headings.sorted(), "still fanned left to right in pin order")
+        for bough in 0..<3 {
+            XCTAssertNotEqual(points(a, bough: bough), points(first, bough: bough))
+            XCTAssertEqual(a.boughs[bough].layout.stems.map(\.nodes.count), first.boughs[bough].layout.stems.map(\.nodes.count))
+        }
+    }
+
     func testTheSharedTrunkCarriesEveryBough() {
         let layout = layout()
         let feet = layout.boughs.map { $0.layout.stems[0].nodes[0].width }
