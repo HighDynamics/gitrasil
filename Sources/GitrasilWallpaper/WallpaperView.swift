@@ -549,7 +549,7 @@ struct TreeDrawing {
         for piece in shapes + roots {
             context.stroke(piece, with: .color(style.ink.opacity(style.woodOpacity * 0.3)), lineWidth: 2.5)
         }
-        for (index, stem) in stems.enumerated() {
+        for index in stems.indices {
             guard let base = outlines[index].first?.point, let tip = outlines[index].last?.point else { continue }
             let seed = seeds[index] ^ 0x9E55
             let length = max(hypot(tip.x - base.x, tip.y - base.y), 1)
