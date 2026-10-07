@@ -17,6 +17,19 @@ public protocol SettingsStorage: AnyObject {
 
 extension UserDefaults: SettingsStorage {}
 
+/// Settings kept in memory only: a copy of saved values to change without writing them back (the
+/// offscreen test aids), or a blank slate (tests).
+public final class MemorySettings: SettingsStorage {
+    public var saved: [String: Any]
+
+    public init(_ saved: [String: Any] = [:]) {
+        self.saved = saved
+    }
+
+    public func object(forKey key: String) -> Any? { saved[key] }
+    public func set(_ value: Any?, forKey key: String) { saved[key] = value }
+}
+
 /// The background's settings from the menu, saved between launches next to the pins. Unset (or
 /// unreadable) values take their defaults: an orchard, every name shown, gusts blowing.
 @MainActor

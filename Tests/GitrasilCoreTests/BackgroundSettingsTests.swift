@@ -1,13 +1,6 @@
 import XCTest
 @testable import GitrasilCore
 
-/// In memory, so tests never write to the user's preferences.
-private final class MemorySettings: SettingsStorage {
-    var saved: [String: Any] = [:]
-    func object(forKey key: String) -> Any? { saved[key] }
-    func set(_ value: Any?, forKey key: String) { saved[key] = value }
-}
-
 @MainActor
 final class BackgroundSettingsTests: XCTestCase {
 
@@ -27,6 +20,24 @@ final class BackgroundSettingsTests: XCTestCase {
         XCTAssertTrue(settings.showsBranchNames)
         XCTAssertTrue(settings.showsRepoNames)
         XCTAssertTrue(settings.gusts)
+    }
+
+    func testACopyOfTheSavedSettingsChangesWithoutWritingThem() {
+        // The offscreen aids try each arrangement on a copy, so a run leaves the saved settings alone.
+        let suite = "gitrasil-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        BackgroundSettings(storage: defaults).arrangement = .singleTree
+        let before = defaults.persistentDomain(forName: suite) as NSDictionary?
+
+        let copy = BackgroundSettings(storage: MemorySettings(defaults.dictionaryRepresentation()))
+        XCTAssertEqual(copy.arrangement, .singleTree, "the copy starts from what's saved")
+        copy.arrangement = .orchard
+        copy.showsBranchNames = false
+        XCTAssertEqual(copy.arrangement, .orchard)
+
+        XCTAssertEqual(defaults.persistentDomain(forName: suite) as NSDictionary?, before)
+        XCTAssertEqual(BackgroundSettings(storage: defaults).arrangement, .singleTree)
     }
 
     func testChoicesAreSavedBetweenLaunches() {
