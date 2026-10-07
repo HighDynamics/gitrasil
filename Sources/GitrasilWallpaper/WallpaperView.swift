@@ -19,7 +19,9 @@ struct WallpaperView: View {
         let showsRepoNames = background.settings.showsRepoNames
         let now = background.now
         let seeds = PinnedRepositories.seeds(panes.map(\.repoURL))
-        // Read each pane here so Observation redraws when one publishes a new tree or growth.
+        // Read each pane here so Observation redraws when one publishes a new tree or growth, and
+        // when the scene stops waiting for its trees.
+        let _ = background.isAwaitingTrees
         let growing = background.isGrowingIn || panes.contains { pane in
             let _ = (pane.tree, pane.growth, pane.problem)
             return pane.growthStart != nil
@@ -305,8 +307,11 @@ struct Landscape {
             let layout = pane.growIn.map { TreeLayout(tree: tree, seed: pane.seed, growIn: $0) }
                 ?? (pane.grown.isEmpty ? planted.full : TreeLayout(tree: tree, seed: pane.seed, grown: pane.grown))
             let drawing = TreeDrawing(style: style, now: now, frame: planted.frame)
-            drawing.shadow(width: planted.full.bounds.width, in: &context)
-            drawing.plate(pane.name, in: &context)
+            // Its shadow and name come with it, not before it starts to grow.
+            if pane.growIn != 0 {
+                drawing.shadow(width: planted.full.bounds.width, in: &context)
+                drawing.plate(pane.name, in: &context)
+            }
             drawing.draw(layout.stems, seeds: layout.stems.map { _ in pane.seed }, parents: layout.stems.map { $0.fork?.parent },
                          rootedAt: layout.stems.isEmpty ? nil : 0, rootSeed: pane.seed, in: &context)
             if let problem = pane.problem {

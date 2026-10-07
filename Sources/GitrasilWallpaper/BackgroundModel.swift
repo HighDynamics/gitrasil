@@ -28,6 +28,12 @@ final class BackgroundModel {
     static let growInDuration: TimeInterval = 2.2
     static let trunkDuration: TimeInterval = 0.8
 
+    /// A whole-scene grow-in waiting for trees still being read (`regrow`): only the ground is drawn
+    /// until every pane has its tree or a problem, or `settleLimit` has passed.
+    var isAwaitingTrees: Bool { wait.isWaiting }
+    static let settleLimit: TimeInterval = 2.5
+    private var wait = GrowInWait()
+
     let pins: PinnedRepositories
     let settings: BackgroundSettings
     /// Now and then a gust through the banners, while the background is on screen.
@@ -37,7 +43,7 @@ final class BackgroundModel {
         didSet {
             for pane in panes { pane.isVisible = isVisible }
             breeze.isVisible = isVisible
-            if !isVisible { growIns = [:]; trunkGrowIn = nil }
+            if !isVisible { growIns = [:]; trunkGrowIn = nil; wait.cancel() }
         }
     }
 
@@ -54,6 +60,8 @@ final class BackgroundModel {
         updateBreeze()
         breeze.start()
         reconcile()
+        // The first trees grow in together, once they've all been read.
+        regrow()
         clock = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.now = Date()
@@ -119,6 +127,7 @@ final class BackgroundModel {
                 let pane = WallpaperModel(repoURL: url)
                 pane.isVisible = isVisible
                 pane.onFirstTree = { [weak self] in self?.treeArrived(url) }
+                pane.onFirstProblem = { [weak self] in self?.paneSettled() }
                 Task { await pane.start() }
                 return pane
             }()
@@ -133,19 +142,44 @@ final class BackgroundModel {
     // MARK: Growing in
 
     /// How far along `url`'s tree (or bough) is in growing in at `date`, eased; nil when it isn't.
+    /// Waiting for the scene's trees, nothing has grown.
     func growIn(_ url: URL, at date: Date) -> Double? {
-        growIns[url].map { TreeLayout.growIn(date.timeIntervalSince($0) / Self.growInDuration) }
+        if isAwaitingTrees { return 0 }
+        return growIns[url].map { TreeLayout.growIn(date.timeIntervalSince($0) / Self.growInDuration) }
     }
 
     /// How far the single tree's shared trunk has risen at `date`, eased; nil when it isn't rising.
     func trunkGrowIn(at date: Date) -> Double? {
-        trunkGrowIn.map { TreeLayout.growIn(date.timeIntervalSince($0) / Self.trunkDuration) }
+        if isAwaitingTrees { return 0 }
+        return trunkGrowIn.map { TreeLayout.growIn(date.timeIntervalSince($0) / Self.trunkDuration) }
     }
 
     var isGrowingIn: Bool { !growIns.isEmpty || trunkGrowIn != nil }
 
     /// Panes with a tree to draw.
     private var ready: [WallpaperModel] { panes.filter { $0.tree != nil } }
+
+    /// The whole scene grows again from the ground (at launch), all together, once every pane has its
+    /// tree or a problem, or after `settleLimit` with the trees there are. Meanwhile only the ground
+    /// shows.
+    func regrow() {
+        guard isVisible else { return }
+        switch wait.start(allSettled: panes.allSatisfy(\.isSettled)) {
+        case .growNow:
+            growInFromTheGround()
+        case .wait(let round):
+            Task {
+                try? await Task.sleep(for: .seconds(Self.settleLimit))
+                if wait.timedOut(round: round) { growInFromTheGround() }
+            }
+        }
+    }
+
+    /// A pane finished its first read (with a tree or a problem): the scene grows once it was the
+    /// last one a whole-scene grow-in was waiting for.
+    private func paneSettled() {
+        if wait.settled(allSettled: panes.allSatisfy(\.isSettled)) { growInFromTheGround() }
+    }
 
     /// Everything grows again from the ground, as when the arrangement changes: in the single tree,
     /// the shared trunk rises first and the boughs follow from the crotch.
@@ -167,6 +201,7 @@ final class BackgroundModel {
     /// crotch (from the ground, when it's the second and the single tree is only now forming).
     private func treeArrived(_ url: URL) {
         guard isVisible else { return }
+        guard !isAwaitingTrees else { return paneSettled() }
         let now = Date()
         switch (settings.arrangement, ready.count) {
         case (.singleTree, 2):

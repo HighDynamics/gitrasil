@@ -34,6 +34,9 @@ final class WallpaperModel {
         return tree == nil && store.lastError != nil ? "Git can’t read this repository." : nil
     }
 
+    /// Whether its first read is done: it has a tree, or a problem to show instead.
+    var isSettled: Bool { tree != nil || problem != nil }
+
     static let growthDuration: TimeInterval = 1.8
 
     /// What a tree draws: a long stretch of trunk, so fork heights spread out, and enough branches to
@@ -54,6 +57,10 @@ final class WallpaperModel {
     /// background can grow it in.
     var onFirstTree: (() -> Void)?
 
+    /// Called when the first read finds a problem instead of a tree (the folder is missing, or git
+    /// can't read it), so a scene waiting for every tree stops waiting for this one.
+    var onFirstProblem: (() -> Void)?
+
     private let store: RepoGraphStore
     private var redraws = 0
 
@@ -66,6 +73,7 @@ final class WallpaperModel {
     func start() async {
         observe()
         await store.start()
+        if tree == nil, problem != nil { onFirstProblem?() }
     }
 
     func stop() {

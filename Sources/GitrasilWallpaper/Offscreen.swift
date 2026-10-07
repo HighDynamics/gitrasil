@@ -140,7 +140,8 @@ enum Offscreen {
         try? await Task.sleep(for: .milliseconds(300))
         for _ in 0..<600 {
             let ready = background.panes.allSatisfy { $0.tree != nil || $0.problem != nil }
-            if ready, !background.isGrowingIn, background.panes.allSatisfy({ $0.growthStart == nil }) { break }
+            if ready, !background.isAwaitingTrees, !background.isGrowingIn,
+               background.panes.allSatisfy({ $0.growthStart == nil }) { break }
             try? await Task.sleep(for: .milliseconds(100))
         }
         try? await Task.sleep(for: .milliseconds(200))
