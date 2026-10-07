@@ -194,6 +194,66 @@ final class TreeLayoutTests: XCTestCase {
                        "a growing limb follows its full shape")
     }
 
+    func testAGrowInRunsFromTheTrunkOutToTheTwigs() {
+        // A long low limb, so the limbs carry on after the trunk has risen.
+        let schedule = TreeLayout.growInSchedule(tree(lowCommits: 30))
+        let low = schedule.stretch(of: "feature/low")!, sub = schedule.stretch(of: "feature/low-sub")!
+        let high = schedule.stretch(of: "feature/high")!
+        XCTAssertEqual(schedule.stretch(of: "main"), schedule.trunk)
+        XCTAssertNil(schedule.stretch(of: "nowhere"))
+        XCTAssertEqual(schedule.trunk.start, 0)
+        XCTAssertLessThan(schedule.trunk.end, 1, "the limbs carry on after the trunk")
+        // A limb starts when the rising trunk reaches its fork: the low one sooner than the high one.
+        XCTAssertGreaterThan(low.start, 0)
+        XCTAssertLessThan(low.start, high.start)
+        XCTAssertLessThan(high.start, schedule.trunk.end)
+        // The sub-branch starts two of its parent's thirty commits along it.
+        XCTAssertEqual(sub.start, low.start + (low.end - low.start) * 2 / 30, accuracy: 1e-12)
+        // They don't all finish together: the last stem finishes at the very end.
+        let ends = [schedule.trunk, low, sub, high].map(\.end)
+        XCTAssertEqual(ends.max()!, 1, accuracy: 1e-12)
+        XCTAssertGreaterThan(Set(ends).count, 1)
+        XCTAssertTrue(ends.allSatisfy { $0 <= 1 + 1e-12 })
+    }
+
+    func testEachStemGrowsSmoothlyThroughItsOwnStretch() {
+        let full = TreeLayout(tree: tree(), seed: "ash"), schedule = full.schedule
+        XCTAssertEqual(schedule, TreeLayout.growInSchedule(tree()))
+        var previous: [String: Double] = [:]
+        let steps = 400
+        for step in 0...steps {
+            let growIn = Double(step) / Double(steps)
+            let layout = TreeLayout(tree: tree(), seed: "ash", growIn: growIn)
+            for limb in tree().limbs {
+                let stretch = schedule.stretch(of: limb.name)!, count = Double(max(limb.commits.count, 1))
+                let grown = stem(layout, limb.name)?.grown ?? 0
+                if growIn <= stretch.start { XCTAssertEqual(grown, 0, "\(limb.name) waits for its start") }
+                if growIn >= stretch.end { XCTAssertEqual(grown, count, "\(limb.name) is grown by its end") }
+                // No jumps: a step of the grow-in grows a limb by no more than its share of it.
+                let most = count / (Double(steps) * (stretch.end - stretch.start)) + 1e-9
+                XCTAssertLessThanOrEqual(grown - (previous[limb.name] ?? 0), most, "\(limb.name) at \(growIn)")
+                XCTAssertGreaterThanOrEqual(grown, previous[limb.name] ?? 0)
+                previous[limb.name] = grown
+            }
+        }
+        XCTAssertEqual(previous, Dictionary(uniqueKeysWithValues: full.stems.dropFirst().map { ($0.name!, $0.grown) }))
+    }
+
+    func testTheScheduleIsTheLayoutsOwn() {
+        // A fork past the trunk's tip is clamped to the tip, in the layout and the schedule alike.
+        let stray = RepoTree.Limb(name: "past-the-tip", commits: commits("p", 3), parent: .trunk(node: 60), isCheckedOut: false)
+        let tip = RepoTree.Limb(name: "at-the-tip", commits: commits("q", 3), parent: .trunk(node: 40), isCheckedOut: false)
+        let tree = RepoTree(trunkName: "main", trunk: commits("t", 40), limbs: [stray, tip], isTrunkCheckedOut: false)
+        let layout = TreeLayout(tree: tree, seed: "ash")
+        XCTAssertEqual(stem(layout, "past-the-tip")?.scale, stem(layout, "at-the-tip")?.scale)
+        XCTAssertEqual(layout.schedule.limbs[0], layout.schedule.limbs[1])
+        XCTAssertEqual(stem(layout, "past-the-tip")?.nodes.first?.point, layout.stems[0].nodes.last?.point)
+        for growIn in [0.0, 0.3, 0.8, 1] {
+            XCTAssertEqual(TreeLayout(tree: tree, seed: "ash", growIn: growIn).schedule, layout.schedule,
+                           "the same schedule, growing in or not")
+        }
+    }
+
     func testGrowInEasesInAndOut() {
         XCTAssertEqual(TreeLayout.growIn(0), 0)
         XCTAssertEqual(TreeLayout.growIn(1), 1)
