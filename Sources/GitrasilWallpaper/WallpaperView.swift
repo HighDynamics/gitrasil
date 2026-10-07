@@ -290,7 +290,7 @@ struct Landscape {
             drawing.shadow(width: planted.full.bounds.width, in: &context)
             drawing.plate(pane.name, in: &context)
             drawing.draw(layout.stems, seeds: layout.stems.map { _ in pane.seed }, parents: layout.stems.map { $0.fork?.parent },
-                         groundStem: layout.stems.first, rootSeed: pane.seed, in: &context)
+                         rootedAt: layout.stems.isEmpty ? nil : 0, rootSeed: pane.seed, in: &context)
             if let problem = pane.problem {
                 problemText(problem, at: CGPoint(x: planted.frame.origin.x, y: size.height / 2), in: &context)
             }
@@ -330,7 +330,7 @@ struct Landscape {
             parents += bough.layout.stems.map { stem in stem.fork.map { $0.parent.map { $0 + offset } ?? 0 } }
         }
         drawing.shadow(width: full.bounds.width, in: &context)
-        drawing.draw(stems, seeds: seeds, parents: parents, groundStem: layout.trunk, rootSeed: "yggdrasil", in: &context)
+        drawing.draw(stems, seeds: seeds, parents: parents, rootedAt: 0, rootSeed: "yggdrasil", in: &context)
         let problems = panes.compactMap { pane in pane.problem.map { "\(pane.name): \($0)" } }
         if !problems.isEmpty {
             problemText(problems.joined(separator: "   "),
@@ -390,10 +390,10 @@ struct TreeDrawing {
     let frame: TreeFrame
 
     /// The wood and foliage of `stems` (names hang on banners over the canvas: `BannerLayer`),
-    /// with roots spreading from `groundStem`'s foot. `seeds` are each stem's repository's seed
-    /// (`Pane.seed`), and `rootSeed` the roots'. `parents` are each stem's parent, as an index into
-    /// `stems` (before it), or nil for one standing on the ground.
-    func draw(_ stems: [TreeLayout.Stem], seeds: [String], parents: [Int?], groundStem: TreeLayout.Stem?, rootSeed: String,
+    /// with roots spreading from the foot of the stem at `ground`. `seeds` are each stem's repository's
+    /// seed (`Pane.seed`), and `rootSeed` the roots'. `parents` are each stem's parent, as an index
+    /// into `stems` (before it), or nil for one standing on the ground.
+    func draw(_ stems: [TreeLayout.Stem], seeds: [String], parents: [Int?], rootedAt ground: Int?, rootSeed: String,
               in context: inout GraphicsContext) {
         for stem in stems { canopy(stem, in: &context) }
         let outlines = stems.map(outline)
@@ -402,9 +402,10 @@ struct TreeDrawing {
             samples.count >= 2 ? taper(samples, seed: seed) : Taper()
         }
         let shapes = tapers.map(\.shape)
-        let roots = groundStem.map { roots(of: $0, seed: rootSeed) } ?? []
+        let roots = ground.map { roots(of: stems[$0], seed: rootSeed) } ?? []
+        let tops = stems.map(top)
         if style.layeredWood {
-            strokes(stems, outlines, shapes, woodSeeds, roots: roots, in: &context)
+            strokes(stems, outlines, shapes, woodSeeds, parents: parents, roots: roots, tops: tops, in: &context)
         } else {
             // A stem growing out of other wood has a rounded base, so no cut end shows past its parent.
             let feet = zip(stems, outlines).compactMap { stem, samples -> Path? in
@@ -412,12 +413,15 @@ struct TreeDrawing {
                 let r = base.width / 2
                 return Path(ellipseIn: CGRect(x: base.point.x - r, y: base.point.y - r, width: 2 * r, height: 2 * r))
             }
-            wood(stems, shapes + feet, roots: roots, in: &context)
+            wood(shapes + feet + tops.compactMap { $0 }, roots: roots, in: &context)
         }
         for (stem, samples) in zip(stems, outlines) { bark(stem, samples, in: &context) }
         for (stem, samples) in zip(stems, outlines) { ridge(stem, samples, in: &context) }
         tint(stems, outlines, shapes, parents: parents, in: &context)
-        if style.contour > 0 { contours(stems, outlines, tapers, woodSeeds, roots: roots, rootSeed: rootSeed, in: &context) }
+        if style.contour > 0 {
+            contours(stems, outlines, tapers, woodSeeds, parents: parents, roots: roots, rootedAt: ground, tops: tops,
+                     rootSeed: rootSeed, in: &context)
+        }
         for (stem, seed) in zip(stems, seeds) { leaves(stem, repo: seed, in: &context) }
         for (stem, seed) in zip(stems, seeds) where stem.isCheckedOut { blossom(stem, repo: seed, in: &context) }
     }
@@ -538,72 +542,187 @@ struct TreeDrawing {
         return Taper(shape: shape, left: left, right: right)
     }
 
-    /// The wood in a dry medium, laid down stroke by stroke: a soft smudge beside it first, then each
-    /// stem with its pressure rising and falling along it, so where strokes overlap (a collar on its
-    /// parent, a bough on the trunk) the medium builds up.
+    /// A shared trunk's rounded top, so the boughs grow out of it; nil for any other stem.
+    private func top(_ stem: TreeLayout.Stem) -> Path? {
+        guard stem.isTrunk, stem.commits.isEmpty, stem.fork == nil, stem.curve.count >= 2, let top = stem.curve.last else { return nil }
+        let center = frame.point(top.point), r = top.width * frame.scale / 2
+        return Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: 2 * r, height: 2 * r))
+    }
+
+    /// The wood in a dry medium, laid down by hand: a soft smudge beside it first, then each stem with
+    /// its pressure rising and falling along it. The whole tree's wood is one layer, so where wood
+    /// meets wood (a collar on its parent, a bough on the trunk, a root at the trunk's foot) the medium
+    /// isn't laid twice: each piece replaces what's under it, a parent after its limbs, and a limb's
+    /// pressure starts from its parent's where it forks, so the fork reads as one piece of wood.
     private func strokes(_ stems: [TreeLayout.Stem], _ outlines: [[(point: CGPoint, width: CGFloat)]], _ shapes: [Path],
-                         _ seeds: [UInt64], roots: [Path], in context: inout GraphicsContext) {
+                         _ seeds: [UInt64], parents: [Int?], roots: [Path], tops: [Path?], in context: inout GraphicsContext) {
+        let pieces = shapes + roots + tops.compactMap { $0 }
+        let bounds = pieces.reduce(CGRect.null) { $0.union($1.boundingRect) }
+        guard !bounds.isNull else { return }
         if style.smudge > 0 {
             // Charcoal rubs off down and to the side; chalk dust falls.
             var smudge = context
+            smudge.clip(to: Path(bounds.insetBy(dx: -10, dy: -10)))
             smudge.opacity = style.smudge
-            smudge.translateBy(x: style.medium == .chalk ? 0 : 2.5, y: 3)
-            for piece in shapes + roots {
-                smudge.fill(piece, with: .color(style.ink))
-                smudge.stroke(piece, with: .color(style.ink), lineWidth: 6)
+            smudge.drawLayer { layer in
+                layer.translateBy(x: style.medium == .chalk ? 0 : 2.5, y: 3)
+                for piece in pieces {
+                    layer.fill(piece, with: .color(style.ink))
+                    layer.stroke(piece, with: .color(style.ink), lineWidth: 6)
+                }
             }
         }
-        // A soft edge: the medium thins out past the stroke's line rather than stopping at it.
-        for piece in shapes + roots {
-            context.stroke(piece, with: .color(style.ink.opacity(style.woodOpacity * 0.3)), lineWidth: 2.5)
-        }
-        for index in stems.indices {
-            guard let base = outlines[index].first?.point, let tip = outlines[index].last?.point else { continue }
-            let seed = seeds[index] ^ 0x9E55
-            let length = max(hypot(tip.x - base.x, tip.y - base.y), 1)
-            // The pressure at fixed distances from the base, so a limb growing longer keeps the shading
-            // it had and only its new stretch is new.
-            let stops = (Array(stride(from: 0, to: length, by: 90)) + [length]).map { distance in
-                let pressure = (1 + HandDrawn.wobble(seed, at: Double(distance) / 90)) / 2
-                return Gradient.Stop(color: style.ink.opacity(style.woodOpacity * (1 - style.pressure * pressure)),
-                                     location: distance / length)
+        let pressure = pressures(stems, outlines, seeds, parents: parents)
+        var wood = context
+        // The layer only needs to cover the wood and its soft edge.
+        wood.clip(to: Path(bounds.insetBy(dx: -3, dy: -3)))
+        wood.opacity = style.woodOpacity
+        wood.drawLayer { layer in
+            layer.blendMode = .copy
+            // A soft edge: the medium thins out past the stroke's line rather than stopping at it. The
+            // wood is drawn over it, so only the part outside the whole tree's outline is left.
+            for piece in pieces { layer.stroke(piece, with: .color(style.ink.opacity(0.3)), lineWidth: 2.5) }
+            // The roots as strong as the trunk's foot, which is drawn over them.
+            let foot = pressure.first?.first?.strength ?? 1
+            for root in roots { layer.fill(root, with: .color(style.ink.opacity(foot))) }
+            for index in stems.indices.reversed() {
+                guard let base = outlines[index].first?.point, let tip = outlines[index].last?.point else { continue }
+                let length = max(hypot(tip.x - base.x, tip.y - base.y), 1)
+                let stops = pressure[index].map {
+                    Gradient.Stop(color: style.ink.opacity($0.strength), location: $0.distance / length)
+                }
+                layer.fill(shapes[index], with: .linearGradient(Gradient(stops: stops), startPoint: base, endPoint: tip))
+                if let top = tops[index] {
+                    layer.fill(top, with: .color(style.ink.opacity(pressure[index].last?.strength ?? 1)))
+                }
             }
-            context.fill(shapes[index], with: .linearGradient(Gradient(stops: stops), startPoint: base, endPoint: tip))
         }
-        for root in roots { context.fill(root, with: .color(style.ink.opacity(style.woodOpacity))) }
     }
 
-    /// The wood's edges drawn as lines, past where each limb leaves its parent, shading from the wood's
-    /// medium to the branch's along it as the limb does; and the roots' outlines.
+    /// Each stem's pressure (`HandDrawn.pressure`), at fixed distances from its base along the line
+    /// to its tip, so a limb growing longer keeps the shading it had and only its new stretch is new.
+    /// Parents first: a limb starts from its parent's strength where it forks, easing into its own over
+    /// its collar.
+    private func pressures(_ stems: [TreeLayout.Stem], _ outlines: [[(point: CGPoint, width: CGFloat)]], _ seeds: [UInt64],
+                           parents: [Int?]) -> [[HandDrawn.Pressure]] {
+        var result: [[HandDrawn.Pressure]] = []
+        for (index, stem) in stems.enumerated() {
+            guard let base = outlines[index].first?.point, let tip = outlines[index].last?.point else { result.append([]); continue }
+            let length = max(hypot(tip.x - base.x, tip.y - base.y), 1)
+            var fork: (strength: Double, collar: Double)?
+            if let joint = stem.fork, let parent = parents[index], parent < index,
+               let parentBase = outlines[parent].first?.point, let parentTip = outlines[parent].last?.point {
+                // Where the fork falls along the parent's shading.
+                let d = CGPoint(x: parentTip.x - parentBase.x, y: parentTip.y - parentBase.y)
+                let along = ((base.x - parentBase.x) * d.x + (base.y - parentBase.y) * d.y) / max(hypot(d.x, d.y), 1)
+                let collar = TreeLayout.collarEnd(own: stem.nodes.first?.width ?? 0, parentWidth: joint.width,
+                                                  angle: (stem.nodes.first?.heading ?? 0) - joint.heading) * frame.scale
+                fork = (HandDrawn.strength(result[parent], at: Double(along)), Double(collar))
+            }
+            result.append(HandDrawn.pressure(seed: seeds[index] ^ 0x9E55, amount: style.pressure, length: Double(length), fork: fork))
+        }
+        return result
+    }
+
+    /// The wood's edges drawn as lines, shading from the wood's medium to the branch's along each limb
+    /// as the limb does; and the roots' outlines. A line stops where it runs into the wood it joins (a
+    /// limb's inside its parent, a parent's under its limbs' collars and a sibling's beside it at the
+    /// same fork, the trunk's under its roots), so what's left is the outline of one forked piece of
+    /// wood: the trunk's edge turns into the bough's.
     private func contours(_ stems: [TreeLayout.Stem], _ outlines: [[(point: CGPoint, width: CGFloat)]], _ tapers: [Taper],
-                          _ seeds: [UInt64], roots: [Path], rootSeed: String, in context: inout GraphicsContext) {
+                          _ seeds: [UInt64], parents: [Int?], roots: [Path], rootedAt ground: Int?, tops: [Path?],
+                          rootSeed: String, in context: inout GraphicsContext) {
         let sketch = Sketch(style)
+        let collars = stems.indices.map { collar($0, stems, outlines, tapers) }
         for (index, stem) in stems.enumerated() {
             let taper = tapers[index]
             guard taper.left.count >= 2, let base = outlines[index].first, let tip = outlines[index].last else { continue }
-            let start = stem.fork.map { fork in
-                TreeLayout.collarExit(parentWidth: fork.width, angle: (stem.nodes.first?.heading ?? 0) - fork.heading) * frame.scale * 0.6
-            } ?? 0
-            var skip = 0, distance: CGFloat = 0
-            while skip < outlines[index].count - 2, distance < start {
-                distance += hypot(outlines[index][skip + 1].point.x - outlines[index][skip].point.x,
-                                  outlines[index][skip + 1].point.y - outlines[index][skip].point.y)
-                skip += 1
+            var hidden: [Path] = []
+            if let parent = parents[index] {
+                hidden += [window(parent, around: base.point, radius: reach(index, stems, outlines), outlines, tapers), tops[parent]]
+                    .compactMap { $0 }
             }
+            for (other, collar) in collars.enumerated() where other != index {
+                guard let collar, let otherBase = outlines[other].first else { continue }
+                let child = parents[other] == index
+                let sibling = parents[other] != nil && parents[other] == parents[index]
+                    && hypot(otherBase.point.x - base.point.x, otherBase.point.y - base.point.y) < max(base.width, otherBase.width)
+                if child || sibling { hidden.append(collar) }
+            }
+            if index == ground { hidden += roots }
             let alpha = style.contour * (stem.isTrunk ? 1 : 0.55 + 0.45 * vigour(tipCommit(stem)))
             let shading = GraphicsContext.Shading.linearGradient(
                 Gradient(colors: [style.ink.opacity(alpha), ink(stem).opacity(alpha)]), startPoint: base.point, endPoint: tip.point)
             // Thin limbs get a finer line, so they aren't all edge.
             let width = min(style.contourWidth, max(base.width * 0.3, 0.7))
+            var lines = context
+            hide(hidden, around: taper.shape.boundingRect, in: &lines)
             for (side, edge) in [taper.left, taper.right].enumerated() {
                 var line = Path()
-                line.addLines(Array(edge.dropFirst(skip)))
-                sketch.stroke(line, with: shading, width: width, seed: seeds[index] &+ UInt64(side + 1), in: &context)
+                line.addLines(edge)
+                sketch.stroke(line, with: shading, width: width, seed: seeds[index] &+ UInt64(side + 1), in: &lines)
             }
         }
         for (index, root) in roots.enumerated() {
+            var lines = context
+            let others = roots.indices.filter { $0 != index }.map { roots[$0] }
+            hide(others + (ground.map { [tapers[$0].shape] } ?? []), around: root.boundingRect, in: &lines)
             sketch.stroke(root, with: .color(style.ink.opacity(style.contour * 0.8)), width: style.contourWidth * 0.8,
-                          seed: HandDrawn.seed("\(rootSeed)\u{1F}root", index), in: &context)
+                          seed: HandDrawn.seed("\(rootSeed)\u{1F}root", index), in: &lines)
+        }
+    }
+
+    /// Clips `context` to leave out `hidden`, for drawing within `bounds`.
+    private func hide(_ hidden: [Path], around bounds: CGRect, in context: inout GraphicsContext) {
+        guard !hidden.isEmpty else { return }
+        // A rectangle first, so the shapes' masks only cover what's drawn. It assumes a sketched line
+        // strays at most 6 pt outside `bounds` (`Sketch`: under 3 pt, wobble and half its width).
+        context.clip(to: Path(bounds.insetBy(dx: -6, dy: -6)))
+        for path in hidden { context.clip(to: path, options: .inverse) }
+    }
+
+    /// How far from its fork stem `index` is still part of the join: past its collar, by its parent's width.
+    private func reach(_ index: Int, _ stems: [TreeLayout.Stem], _ outlines: [[(point: CGPoint, width: CGFloat)]]) -> CGFloat {
+        guard let fork = stems[index].fork else { return 0 }
+        let stem = stems[index]
+        let collar = TreeLayout.collarEnd(own: stem.nodes.first?.width ?? 0, parentWidth: fork.width,
+                                          angle: (stem.nodes.first?.heading ?? 0) - fork.heading)
+        return (collar + fork.width) * frame.scale
+    }
+
+    /// Stem `index`'s collar: its wood from its fork to where it has eased back to its own width.
+    private func collar(_ index: Int, _ stems: [TreeLayout.Stem], _ outlines: [[(point: CGPoint, width: CGFloat)]],
+                        _ tapers: [Taper]) -> Path? {
+        let samples = outlines[index], taper = tapers[index]
+        guard let fork = stems[index].fork, taper.left.count == samples.count, samples.count >= 2 else { return nil }
+        let stem = stems[index]
+        let length = TreeLayout.collarEnd(own: stem.nodes.first?.width ?? 0, parentWidth: fork.width,
+                                          angle: (stem.nodes.first?.heading ?? 0) - fork.heading) * frame.scale
+        var end = 1, distance: CGFloat = 0
+        while end < samples.count - 1, distance < length {
+            distance += hypot(samples[end].point.x - samples[end - 1].point.x, samples[end].point.y - samples[end - 1].point.y)
+            end += 1
+        }
+        return band(taper, 0...end)
+    }
+
+    /// The part of stem `index`'s wood within `radius` of `point`: where a limb forking there lies on it.
+    private func window(_ index: Int, around point: CGPoint, radius: CGFloat, _ outlines: [[(point: CGPoint, width: CGFloat)]],
+                        _ tapers: [Taper]) -> Path? {
+        let samples = outlines[index]
+        guard tapers[index].left.count == samples.count,
+              let first = samples.firstIndex(where: { hypot($0.point.x - point.x, $0.point.y - point.y) < radius }),
+              let last = samples.lastIndex(where: { hypot($0.point.x - point.x, $0.point.y - point.y) < radius }) else { return nil }
+        let range = max(first - 1, 0)...min(last + 1, samples.count - 1)
+        return range.count >= 2 ? band(tapers[index], range) : nil
+    }
+
+    /// A stretch of a stem's shape, between two of its samples.
+    private func band(_ taper: Taper, _ range: ClosedRange<Int>) -> Path {
+        Path { p in
+            p.move(to: taper.left[range.lowerBound])
+            for point in taper.left[range].dropFirst() + taper.right[range].reversed() { p.addLine(to: point) }
+            p.closeSubpath()
         }
     }
 
@@ -611,14 +730,8 @@ struct TreeDrawing {
     /// rounded top, the roots. Painted on paper, then inked as a single layer, so where wood meets
     /// wood (a limb's collar on its parent, a bough on the trunk) the outlines merge and the tone
     /// stays even, with no seam and no darker overlap.
-    private func wood(_ stems: [TreeLayout.Stem], _ shapes: [Path], roots: [Path], in context: inout GraphicsContext) {
-        var pieces = shapes + roots
-        // A shared trunk (no commits of its own) is rounded off at its top, so the boughs grow out of it.
-        for stem in stems where stem.isTrunk && stem.commits.isEmpty && stem.fork == nil {
-            guard stem.curve.count >= 2, let top = stem.curve.last else { continue }
-            let center = frame.point(top.point), r = top.width * frame.scale / 2
-            pieces.append(Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: 2 * r, height: 2 * r)))
-        }
+    private func wood(_ shapes: [Path], roots: [Path], in context: inout GraphicsContext) {
+        let pieces = shapes + roots
         let bounds = pieces.reduce(CGRect.null) { $0.union($1.boundingRect) }
         guard !bounds.isNull else { return }
         for piece in pieces { context.fill(piece, with: .color(style.paper[1])) }
@@ -704,33 +817,45 @@ struct TreeDrawing {
     /// Each limb shades from its parent's tone at the fork (plain wood off the trunk) to its branch's
     /// ink at the tip: a wash of paper, then the ink, both rising along it. Parents first, so a
     /// sub-branch picks up where its parent's shading had got to.
+    ///
+    /// The tints are one layer, and a sub-branch's replaces its parent's where its collar lies on it
+    /// rather than going over it, so the fork changes colour without a darker or lighter patch.
     private func tint(_ stems: [TreeLayout.Stem], _ outlines: [[(point: CGPoint, width: CGFloat)]], _ shapes: [Path],
                       parents: [Int?], in context: inout GraphicsContext) {
-        // Per stem: the base and tip of its gradient, where it starts and with what, and its ink.
-        var ramps: [(base: CGPoint, tip: CGPoint, from: Double, start: Double, ink: Color, alpha: Double)?] = []
-        for (index, stem) in stems.enumerated() {
-            guard !stem.isTrunk, let base = outlines[index].first, let tip = outlines[index].last else { ramps.append(nil); continue }
-            let alpha = 0.55 + 0.4 * vigour(tipCommit(stem))
-            var from = 0.0, fromInk = ink(stem), fromAlpha = alpha
-            if let parent = parents[index], parent < ramps.count, let ramp = ramps[parent] {
-                let d = CGPoint(x: ramp.tip.x - ramp.base.x, y: ramp.tip.y - ramp.base.y)
-                let u = ((base.point.x - ramp.base.x) * d.x + (base.point.y - ramp.base.y) * d.y) / max(d.x * d.x + d.y * d.y, 0.001)
-                from = Self.rampValue(u, from: ramp.from, start: ramp.start)
-                fromInk = ramp.ink
-                fromAlpha = ramp.alpha
+        let bounds = stems.indices.filter { !stems[$0].isTrunk }.reduce(CGRect.null) { $0.union(shapes[$1].boundingRect) }
+        guard !bounds.isNull else { return }
+        var tints = context
+        tints.clip(to: Path(bounds.insetBy(dx: -2, dy: -2)))
+        tints.drawLayer { layer in
+            // Per stem: the base and tip of its gradient, where it starts and with what, and its ink.
+            var ramps: [(base: CGPoint, tip: CGPoint, from: Double, start: Double, ink: Color, alpha: Double)?] = []
+            for (index, stem) in stems.enumerated() {
+                guard !stem.isTrunk, let base = outlines[index].first, let tip = outlines[index].last else { ramps.append(nil); continue }
+                let alpha = 0.55 + 0.4 * vigour(tipCommit(stem))
+                var from = 0.0, fromInk = ink(stem), fromAlpha = alpha
+                if let parent = parents[index], parent < ramps.count, let ramp = ramps[parent] {
+                    let d = CGPoint(x: ramp.tip.x - ramp.base.x, y: ramp.tip.y - ramp.base.y)
+                    let u = ((base.point.x - ramp.base.x) * d.x + (base.point.y - ramp.base.y) * d.y) / max(d.x * d.x + d.y * d.y, 0.001)
+                    from = Self.rampValue(u, from: ramp.from, start: ramp.start)
+                    fromInk = ramp.ink
+                    fromAlpha = ramp.alpha
+                }
+                let start = from > 0 ? 0 : 0.35
+                ramps.append((base.point, tip.point, from, start, ink(stem), alpha))
+                var wash = layer
+                // A limb off plain wood starts untinted, so there's nothing under it to replace.
+                if from > 0 { wash.blendMode = .copy }
+                wash.fill(shapes[index], with: .linearGradient(
+                    Gradient(stops: [.init(color: style.paper[1].opacity(from), location: 0),
+                                     .init(color: style.paper[1].opacity(from), location: start),
+                                     .init(color: style.paper[1], location: 1)]),
+                    startPoint: base.point, endPoint: tip.point))
+                layer.fill(shapes[index], with: .linearGradient(
+                    Gradient(stops: [.init(color: fromInk.opacity(fromAlpha * from), location: 0),
+                                     .init(color: fromInk.opacity(fromAlpha * from), location: start),
+                                     .init(color: ink(stem).opacity(alpha), location: 1)]),
+                    startPoint: base.point, endPoint: tip.point))
             }
-            let start = from > 0 ? 0 : 0.35
-            ramps.append((base.point, tip.point, from, start, ink(stem), alpha))
-            context.fill(shapes[index], with: .linearGradient(
-                Gradient(stops: [.init(color: style.paper[1].opacity(from), location: 0),
-                                 .init(color: style.paper[1].opacity(from), location: start),
-                                 .init(color: style.paper[1], location: 1)]),
-                startPoint: base.point, endPoint: tip.point))
-            context.fill(shapes[index], with: .linearGradient(
-                Gradient(stops: [.init(color: fromInk.opacity(fromAlpha * from), location: 0),
-                                 .init(color: fromInk.opacity(fromAlpha * from), location: start),
-                                 .init(color: ink(stem).opacity(alpha), location: 1)]),
-                startPoint: base.point, endPoint: tip.point))
         }
     }
 
