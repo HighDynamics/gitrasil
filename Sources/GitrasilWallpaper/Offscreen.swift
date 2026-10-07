@@ -85,9 +85,9 @@ enum Offscreen {
         let panes = zip(background.panes, PinnedRepositories.seeds(background.panes.map(\.repoURL))).map {
             Pane($0, seed: $1, growIn: growIn)
         }
-        let arrangement = background.settings.arrangement, now = background.now
+        let arrangement = background.settings.arrangement, now = background.now, shuffle = background.settings.layoutSeed
         return Canvas { context, size in
-            Landscape(style: style, now: now, size: size, trunkGrowIn: growIn.map { _ in 1 })
+            Landscape(style: style, now: now, size: size, shuffle: shuffle, trunkGrowIn: growIn.map { _ in 1 })
                 .draw(panes, arrangement: arrangement, in: &context)
         }
     }
@@ -99,7 +99,8 @@ enum Offscreen {
     }
 
     private static func bannerLayer(_ background: BackgroundModel, style: WallpaperStyle, size: CGSize) -> some View {
-        let plan = Landscape(style: style, now: background.now, size: size, trunkGrowIn: nil)
+        let plan = Landscape(style: style, now: background.now, size: size, shuffle: background.settings.layoutSeed,
+                             trunkGrowIn: nil)
             .plan(panes(background), arrangement: background.settings.arrangement,
                   branchNames: background.settings.showsBranchNames, repoNames: background.settings.showsRepoNames)
         return BannerLayer(plan: plan, shown: [:], style: style, breeze: background.breeze)

@@ -18,6 +18,7 @@ struct WallpaperView: View {
         let showsBranchNames = background.settings.showsBranchNames
         let showsRepoNames = background.settings.showsRepoNames
         let now = background.now
+        let shuffle = background.settings.layoutSeed
         let seeds = PinnedRepositories.seeds(panes.map(\.repoURL))
         // Read each pane here so Observation redraws when one publishes a new tree or growth, and
         // when the scene stops waiting for its trees.
@@ -43,7 +44,7 @@ struct WallpaperView: View {
                         }
                         let trunkGrowIn = background.trunkGrowIn(at: date)
                         Canvas { context, size in
-                            Landscape(style: style, now: now, size: size, trunkGrowIn: trunkGrowIn)
+                            Landscape(style: style, now: now, size: size, shuffle: shuffle, trunkGrowIn: trunkGrowIn)
                                 .draw(panes, arrangement: arrangement, in: &context)
                         }
                     }
@@ -51,10 +52,10 @@ struct WallpaperView: View {
                         // The names hang where the full-grown trees put them, planned only when a tree or
                         // what's shown changes, not on every redraw.
                         let key = PlanCache.Key(dark: colorScheme == .dark, medium: medium, size: proxy.size, now: now,
-                                                arrangement: arrangement, branchNames: showsBranchNames,
+                                                shuffle: shuffle, arrangement: arrangement, branchNames: showsBranchNames,
                                                 repoNames: showsRepoNames, trees: panes.map { .init(id: $0.repoURL.path, tree: $0.tree) })
                         let plan = plans.plan(for: key) {
-                            Landscape(style: style, now: now, size: proxy.size, trunkGrowIn: nil).plan(
+                            Landscape(style: style, now: now, size: proxy.size, shuffle: shuffle, trunkGrowIn: nil).plan(
                                 zip(panes, seeds).map { Pane($0, seed: $1) },
                                 arrangement: arrangement, branchNames: showsBranchNames, repoNames: showsRepoNames)
                         }
@@ -185,6 +186,8 @@ final class PlanCache {
         let medium: Medium
         let size: CGSize
         let now: Date
+        /// The trees' layout seed: a reshuffle moves every limb, and its banner with it.
+        let shuffle: Int
         let arrangement: Arrangement
         let branchNames: Bool
         let repoNames: Bool
@@ -249,6 +252,8 @@ struct Landscape {
     let style: WallpaperStyle
     let now: Date
     let size: CGSize
+    /// The trees' layout seed (`BackgroundSettings.layoutSeed`), as `TreeLayout` takes it.
+    let shuffle: Int
     /// How far the single tree's shared trunk has risen, while it's rising.
     let trunkGrowIn: Double?
 
@@ -286,8 +291,8 @@ struct Landscape {
         let shared = min(tall / Composition.nominalHeight, plot / Composition.plotWidth)
         return panes.enumerated().compactMap { index, pane in
             guard let tree = pane.tree else { return nil }
-            let full = TreeLayout(tree: tree, seed: pane.seed)
-            var rng = SeededRandom(pane.seed, -9)
+            let full = TreeLayout(tree: tree, seed: pane.seed, shuffle: shuffle)
+            var rng = SeededRandom(SeededRandom.key(pane.seed, shuffle: shuffle), -9)
             let x = plot * (CGFloat(index) + 0.5) + (panes.count > 1 ? plot * rng.next(in: -0.05...0.05) : 0)
             let frame = TreeFrame(size: size, bounds: full.bounds, nominalHeight: Composition.nominalHeight,
                                   scale: shared, maxWidth: min(plot * 1.45, size.width - 2 * TreeFrame.margin), x: x)
@@ -304,8 +309,8 @@ struct Landscape {
         }
         for planted in orchard(panes) {
             let pane = panes[planted.index], tree = pane.tree!
-            let layout = pane.growIn.map { TreeLayout(tree: tree, seed: pane.seed, growIn: $0) }
-                ?? (pane.grown.isEmpty ? planted.full : TreeLayout(tree: tree, seed: pane.seed, grown: pane.grown))
+            let layout = pane.growIn.map { TreeLayout(tree: tree, seed: pane.seed, growIn: $0, shuffle: shuffle) }
+                ?? (pane.grown.isEmpty ? planted.full : TreeLayout(tree: tree, seed: pane.seed, grown: pane.grown, shuffle: shuffle))
             let drawing = TreeDrawing(style: style, now: now, frame: planted.frame)
             // Its shadow and name come with it, not before it starts to grow.
             if pane.growIn != 0 {
@@ -324,7 +329,7 @@ struct Landscape {
     /// pin order, and where it stands.
     func singleTree(_ ready: [Pane]) -> (full: YggdrasilLayout, frame: TreeFrame) {
         // A bough's name is its seed: it sets the bough's lean.
-        let full = YggdrasilLayout(repos: ready.map { .init(name: $0.seed, tree: $0.tree!) })
+        let full = YggdrasilLayout(repos: ready.map { .init(name: $0.seed, tree: $0.tree!) }, shuffle: shuffle)
         let tall = Composition.groundY(size.height) - Composition.top - TreeFrame.margin
         // Its boughs lean, so it's rarely as tall as its trees would be on their own.
         let nominal = YggdrasilLayout.crotchHeight + Composition.nominalHeight * 0.82
@@ -340,7 +345,7 @@ struct Landscape {
         let still = trunkGrowIn == nil && ready.allSatisfy { $0.grown.isEmpty && $0.growIn == nil }
         let layout = still ? full : YggdrasilLayout(repos: ready.map {
             .init(name: $0.seed, tree: $0.tree!, grown: $0.grown, growIn: $0.growIn)
-        }, trunkGrowIn: trunkGrowIn)
+        }, trunkGrowIn: trunkGrowIn, shuffle: shuffle)
         let drawing = TreeDrawing(style: style, now: now, frame: frame)
         let stems = [layout.trunk] + layout.boughs.flatMap(\.layout.stems)
         // Each bough's stems are seeded from its repository, as an orchard tree's are.

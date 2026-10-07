@@ -7,7 +7,7 @@ import GitrasilCore
 /// a button to reveal it in Finder; a pinned folder lists its repositories under it, ticked where
 /// they're shown. Adds repositories or folders through an open panel, holds the settings (how several
 /// are arranged, what they're drawn in, which names hang on banners and whether they sway in gusts),
-/// grows the trees again on request, and quits.
+/// grows the trees again on request (as they are, or reshuffled), and quits.
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
 
@@ -129,6 +129,9 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         let watch = action("Watch Gitrasil Grow", #selector(watchGrow), nil)
         watch.toolTip = "Grows every tree again from the ground"
         menu.addItem(watch)
+        let reshuffle = action("Reshuffle Branches", #selector(reshuffleBranches), nil)
+        reshuffle.toolTip = "Grows every tree again with its branches leaning and curving a new way (the same branches, kept between launches)"
+        menu.addItem(reshuffle)
         menu.addItem(.separator())
         menu.addItem(action("Quit Gitrasil Background", #selector(quit), nil, key: "q"))
     }
@@ -166,12 +169,17 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         regrow()
     }
 
+    /// A new layout seed; the background grows the trees again in their new shape.
+    @objc private func reshuffleBranches() {
+        settings.reshuffle()
+    }
+
     /// Gusts sway banners, so with none hanging (or the breeze turned off from outside) there's nothing
     /// to set; with nothing pinned there's nothing to grow.
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
         case #selector(toggleGusts): settings.hasBanners && !gustsOverridden
-        case #selector(watchGrow): !pins.shown.isEmpty
+        case #selector(watchGrow), #selector(reshuffleBranches): !pins.shown.isEmpty
         default: true
         }
     }

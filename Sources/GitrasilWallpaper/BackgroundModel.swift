@@ -85,19 +85,24 @@ final class BackgroundModel {
         }
     }
 
-    /// Follow the settings (the view redraws on its own; it reads them): a new arrangement grows in
-    /// from the ground, and the breeze follows the banners and gusts.
+    /// Follow the settings (the view redraws on its own; it reads them): a new arrangement or layout
+    /// seed grows in from the ground, and the breeze follows the banners and gusts.
     private func observeSettings() {
-        let arrangement = settings.arrangement, medium = settings.medium
+        let arrangement = settings.arrangement, medium = settings.medium, layoutSeed = settings.layoutSeed
         let names = (settings.showsBranchNames, settings.showsRepoNames, settings.gusts)
         withObservationTracking {
-            _ = (settings.arrangement, settings.medium, settings.showsBranchNames, settings.showsRepoNames, settings.gusts)
+            _ = (settings.arrangement, settings.medium, settings.showsBranchNames, settings.showsRepoNames, settings.gusts,
+                 settings.layoutSeed)
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
                 if self.settings.arrangement != arrangement {
                     logEvent("arrangement: \(self.settings.arrangement.rawValue)")
                     self.growInFromTheGround()
+                }
+                if self.settings.layoutSeed != layoutSeed {
+                    logEvent("layout seed: \(self.settings.layoutSeed)")
+                    self.regrow()
                 }
                 // A new medium just redraws (the view reads it); the trees don't grow again.
                 if self.settings.medium != medium { logEvent("medium: \(self.settings.medium.rawValue)") }

@@ -96,6 +96,10 @@ The same menu holds the settings:
   it's turned on.
 - **Watch Gitrasil Grow** — grows every tree again from the ground, just to watch. The scene also
   grows again on its own when a repository is dropped.
+- **Reshuffle Branches** — grows every tree again with its branches leaning and curving a new way.
+  The branching itself (which branch leaves where) still comes from the history, the hand-drawn
+  wobble stays as it was, and the new shape is kept between launches. Until the first reshuffle the
+  trees take the shape their names alone give.
 
 Pins and settings are saved between launches in the `com.gitrasil.background` defaults. For a
 test run or a preview:
