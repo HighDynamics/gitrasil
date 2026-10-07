@@ -28,9 +28,10 @@ struct BannerPlan {
     /// A repository's ribbon, in the single tree.
     struct Ribbon: Equatable, Identifiable {
         let ribbon: BannerLayout.Ribbon
-        /// The repository it names: its pane's id, and the name written on it.
+        /// The repository it names: its pane's id, the name written on it, and its seed (`Pane.seed`).
         let pane: String
         let name: String
+        let seed: String
         let fontSize: CGFloat
 
         var id: String { ribbon.id }
@@ -149,7 +150,7 @@ extension Landscape {
             requests.append(.init(id: id, anchors: anchors, size: RibbonShape.size(pane.name, fontSize: fontSize, style: style)))
         }
         return BannerLayout.hang(requests, obstacles: obstacles, bounds: bounds).compactMap { ribbon in
-            panes[ribbon.id].map { BannerPlan.Ribbon(ribbon: ribbon, pane: $0.id, name: $0.name, fontSize: fontSize) }
+            panes[ribbon.id].map { BannerPlan.Ribbon(ribbon: ribbon, pane: $0.id, name: $0.name, seed: $0.seed, fontSize: fontSize) }
         }
     }
 }
@@ -383,9 +384,9 @@ private struct RibbonView: View {
             Cords(anchor: anchor, ends: [hung.cordEnds.0, hung.cordEnds.1].map { end in
                 CGPoint(x: end.x - box.minX,
                         y: end.y - box.minY + RibbonShape.top(at: end.x - hung.rect.minX, size: hung.rect.size))
-            })
+            }, seed: HandDrawn.seed(ribbon.id), hand: style.hand)
                 .stroke(style.ink.opacity(0.55), style: StrokeStyle(lineWidth: 0.9, lineCap: .round, lineJoin: .round))
-            RibbonShape(name: ribbon.name, fontSize: ribbon.fontSize, style: style)
+            RibbonShape(name: ribbon.name, seed: ribbon.seed, fontSize: ribbon.fontSize, style: style, origin: hung.rect.origin)
                 .equatable()
                 .frame(width: hung.rect.width, height: hung.rect.height)
                 .offset(x: hung.rect.minX - box.minX, y: hung.rect.minY - box.minY)
@@ -396,16 +397,18 @@ private struct RibbonView: View {
     }
 }
 
-/// The two cords a ribbon hangs by, tied at one point, with a small knot there.
+/// The two cords a ribbon hangs by, tied at one point, with a small knot there. Drawn by hand, a
+/// cord isn't quite straight.
 private struct Cords: Shape {
     let anchor: CGPoint
     let ends: [CGPoint]
+    let seed: UInt64
+    let hand: CGFloat
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        for end in ends {
-            path.move(to: anchor)
-            path.addLine(to: end)
+        for (index, end) in ends.enumerated() {
+            path.addLines(Sketched.line(from: anchor, to: end, seed: seed &+ UInt64(index), hand: hand))
         }
         path.addEllipse(in: CGRect(x: anchor.x - 1.8, y: anchor.y - 1.8, width: 3.6, height: 3.6))
         return path
@@ -417,14 +420,18 @@ private struct Cords: Shape {
 /// branch's pennant. Drawn once into its own layer; swaying only turns that layer.
 struct RibbonShape: View, Equatable {
     let name: String
+    /// Its repository's seed (`Pane.seed`), so two repositories of the same name don't wobble alike.
+    let seed: String
     let fontSize: CGFloat
     let style: WallpaperStyle
+    /// Where it hangs on the screen, so its grain lines up with the paper's.
+    var origin: CGPoint = .zero
 
     /// Room around the name on the panel.
     static let padding = CGSize(width: 18, height: 4)
 
     static func == (a: RibbonShape, b: RibbonShape) -> Bool {
-        a.name == b.name && a.fontSize == b.fontSize && a.style.paper == b.style.paper && a.style.ink == b.style.ink
+        a.name == b.name && a.seed == b.seed && a.fontSize == b.fontSize && a.origin == b.origin && a.style.bannerKey == b.style.bannerKey
     }
 
     /// The panel's height for a ribbon `size` tall.
@@ -453,6 +460,8 @@ struct RibbonShape: View, Equatable {
             let tail = ph * Self.tailRatio, notch = ph * 0.32
             let left = tail, right = size.width - tail
             let ink = style.ink, line = style.lineWidth
+            let sketch = Sketch(style), seed = HandDrawn.seed(self.seed, -21)
+            let grainOrigin = CGPoint(x: -origin.x, y: -origin.y)
 
             // The tails, behind: from each end of the panel out to a swallowtail, dropped below it.
             for side in [-1.0, 1.0] {
@@ -464,17 +473,23 @@ struct RibbonShape: View, Equatable {
                 piece.addLine(to: CGPoint(x: outer, y: arch + drop + ph))
                 piece.addLine(to: CGPoint(x: inner, y: arch + drop + ph))
                 piece.closeSubpath()
-                context.fill(piece, with: .color(style.paper[1]))
-                context.fill(piece, with: .color(ink.opacity(0.06)))
-                context.stroke(piece, with: .color(ink.opacity(0.8)), style: StrokeStyle(lineWidth: line, lineJoin: .round))
+                let pieceSeed = seed &+ (side < 0 ? 1 : 2)
+                let shape = sketch.shape(piece, seed: pieceSeed)
+                context.fill(shape, with: .color(style.paper[1]))
+                context.fill(shape, with: .color(ink.opacity(0.06)))
+                Textures.grained(style, in: &context, size: size, origin: grainOrigin) { context in
+                    sketch.stroke(piece, with: .color(ink.opacity(0.8)), width: line, seed: pieceSeed, in: &context)
+                }
                 // The fold where the ribbon turns back behind the panel.
                 var fold = Path()
                 fold.move(to: CGPoint(x: inner, y: arch + ph))
                 fold.addLine(to: CGPoint(x: inner, y: arch + drop + ph))
                 fold.addLine(to: CGPoint(x: inner - side * drop, y: arch + ph))
                 fold.closeSubpath()
-                context.fill(fold, with: .color(ink.opacity(0.55)))
-                context.stroke(fold, with: .color(ink.opacity(0.8)), style: StrokeStyle(lineWidth: line * 0.8, lineJoin: .round))
+                Textures.grained(style, in: &context, size: size, origin: grainOrigin) { context in
+                    context.fill(sketch.shape(fold, seed: pieceSeed &+ 10), with: .color(ink.opacity(0.55)))
+                    sketch.stroke(fold, with: .color(ink.opacity(0.8)), width: line * 0.8, seed: pieceSeed &+ 10, in: &context)
+                }
             }
 
             // The panel, arched, with an inner rule.
@@ -488,12 +503,18 @@ struct RibbonShape: View, Equatable {
                 path.closeSubpath()
                 return path
             }
-            context.fill(panel(inset: 0), with: .color(style.paper[0]))
-            context.stroke(panel(inset: 0), with: .color(ink.opacity(0.9)), style: StrokeStyle(lineWidth: line * 1.5, lineJoin: .round))
-            context.stroke(panel(inset: 3), with: .color(ink.opacity(0.45)), style: StrokeStyle(lineWidth: line * 0.6, lineJoin: .round))
-
-            let text = context.resolve(Text(name).font(style.ribbonFont(fontSize)).foregroundColor(ink.opacity(0.9)))
-            context.draw(text, at: CGPoint(x: size.width / 2, y: ph / 2 + 2), anchor: .center)
+            context.fill(sketch.shape(panel(inset: 0), seed: seed &+ 3), with: .color(style.paper[0]))
+            Textures.grained(style, in: &context, size: size, origin: grainOrigin) { context in
+                if sketch.hand > 0 {
+                    sketch.stroke(panel(inset: 0), with: .color(ink.opacity(0.9)), width: line * 1.5, seed: seed &+ 3, in: &context)
+                    sketch.stroke(panel(inset: 3), with: .color(ink.opacity(0.45)), width: line * 0.6, seed: seed &+ 4, in: &context)
+                } else {
+                    context.stroke(panel(inset: 0), with: .color(ink.opacity(0.9)), style: StrokeStyle(lineWidth: line * 1.5, lineJoin: .round))
+                    context.stroke(panel(inset: 3), with: .color(ink.opacity(0.45)), style: StrokeStyle(lineWidth: line * 0.6, lineJoin: .round))
+                }
+                let text = context.resolve(Text(name).font(style.ribbonFont(fontSize)).foregroundColor(ink.opacity(0.9)))
+                context.draw(text, at: CGPoint(x: size.width / 2, y: ph / 2 + 2), anchor: .center)
+            }
         }
     }
 }
@@ -510,7 +531,8 @@ private struct BannerView: View {
         let box = banner.rect.union(CGRect(origin: banner.tip, size: .zero)).insetBy(dx: -14, dy: -14)
         ZStack(alignment: .topLeading) {
             Thread(tip: CGPoint(x: banner.tip.x - box.minX, y: banner.tip.y - box.minY),
-                   hook: CGPoint(x: banner.hook.x - box.minX, y: banner.hook.y - box.minY))
+                   hook: CGPoint(x: banner.hook.x - box.minX, y: banner.hook.y - box.minY),
+                   seed: HandDrawn.seed(hanging.id), hand: style.hand)
                 .stroke(style.ink.opacity(0.42), style: StrokeStyle(lineWidth: 0.7, lineCap: .round))
             Pennant(hanging: hanging, style: style)
                 .equatable()
@@ -523,16 +545,30 @@ private struct BannerView: View {
     }
 }
 
-/// The thread: a fine line sagging a little between the tip and the hook.
+/// The thread: a fine line sagging a little between the tip and the hook, not quite smooth when
+/// drawn by hand.
 private struct Thread: Shape {
     let tip: CGPoint
     let hook: CGPoint
+    let seed: UInt64
+    let hand: CGFloat
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
         let length = hypot(hook.x - tip.x, hook.y - tip.y)
-        path.move(to: tip)
-        path.addQuadCurve(to: hook, control: CGPoint(x: (tip.x + hook.x) / 2, y: (tip.y + hook.y) / 2 + length * 0.12))
+        let control = CGPoint(x: (tip.x + hook.x) / 2, y: (tip.y + hook.y) / 2 + length * 0.12)
+        if hand > 0 {
+            let steps = max(4, Int(length / 6))
+            let points = (0...steps).map { k -> CGPoint in
+                let t = CGFloat(k) / CGFloat(steps), u = 1 - t
+                return CGPoint(x: u * u * tip.x + 2 * u * t * control.x + t * t * hook.x,
+                               y: u * u * tip.y + 2 * u * t * control.y + t * t * hook.y)
+            }
+            path.addLines(HandDrawn.displace(points, seed: seed, amplitude: 0.5 * hand, wavelength: 30))
+        } else {
+            path.move(to: tip)
+            path.addQuadCurve(to: hook, control: control)
+        }
         path.addEllipse(in: CGRect(x: hook.x - 1.4, y: hook.y - 1.4, width: 2.8, height: 2.8))
         return path
     }
@@ -548,7 +584,7 @@ struct Pennant: View, Equatable {
     static func notch(height: CGFloat) -> CGFloat { min(7, height * 0.32) }
 
     static func == (a: Pennant, b: Pennant) -> Bool {
-        a.hanging == b.hanging && a.style.paper == b.style.paper && a.style.ink == b.style.ink
+        a.hanging == b.hanging && a.style.bannerKey == b.style.bannerKey
     }
 
     var body: some View {
@@ -564,16 +600,40 @@ struct Pennant: View, Equatable {
             flag.addQuadCurve(to: CGPoint(x: 0, y: h - 0.5), control: CGPoint(x: w * 0.5, y: h + 0.8))
             flag.closeSubpath()
             if side < 0 { flag = flag.applying(CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: w, ty: 0)) }
-            context.fill(flag, with: .color(style.paper[0].opacity(0.94)))
-            context.fill(flag, with: .color(hanging.ink.opacity(0.07)))
-            context.stroke(flag, with: .color(hanging.ink.opacity(0.75 * hanging.alpha)),
-                           style: StrokeStyle(lineWidth: style.lineWidth * 0.8, lineJoin: .round))
-            let text = context.resolve(Text(hanging.name).font(style.labelFont(hanging.fontSize))
-                .foregroundColor(hanging.ink.opacity(hanging.alpha)))
-            let textRect = side > 0
-                ? CGRect(x: Self.padding, y: 0, width: w - Self.padding * 2 - notch, height: h)
-                : CGRect(x: Self.padding + notch, y: 0, width: w - Self.padding * 2 - notch, height: h)
-            context.draw(text, at: CGPoint(x: textRect.midX, y: textRect.midY + 0.5), anchor: .center)
+            let sketch = Sketch(style), seed = HandDrawn.seed(hanging.id)
+            let shape = sketch.shape(flag, seed: seed)
+            context.fill(shape, with: .color(style.paper[0].opacity(0.94)))
+            context.fill(shape, with: .color(hanging.ink.opacity(0.07)))
+            let rect = hanging.banner.rect
+            Textures.grained(style, in: &context, size: size, origin: CGPoint(x: -rect.minX, y: -rect.minY)) { context in
+                if sketch.hand > 0 {
+                    sketch.stroke(flag, with: .color(hanging.ink.opacity(0.75 * hanging.alpha)), width: style.lineWidth * 0.8,
+                                  seed: seed, in: &context)
+                } else {
+                    context.stroke(flag, with: .color(hanging.ink.opacity(0.75 * hanging.alpha)),
+                                   style: StrokeStyle(lineWidth: style.lineWidth * 0.8, lineJoin: .round))
+                }
+                let text = context.resolve(Text(hanging.name).font(style.labelFont(hanging.fontSize))
+                    .foregroundColor(hanging.ink.opacity(hanging.alpha)))
+                let textRect = side > 0
+                    ? CGRect(x: Self.padding, y: 0, width: w - Self.padding * 2 - notch, height: h)
+                    : CGRect(x: Self.padding + notch, y: 0, width: w - Self.padding * 2 - notch, height: h)
+                context.draw(text, at: CGPoint(x: textRect.midX, y: textRect.midY + 0.5), anchor: .center)
+            }
         }
+    }
+}
+
+/// Short lines drawn by hand, for the cords.
+enum Sketched {
+    /// A straight line from `a` to `b`, a little off true (true with a hand of 0).
+    static func line(from a: CGPoint, to b: CGPoint, seed: UInt64, hand: CGFloat) -> [CGPoint] {
+        guard hand > 0 else { return [a, b] }
+        let steps = max(2, Int(hypot(b.x - a.x, b.y - a.y) / 6))
+        let points = (0...steps).map { k -> CGPoint in
+            let t = CGFloat(k) / CGFloat(steps)
+            return CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t)
+        }
+        return HandDrawn.displace(points, seed: seed, amplitude: 0.6 * hand, wavelength: 28)
     }
 }
