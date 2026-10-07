@@ -426,8 +426,9 @@ off in the ink.
   stroke keeps its shape between redraws, a limb that grows by a commit keeps the wobble it had (only
   its new stretch is new), and a banner swaying in a gust only turns its layer, as before. The noise
   and the displacement are in Core (`HandDrawn`), unit-tested for exactly that.
-- Easy to turn off: `GITRASIL_BACKGROUND_WOBBLE=off` sets it to zero, and the ink is then drawn as
-  on `main`, pixel for pixel (checked).
+- Easy to turn off: `GITRASIL_BACKGROUND_WOBBLE=off` sets it to zero, and the ink is then drawn
+  exactly as on `main` (checked: it differs from `main`'s snapshots no more than two of `main`'s
+  own do, by the fade moving with the clock).
 
 **3. Charcoal.** Warm paper with a tooth to it. The wood is laid down stroke by stroke, so it's
 darker where strokes overlap (a limb's collar over its parent), with pressure rising and falling
@@ -451,7 +452,46 @@ then tiled. A redraw of the tree adds one pass over the canvas (the grain), noth
 build, the throwaway pins) and reports the median time per redraw. It goes in first, so the same
 harness measures `main`'s drawing and then each medium. Numbers in "What was built".
 
-**Checks.** Unit tests for the setting and the wobble's stability; screenshots, light and dark, of
-each medium in both arrangements and one side by side, in `docs/yggdrasil/hand-drawn/`; `swift
-build` and `swift test` on the final commit. Run only from this worktree, with a throwaway defaults
-suite and a few of `~/repos` pinned read-only.
+**Checks.** Unit tests for the setting and the wobble's stability; each medium looked at in both
+arrangements, light and dark, and side by side, from offscreen snapshots (kept out of the repo);
+`swift build` and `swift test` on the final commit. Run only from this worktree, with a throwaway
+defaults suite and a few of `~/repos` pinned read-only.
+
+### What was built
+
+A **Medium** section in the menu (Ink, Charcoal, Chalk), saved as `medium` in the defaults (ink when
+unset or unreadable) and switched live: a change redraws everything in the new medium without a
+grow-in. Ink is still the default, and still ink on cream; the only change to it is the hand: limb
+edges stray a little, leaves are lopsided, and the pennant and ribbon frames, threads and cords
+wobble. `GITRASIL_BACKGROUND_WOBBLE=off` takes that away again.
+
+Each medium was looked at in both arrangements, light and dark, from `--snapshot`; no images are
+kept in the repo, so in words:
+
+- **Ink**: brush ink on cream paper, as on `main`, but by hand: limbs taper unevenly, leaves lean,
+  and the banners' frames overshoot their corners a hair. In dark mode, lightened inks on warm
+  charcoal paper.
+- **Charcoal**: warm paper with a visible tooth; the wood built up in overlapping strokes, grainy
+  with soft edges and a smudge, darker where collars overlap (the crotch of the single tree, where
+  three boughs meet, comes out a dark knot: that's the overlap, as asked, but it's the strongest
+  mark on the screen); muted pastel branches. In dark mode, white charcoal on a warm brown toned
+  paper, so it doesn't read as chalk.
+- **Chalk**: the board in both modes (green-grey slate in light, near-black in dark), white chalk
+  wood laid on lightly and broken by the board's grain, coloured chalk branches, Chalkboard SE and
+  Chalkduster names.
+
+**Redraw times**, median of 9 offscreen renders (ms, release build, ImageRenderer on the CPU, so
+for comparison rather than what the window costs on the GPU), 1440×900@2x light; the other screens
+and modes are within a millisecond or two of these:
+
+| | Orchard trees | paper | banners | Single tree trees | paper | banners |
+|---|---|---|---|---|---|---|
+| `main` | 9.4 | 2.6 | 7.1 | 10.6 | 3.7 | 7.7 |
+| Ink | 9.2 | 2.9 | 8.4 | 10.6 | 3.5 | 9.9 |
+| Charcoal | 10.8 | 4.5 | 9.1 | 13.1 | 4.1 | 11.8 |
+| Chalk | 13.1 | 4.3 | 9.7 | 13.1 | 4.2 | 11.9 |
+
+The trees are what a gust or a grow-in redraws; the paper only redraws on a resize or a mode
+change, and the banners on a change to the layout. Ink's trees cost what `main`'s do; its banners
+cost a millisecond or two more for the hand-drawn frames. Charcoal and chalk add about 3 ms a tree
+redraw (the layered wood and the grain pass) and 2–4 ms to the banners.

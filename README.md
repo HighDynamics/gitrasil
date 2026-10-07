@@ -35,12 +35,17 @@ layer on top.
   `RepoGraphStore`, which keeps one repository's graph live (ref changes only, settled,
   fingerprint-gated).
 - **`Settings/`** — `PinnedRepositories`, the saved pins (repositories, or folders of them) and the
-  repositories they put on the background; `BackgroundSettings`, the arrangement and banner choices.
+  repositories they put on the background; `BackgroundSettings`, the arrangement, banner and medium
+  choices.
+- **`Layout/HandDrawn.swift`** — the seeded noise behind the hand-drawn wobble and the paper's
+  textures: the same seed gives the same line on every redraw.
 
 ### `GitrasilWallpaper`
 
-The desktop-level window, the menu-bar item, and the drawing. The look is a `WallpaperStyle` value
-(currently ink on cream); the drawing code reads only that, so restyling is a new value. The
+The desktop-level window, the menu-bar item, and the drawing. The look is a `WallpaperStyle` value,
+one per medium (ink, charcoal, chalk) and mode; the drawing code reads only that, so restyling is a
+new value. `Sketch` draws a line by hand (wobbling, its width varying along it), and `Textures`
+makes the dry media's paper tooth, board dust and grain once and tiles them. The
 menu-bar icon is `Resources/MenuBarIcon.pdf`, drawn by `scripts/draw-icon.swift` (see
 `MenuBarIcon.swift` for the format).
 
@@ -63,6 +68,13 @@ scripts/run-wallpaper.sh [--quit-after <seconds>]
 It builds and runs the release build (`.build/out/Products/Release/GitrasilWallpaper`): placing
 the banners over a dense crown is slow in a debug build.
 
+The same binary has two offscreen aids, which draw the pinned repositories without a window and
+quit:
+
+- `--benchmark [runs]` prints the median time (ms) to draw the trees, the paper and the banners,
+  for each arrangement, medium, screen size and mode;
+- `--snapshot <folder>` writes `<medium>-<arrangement>-<mode>.jpg` at 1440×900@2x.
+
 Pin repositories from the menu-bar item (the small tree), or a folder of them: a pinned folder
 stands for every repository in it (one or two folders down), as they come and go. Pins are a
 checklist in the menu; untick several in one visit. The background grows the first four (a folder
@@ -76,6 +88,9 @@ The same menu holds the settings:
 - **Banners** — *Branch Names*, each branch's name on a pennant at its tip, and *Repository
   Names*, in the single tree each repository's name on a ribbon under its bough. Each can be
   turned off on its own.
+- **Medium** — *Ink*, brush ink on cream paper; *Charcoal*, charcoal and coloured pastel on paper
+  with a tooth; or *Chalk*, coloured chalk on a slate board (a green-grey board in light mode, a
+  near-black one in dark). Every medium draws by hand: lines wobble and vary in width.
 - **Sway in Gusts** — now and then a gust sways the banners for a few seconds, only on mains power
   with the display awake and the background uncovered.
 
@@ -85,7 +100,9 @@ test run or a preview:
 - `GITRASIL_BACKGROUND_DEFAULTS_SUITE` names another defaults suite;
 - `GITRASIL_BACKGROUND_APPEARANCE=light|dark` previews a mode (background and menu) without
   changing the system's;
-- `GITRASIL_BACKGROUND_BREEZE=off` keeps the banners still whatever the setting.
+- `GITRASIL_BACKGROUND_BREEZE=off` keeps the banners still whatever the setting;
+- `GITRASIL_BACKGROUND_WOBBLE=off` draws every line straight, as before the hand-drawn look (ink
+  is then exactly as it was).
 
 Ctrl-C or the menu's Quit removes it; nothing is installed and the system wallpaper is never
 changed.
