@@ -41,7 +41,7 @@ public final class MemorySettings: SettingsStorage {
 }
 
 /// The background's settings from the menu, saved between launches next to the pins. Unset (or
-/// unreadable) values take their defaults: an orchard in ink, every name shown, gusts blowing.
+/// unreadable) values take their defaults: an orchard in chalk, every name shown, gusts blowing.
 @MainActor
 @Observable
 public final class BackgroundSettings {
@@ -90,7 +90,7 @@ public final class BackgroundSettings {
     public init(storage: SettingsStorage) {
         self.storage = storage
         arrangement = (storage.object(forKey: Self.arrangementKey) as? String).flatMap(Arrangement.init(rawValue:)) ?? .orchard
-        medium = (storage.object(forKey: Self.mediumKey) as? String).flatMap(Medium.init(rawValue:)) ?? .ink
+        medium = (storage.object(forKey: Self.mediumKey) as? String).flatMap(Medium.init(rawValue:)) ?? .chalk
         showsBranchNames = storage.object(forKey: Self.branchNamesKey) as? Bool ?? true
         showsRepoNames = storage.object(forKey: Self.repoNamesKey) as? Bool ?? true
         gusts = storage.object(forKey: Self.gustsKey) as? Bool ?? true

@@ -495,3 +495,9 @@ The trees are what a gust or a grow-in redraws; the paper only redraws on a resi
 change, and the banners on a change to the layout. Ink's trees cost what `main`'s do; its banners
 cost a millisecond or two more for the hand-drawn frames. Charcoal and chalk add about 3 ms a tree
 redraw (the layered wood and the grain pass) and 2–4 ms to the banners.
+
+### Decided (Oct 7)
+
+Daniel picked **chalk as the default**: with no `medium` saved (or an unreadable one), the
+background is chalk; a saved choice is kept, and ink and charcoal stay in the menu. No screenshots
+go in the repo: the media are described in words above.
