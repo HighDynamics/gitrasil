@@ -7,7 +7,7 @@ final class BackgroundSettingsTests: XCTestCase {
     func testDefaultsUntilChosenOtherwise() {
         let settings = BackgroundSettings(storage: MemorySettings())
         XCTAssertEqual(settings.arrangement, .orchard)
-        XCTAssertEqual(settings.medium, .ink)
+        XCTAssertEqual(settings.medium, .chalk)
         XCTAssertTrue(settings.showsBranchNames)
         XCTAssertTrue(settings.showsRepoNames)
         XCTAssertTrue(settings.gusts)
@@ -18,7 +18,7 @@ final class BackgroundSettingsTests: XCTestCase {
         storage.saved = ["arrangement": "hedge", "medium": "crayon", "showsBranchNames": "no", "showsRepoNames": [1], "gusts": 3]
         let settings = BackgroundSettings(storage: storage)
         XCTAssertEqual(settings.arrangement, .orchard)
-        XCTAssertEqual(settings.medium, .ink)
+        XCTAssertEqual(settings.medium, .chalk)
         XCTAssertTrue(settings.showsBranchNames)
         XCTAssertTrue(settings.showsRepoNames)
         XCTAssertTrue(settings.gusts)
@@ -61,15 +61,25 @@ final class BackgroundSettingsTests: XCTestCase {
     func testTheMediumIsSavedBetweenLaunches() {
         let storage = MemorySettings()
         let settings = BackgroundSettings(storage: storage)
-        settings.medium = .chalk
-        XCTAssertEqual(storage.saved["medium"] as? String, "chalk")
-        XCTAssertNil(storage.saved["arrangement"], "only what changed is written")
-        XCTAssertEqual(BackgroundSettings(storage: storage).medium, .chalk)
-
         settings.medium = .charcoal
+        XCTAssertEqual(storage.saved["medium"] as? String, "charcoal")
+        XCTAssertNil(storage.saved["arrangement"], "only what changed is written")
         XCTAssertEqual(BackgroundSettings(storage: storage).medium, .charcoal)
+
         settings.medium = .ink
         XCTAssertEqual(BackgroundSettings(storage: storage).medium, .ink)
+        settings.medium = .chalk
+        XCTAssertEqual(BackgroundSettings(storage: storage).medium, .chalk)
+    }
+
+    func testASavedMediumIsKeptOverTheDefault() {
+        // Whoever chose ink (or charcoal) before chalk became the default keeps it.
+        for medium in [Medium.ink, .charcoal] {
+            let storage = MemorySettings()
+            storage.saved = ["medium": medium.rawValue]
+            XCTAssertEqual(BackgroundSettings(storage: storage).medium, medium)
+            XCTAssertEqual(storage.saved["medium"] as? String, medium.rawValue, "reading doesn't rewrite it")
+        }
     }
 
     func testTheMediumIsSavedUnderAStableName() {

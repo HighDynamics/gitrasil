@@ -90,7 +90,7 @@ The same menu holds the settings:
   turned off on its own.
 - **Medium** — *Ink*, brush ink on cream paper; *Charcoal*, charcoal and coloured pastel on paper
   with a tooth; or *Chalk*, coloured chalk on a slate board (a green-grey board in light mode, a
-  near-black one in dark). Every medium draws by hand: lines wobble and vary in width.
+  near-black one in dark), the default. Every medium draws by hand: lines wobble and vary in width.
 - **Sway in Gusts** — now and then a gust sways the banners for a few seconds, only on mains power
   with the display awake and the background uncovered.
 
