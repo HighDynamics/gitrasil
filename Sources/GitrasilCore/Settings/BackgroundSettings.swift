@@ -9,6 +9,16 @@ public enum Arrangement: String, CaseIterable, Sendable {
     case singleTree
 }
 
+/// What the trees are drawn in.
+public enum Medium: String, CaseIterable, Sendable {
+    /// Brush ink on cream paper.
+    case ink
+    /// Charcoal and coloured pastel on paper with a tooth.
+    case charcoal
+    /// Coloured chalk on a slate board.
+    case chalk
+}
+
 /// Where the settings are saved: `UserDefaults` for the app, a dictionary in tests.
 public protocol SettingsStorage: AnyObject {
     func object(forKey key: String) -> Any?
@@ -31,7 +41,7 @@ public final class MemorySettings: SettingsStorage {
 }
 
 /// The background's settings from the menu, saved between launches next to the pins. Unset (or
-/// unreadable) values take their defaults: an orchard, every name shown, gusts blowing.
+/// unreadable) values take their defaults: an orchard in ink, every name shown, gusts blowing.
 @MainActor
 @Observable
 public final class BackgroundSettings {
@@ -40,9 +50,15 @@ public final class BackgroundSettings {
     static let branchNamesKey = "showsBranchNames"
     static let repoNamesKey = "showsRepoNames"
     static let gustsKey = "gusts"
+    static let mediumKey = "medium"
 
     public var arrangement: Arrangement {
         didSet { if arrangement != oldValue { storage.set(arrangement.rawValue, forKey: Self.arrangementKey) } }
+    }
+
+    /// What the trees are drawn in.
+    public var medium: Medium {
+        didSet { if medium != oldValue { storage.set(medium.rawValue, forKey: Self.mediumKey) } }
     }
 
     /// Whether branch names hang on pennants from their tips.
@@ -74,6 +90,7 @@ public final class BackgroundSettings {
     public init(storage: SettingsStorage) {
         self.storage = storage
         arrangement = (storage.object(forKey: Self.arrangementKey) as? String).flatMap(Arrangement.init(rawValue:)) ?? .orchard
+        medium = (storage.object(forKey: Self.mediumKey) as? String).flatMap(Medium.init(rawValue:)) ?? .ink
         showsBranchNames = storage.object(forKey: Self.branchNamesKey) as? Bool ?? true
         showsRepoNames = storage.object(forKey: Self.repoNamesKey) as? Bool ?? true
         gusts = storage.object(forKey: Self.gustsKey) as? Bool ?? true
