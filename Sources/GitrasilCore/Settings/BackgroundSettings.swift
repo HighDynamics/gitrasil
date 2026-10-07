@@ -41,7 +41,7 @@ public final class MemorySettings: SettingsStorage {
 }
 
 /// The background's settings from the menu, saved between launches next to the pins. Unset (or
-/// unreadable) values take their defaults: an orchard in chalk, every name shown, gusts blowing.
+/// unreadable) values take their defaults: an orchard in chalk, every name shown, the banners still.
 @MainActor
 @Observable
 public final class BackgroundSettings {
@@ -72,7 +72,7 @@ public final class BackgroundSettings {
         didSet { if showsRepoNames != oldValue { storage.set(showsRepoNames, forKey: Self.repoNamesKey) } }
     }
 
-    /// Whether a gust now and then sways the banners; off, they hang still.
+    /// Whether a gust now and then sways the banners; off (the default), they hang still.
     public var gusts: Bool {
         didSet { if gusts != oldValue { storage.set(gusts, forKey: Self.gustsKey) } }
     }
@@ -93,6 +93,6 @@ public final class BackgroundSettings {
         medium = (storage.object(forKey: Self.mediumKey) as? String).flatMap(Medium.init(rawValue:)) ?? .chalk
         showsBranchNames = storage.object(forKey: Self.branchNamesKey) as? Bool ?? true
         showsRepoNames = storage.object(forKey: Self.repoNamesKey) as? Bool ?? true
-        gusts = storage.object(forKey: Self.gustsKey) as? Bool ?? true
+        gusts = storage.object(forKey: Self.gustsKey) as? Bool ?? false
     }
 }

@@ -92,7 +92,8 @@ The same menu holds the settings:
   with a tooth; or *Chalk*, coloured chalk on a slate board (a green-grey board in light mode, a
   near-black one in dark), the default. Every medium draws by hand: lines wobble and vary in width.
 - **Sway in Gusts** — now and then a gust sways the banners for a few seconds, only on mains power
-  with the display awake and the background uncovered.
+  with the display awake and the background uncovered. Off by default: the banners hang still until
+  it's turned on.
 
 Pins and settings are saved between launches in the `com.gitrasil.background` defaults. For a
 test run or a preview:
