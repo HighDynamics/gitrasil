@@ -34,22 +34,24 @@ enum Offscreen {
         for arrangement in Arrangement.allCases {
             background.settings.arrangement = arrangement
             await settle(background)
-            for screen in screens {
-                for dark in [false, true] {
-                    let style = WallpaperStyle.inkOnCream(dark: dark)
-                    let trees = median(runs) { render(treeCanvas(background, style: style), screen: screen, dark: dark) }
-                    let paper = median(runs) { render(paperCanvas(background, style: style), screen: screen, dark: dark) }
-                    let banners = median(runs) { render(bannerLayer(background, style: style, size: screen.size),
-                                                        screen: screen, dark: dark) }
-                    print(String(format: "  %@ %@ %@: trees %.1f, paper %.1f, banners %.1f",
-                                 arrangement.rawValue, screen.name, dark ? "dark" : "light", trees, paper, banners))
+            for medium in Medium.allCases {
+                for screen in screens {
+                    for dark in [false, true] {
+                        let style = WallpaperStyle.make(medium, dark: dark)
+                        let trees = median(runs) { render(treeCanvas(background, style: style), screen: screen, dark: dark) }
+                        let paper = median(runs) { render(paperCanvas(background, style: style), screen: screen, dark: dark) }
+                        let banners = median(runs) { render(bannerLayer(background, style: style, size: screen.size),
+                                                            screen: screen, dark: dark) }
+                        print(String(format: "  %@ %@ %@ %@: trees %.1f, paper %.1f, banners %.1f", medium.rawValue,
+                                     arrangement.rawValue, screen.name, dark ? "dark" : "light", trees, paper, banners))
+                    }
                 }
             }
         }
     }
 
-    /// Renders the whole background (paper, trees, banners) in each arrangement, light and dark, as
-    /// `<arrangement>-<light|dark>.jpg` in `folder`, for the first screen.
+    /// Renders the whole background (paper, trees, banners) in each medium and arrangement, light and
+    /// dark, as `<medium>-<arrangement>-<light|dark>.jpg` in `folder`, for the first screen.
     static func snapshot(_ background: BackgroundModel, to folder: URL) async {
         await settle(background)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -57,11 +59,15 @@ enum Offscreen {
         for arrangement in Arrangement.allCases {
             background.settings.arrangement = arrangement
             await settle(background)
-            for dark in [false, true] {
-                let url = folder.appendingPathComponent("\(arrangement.rawValue)-\(dark ? "dark" : "light").jpg")
-                guard let image = render(WallpaperView(background: background), screen: screen, dark: dark) else { continue }
-                write(image, to: url)
-                print("wrote \(url.path)")
+            for medium in Medium.allCases {
+                background.settings.medium = medium
+                for dark in [false, true] {
+                    let name = "\(medium.rawValue)-\(arrangement == .singleTree ? "single-tree" : "orchard")-\(dark ? "dark" : "light")"
+                    let url = folder.appendingPathComponent("\(name).jpg")
+                    guard let image = render(WallpaperView(background: background), screen: screen, dark: dark) else { continue }
+                    write(image, to: url)
+                    print("wrote \(url.path)")
+                }
             }
         }
     }
