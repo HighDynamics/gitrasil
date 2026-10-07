@@ -691,8 +691,7 @@ and curve differently; for a given seed the trees are the same on every launch. 
 jitter stays keyed as it is (and a gust never redraws the trees), so lines don't shimmer. The banner
 plan's cache key gains the seed.
 
-**A gust at once.** Turning Sway in Gusts on (or turning the banners back on with it on) blows the
-first gust straight away, when gusts may blow at all (mains power, the display awake); the usual
+**A gust at once.** Turning Sway in Gusts on blows the first gust straight away, when gusts may blow at all (mains power, the display awake); the usual
 timer takes over from there.
 
 **Kept.** Draw only on change: the clocks run only while something grows (the banners' grow-in
@@ -702,3 +701,61 @@ grow-in frame). A `--frames <folder>` aid renders a whole-scene grow-in frame by
 for a look at it outside the repo. Tests: the grow-in schedule (stems in order, smooth, ending on
 the tree as it stands), the layout seed (default, saved, kept, reshuffled; seed 0 unchanged, a new
 seed deterministic). `swift build -c release` (no warnings) and `swift test` on the final commit.
+
+### What was built
+
+As planned, on `grow-anim`, rebased onto `main` once round 6 was merged (3e15a7e).
+
+- *The grow-in unfolds* (`TreeLayout.growInSchedule`, `Stretch`). Times are first worked out in
+  units of the trunk's rise: a limb off the trunk starts when the trunk passes its fork, a limb off a
+  limb when its parent reaches its fork node, and each grows for its own length (at least 0.12 of the
+  trunk's rise, so a one-commit sprout doesn't flick in), then everything is scaled so the last twig
+  ends at 1. A limb left out of the layout gets an empty stretch at the end. Watched from `--frames`:
+  the trunk rises, the low limbs reach out, the crown fills in last, with no step anywhere.
+- *Names fade as their wood finishes*: a pennant over the last 0.08 of the grow-in before its stem
+  ends (or its whole stretch, if shorter), a ribbon likewise as its bough's own trunk ends; on a limb
+  growing new commits, over the last 15 % of the growth. The banner layer takes an opacity per
+  banner from the trees' own clock (its own 30 fps timeline, paused unless something grows), so the
+  plan and the banners' images are untouched. Each banner carries its stem's stretch in the cached
+  plan, from the layout's own schedule (`TreeLayout.schedule`, built from the same limb plan the
+  layout grows by), so a name can't drift off its wood and a frame only looks up each pane's
+  progress.
+- *One grow-in for the scene* (`BackgroundModel.regrow`): at launch, when a repository is dropped,
+  from Watch Gitrasil Grow and on a reshuffle. It waits for every pane's tree or problem (up to
+  2.5 s; `GrowInWait`, tested), drawing only the ground, then grows everything together; a pane
+  whose first read finds a problem counts as read (live, a folder git can't read alone: the wait
+  ends 0.2 s in, not 2.5 s). A tree pinned later still grows in on its own. Live, at launch: one
+  grow-in instead of the orchard tree, then the single tree, then two re-fans; moving a repository
+  out of a pinned folder grows the three left from the ground.
+- *Reshuffle Branches*: `BackgroundSettings.layoutSeed` (saved as `layoutSeed`; 0 or unreadable is
+  the first shape) and `reshuffle()`; `TreeLayout`, `YggdrasilLayout` and the orchard take it as
+  `shuffle` and mix it into the seeds' keys (`SeededRandom.key`, the name itself for 0). The drawing's
+  seeds (wobble, leaves, roots, banners) still come from the names alone. `PlanCache.Key` has the
+  seed. Watch Gitrasil Grow and Reshuffle Branches are greyed with nothing pinned. There's no menu
+  item back to the first shape (deleting `layoutSeed` from the defaults does it).
+- *A gust at once*: turning Sway in Gusts on calls `Breeze.blowNow()` (a gust if gusts may blow,
+  the next one timed from it); not at launch. Live with a temporary toggle (not committed): "gusts
+  on" and "gust" logged in the same second.
+- `--frames <folder>`: the scene grown again and rendered at 20 frames a second of its clock, with
+  the clock kept (`BackgroundModel.GrowInClock`) since rendering is slower than real time.
+
+**Redraw times**, median of 15 offscreen renders (ms, release, four throwaway repositories), `main`
+(a54582c) / round 6 (b2ac10d) / now, light (dark is within 0.5 ms). The trees' full redraw is round 6's;
+the grow-in frame (every tree halfway through its grow-in) draws less wood halfway now, since the
+outer limbs haven't started, so it's cheaper, and a grow-in's last frames cost what the full trees do:
+
+| | Trees | Grow-in frame | Banners |
+|---|---|---|---|
+| Ink orchard 1440×900@2x | 14.6 / 14.7 / 15.7 | 11.5 / 11.5 / 7.4 | 10.4 / 10.4 / 10.4 |
+| Chalk orchard 1440×900@2x | 19.9 / 21.3 / 21.3 | 13.7 / 15.0 / 9.9 | 11.4 / 11.1 / 11.4 |
+| Chalk orchard 3440×1440@1x | 21.1 / 23.0 / 23.1 | 15.1 / 16.4 / 11.0 | 11.3 / 11.3 / 11.2 |
+| Ink single tree 1440×900@2x | 17.1 / 17.0 / 17.2 | 12.0 / 11.9 / 7.6 | 12.3 / 12.2 / 12.1 |
+| Charcoal single tree 1440×900@2x | 21.3 / 23.9 / 23.4 | 14.7 / 16.9 / 10.9 | 13.4 / 13.3 / 13.3 |
+| Chalk single tree 1440×900@2x | 21.3 / 23.9 / 23.8 | 14.8 / 17.0 / 10.8 | 13.4 / 13.4 / 13.5 |
+| Chalk single tree 3440×1440@1x | 21.8 / 24.3 / 24.4 | 15.4 / 17.4 / 11.3 | 13.8 / 13.7 / 13.5 |
+
+The banners are planned and drawn as before; during a grow-in only their opacities change. CPU time
+of a whole 8 s launch (both displays: reading the trees, the grow-in, then idle), three runs each:
+`main` 3.06–3.14 s, round 6 3.19–3.21 s, now 2.75–2.81 s, since the scene grows in once instead of
+three or four times. The gust timer is untouched: a gust still only turns the banners' layers, and
+with nothing growing every clock is paused.
