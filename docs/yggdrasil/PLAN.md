@@ -759,3 +759,121 @@ of a whole 8 s launch (both displays: reading the trees, the grow-in, then idle)
 `main` 3.06–3.14 s, round 6 3.19–3.21 s, now 2.75–2.81 s, since the scene grows in once instead of
 three or four times. The gust timer is untouched: a gust still only turns the banners' layers, and
 with nothing growing every clock is paused.
+
+## Round 8: branch tips that look like big stubs
+
+Daniel (via Arbor): some branch ends look like big blunt stubs instead of tapering off, most on
+`dnd-app`. Branch `fix/branch-tips`, from `main` (c1f2dc1).
+
+**Reproduced.** Rendered `dnd-app` with `--snapshot` in every medium, both arrangements, in a
+throwaway suite (alone, and with `love-scribe-journal` and `gitrasil`). It no longer has 14 limbs:
+its old branches have aged out of the 120-day window or are gone, so today it draws 200 trunk commits
+and three limbs. The stubs are still plain on the single tree's `dnd-app` bough, whose top is a
+fat column cut off flat under its leaves, and they're there, smaller, on every limb of every tree.
+Before and after images: `tips/side-by-side-*.jpg`.
+
+**Cause.** Nothing ever *ends* a stem. The layout's widths are the pipe model, a node's width going
+with the square root of what is still to come beyond it, and the drawing then fills one closed
+outline through the samples. Four things keep the end wide:
+
+1. *A floor at the tip.* `TreeLayout.width(weight:)` is `0.0042·√weight + 0.0022`, and the weight
+   beyond the last commit is the `+ 0.5` every limb carries (a trunk's `+ 1`). So the narrowest a limb
+   gets is 0.0052 of the trunk's height, a trunk's 0.0064 — a flat cut 3–5 pt across at the scale a
+   tree is drawn at, on a stem that was 10–30 pt across a little way below. A bud has no taper at all
+   (its two nodes are both 0.0052).
+2. *A trunk's top is slow.* Trunk commits are spaced on a log scale from the tip down, so the newest 12
+   of 200 take the top half of the trunk, and over all of it the width only goes from 0.0145 to
+   0.0064. It reads as a column that stops.
+3. *A limb carries its sub-limbs to the end.* A limb with a sub-limb forking at its last node keeps that
+   sub-limb's weight there (`0.0111` on `connections`, a 3-commit limb, against 0.0052), so its end is
+   twice as wide as a childless one.
+4. *The outline closes with a straight line.* `taper(...)` joins the last left and right points with
+   `closeSubpath`, so whatever width the stem has at the end is the width of the cut. The drawing also
+   floors every sample at 0.9 pt.
+
+It's the same cut wherever a stem stops, so it shows too on a limb that's *growing* (a new commit, a
+grow-in): the stem is cut at the part-way node with the width it'll have there when it's done. It does
+**not** come from the history window: that drops the *old* end of a limb or the trunk (a fork older
+than the window joins at the trunk's base), and a limb's tip is always its newest real commit. Nor from
+round caps: the wood is filled shapes, not strokes, and the lines along its edges converge, not cap.
+
+**Fix (planned).** Taper every stem to a fine point in the drawing, over a stretch of its length: the
+stretch is `12×` the stem's width at its end, but never more than 85 % of its length (so a one-commit
+limb or a bud is a thorn, wide at the collar and pointed at the end). Applied to the resampled
+centreline, after the collar and the root flare, to the stem as it's drawn now, so a growing limb
+tapers to wherever it has got to. The layout's nodes and widths are not changed, so every fork,
+position and seed 0 are the same (bar a collar inside a parent's taper, below). The shape is a pure function in Core
+(`TreeLayout.TipTaper`), tested.
+
+### What was built
+
+As planned, with two changes after looking at it:
+
+- *The taper is sized from where it starts, not from the end.* A trunk's top is still wide a little
+  way back (0.0145 against 0.0064 at the very end), so `12×` the end width made a cone that began in a
+  visible corner. `TipTaper` asks the stem for its width where the taper would start (twice over, so it
+  settles) and takes `12×` that: a trunk's top tapers over a few times the length a fine limb's end does.
+- *The profile eases in.* The width's multiplier is `0.04 + 0.96·sin(s·π/2)` for `s`, the fraction
+  of the taper still to go (1 where it starts, 0 at the tip): no corner where it starts, a point at the
+  end. A straight cone, and a power curve like `s^0.85`, both left a visible kink on a wide trunk.
+
+A **tip is a point, not a drawn finish**: every stem, including one cut short by the grow-in or by a
+commit still growing, ends in the same fine point. I chose it over a deliberate cap (a bud, a nub, a
+cut-and-callus) because the end is always under a cluster of leaves and a pennant's thread: a
+detailed finish would be hidden or would fight them, and a point reads as "this branch goes on
+growing", which is what a limb at the tip of a repository is. Limbs the history window cuts at the
+*base* aren't affected by any of this (their tips were never the cut).
+
+`TreeLayout.TipTaper` (`length`, `factor(distanceToTip:)`) and `Stem.tipTaper` / `Stem.tapersToTip`
+are in Core; `TreeDrawing.outline` applies the factor to the wood's width samples after the collar and
+the roots' flare, and before the 0.9 pt floor, so the very end is a 0.9 pt point. A shared trunk
+(no commits of its own, ends in its boughs) doesn't taper. Nothing in the layout moved: seed 0's nodes
+and curves are the ones round 7 gave (`testTheTaperLeavesTheLayoutAlone`), so only the tips (and the collars of limbs forking inside a taper) differ.
+A limb that forks *inside* its parent's taper gets a collar sized from the wood that's actually drawn
+there, not from the pipe model's width at that node, which the taper has since narrowed: `Fork.width` is
+the parent's width times `Stem.taperFactor(at:)` (a trunk's foot and a fork well back from the end are
+untouched, a limb leaving at the very end leaves a point). Without it a sub-limb's collar flared to
+1.5× a parent that had tapered to a thread. It reads the layout's nodes and writes only `Fork.width`.
+
+Tests. `TreeLayoutTests`: the factor (1 beyond the taper, a point at the end, monotone, no corner at
+its start), every stem of a tree with short limbs, a bud, a limb with a sub-limb at its end and a limb
+at the trunk's tip ends in a point, a short limb and a bud narrow over most of their length, a wide
+trunk top gets a longer taper than a fine twig, a stem part-way through a grow-in or a new commit
+tapers to where it's got to (and never outruns what's grown), a stem with nothing grown yet has no taper
+and doesn't trap, a fork inside its parent's taper, the shared trunk doesn't taper, and the last node
+of every stem is where main's layout put it (reference values). `GitrasilWallpaperTests` (a new test
+target, `TreeDrawingTests`) asserts on `TreeDrawing.outline`, the width samples the wood is made of:
+every outline ends at the 0.9 pt floor, the base is left alone, the taper is measured in tree units
+at three scales, a bud's collar is not tapered, and a stem cut part-way through a grow-in ends in a
+point. Each of three regressions (the distance not divided by the scale, the taper measured from the
+wrong end, the taper applied before the collar) was put in by hand and fails one of them. `swift build`
+and `swift test` (120 core and 5 wallpaper tests) pass.
+
+**Looked at.** Full 1440×900@2x renders (light mode, the throwaway instance only), before and
+after, kept outside the repo: `dnd-app` alone in every medium and both arrangements, a throwaway
+`thicket` repository (200 trunk commits and 11 limbs: one- and two-commit limbs, a bud, a limb with
+sub-limbs at its end) in chalk and ink, and `dnd-app` with `love-scribe-journal` and `gitrasil` as a
+single tree. The side-by-sides (`tips/side-by-side-*`, before on the left) are in the repo: zoomed
+crops of the dnd-app bough's top in each medium, short limbs in chalk and ink, a mid-grow-in frame,
+and two whole screens.
+
+![dnd-app's bough, chalk](tips/side-by-side-dnd-app-bough-chalk.jpg)
+![short limbs, ink](tips/side-by-side-short-limbs-ink.jpg)
+![growing](tips/side-by-side-growing.jpg)
+
+**Redraw times**, median of 15 offscreen renders (ms, release, four pins: `dnd-app`, `thicket`,
+`love-scribe-journal`, `gitrasil`), `main` (c1f2dc1) then this branch, two runs each, light (dark is
+within 0.3 ms): no difference beyond the noise, in trees, the grow-in frame or the banners. The fork
+width adds one `taperFactor` per child stem to the layout, which doesn't show.
+
+| | Trees | Grow-in frame |
+|---|---|---|
+| Ink orchard 1440×900@2x | 14.3, 14.5 / 14.6, 14.0 | 7.6, 7.5 / 7.7, 7.5 |
+| Chalk orchard 1440×900@2x | 19.0, 19.0 / 18.3, 18.0 | 10.0, 10.0 / 10.1, 9.7 |
+| Chalk orchard 3440×1440@1x | 20.2, 20.1 / 20.0, 18.9 | 10.6, 10.7 / 10.7, 10.4 |
+| Ink single tree 1440×900@2x | 15.4, 15.1 / 15.4, 14.4 | 7.7, 7.7 / 7.7, 7.6 |
+| Charcoal single tree 1440×900@2x | 19.9, 20.8 / 21.3, 19.9 | 10.5, 10.7 / 10.7, 10.6 |
+| Chalk single tree 1440×900@2x | 20.7, 19.6 / 20.8, 20.1 | 10.6, 10.1 / 10.7, 10.3 |
+| Chalk single tree 3440×1440@1x | 21.0, 19.9 / 21.4, 20.2 | 11.2, 10.4 / 10.9, 10.6 |
+
+The paper and the banners are untouched.
