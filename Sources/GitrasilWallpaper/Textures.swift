@@ -17,7 +17,7 @@ enum Textures {
     static let tile: CGFloat = 256
 
     private static let lock = NSLock()
-    nonisolated(unsafe) private static var cache: [String: Any] = [:]
+    private nonisolated(unsafe) static var cache: [String: Any] = [:]
 
     /// The surface over the paper, or nil for a medium without one.
     static func surface(_ style: WallpaperStyle, dark: Bool, scale: CGFloat) -> Image? {

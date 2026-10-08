@@ -51,7 +51,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings = BackgroundSettings(storage: MemorySettings(defaults.dictionaryRepresentation()))
         }
         let background = BackgroundModel(pins: pins, settings: settings)
-        logEvent("defaults \(suite), \(pins.pins.count) pinned (\(pins.shown.count) shown), \(settings.arrangement.rawValue), \(settings.medium.rawValue)")
+        logEvent("defaults \(suite), \(pins.pins.count) pinned (\(pins.shown.count) shown), "
+            + "\(settings.arrangement.rawValue), \(settings.medium.rawValue)")
 
         // Follows the system's light/dark mode; GITRASIL_BACKGROUND_APPEARANCE=light|dark pins one (the
         // background and the menu), to preview the other mode without changing the system setting.
@@ -102,6 +103,7 @@ if let flag = arguments.firstIndex(of: "--quit-after"), flag + 1 < arguments.cou
     quitAfter = TimeInterval(arguments[flag + 1])
     arguments.removeSubrange(flag...(flag + 1))
 }
+
 var mode = Mode.background(quitAfter: quitAfter)
 if arguments.first == "--benchmark" {
     mode = .benchmark(runs: arguments.dropFirst().first.flatMap { Int($0) } ?? 15)
@@ -113,6 +115,7 @@ if arguments.first == "--benchmark" {
     mode = .frames(URL(fileURLWithPath: arguments[1]))
     arguments.removeFirst(2)
 }
+
 guard arguments.isEmpty else {
     FileHandle.standardError.write(Data("""
         usage: GitrasilWallpaper [--quit-after <seconds>]

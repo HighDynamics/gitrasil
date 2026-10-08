@@ -1,0 +1,20 @@
+# SwiftFormat config. Run through scripts/check.sh (pinned version, see docs/ci-quality.md).
+--swiftversion 5.9
+--exclude .build
+--indent 4
+--commas inline
+--trailing-commas never
+
+# The codebase is written densely on purpose (one-line `if`/`guard`/`for` bodies, long math
+# expressions, comments wrapped by hand), so the rules that re-wrap code or comments are off:
+# running them would rewrite most of the code without catching anything.
+--disable wrap,wrapArguments,wrapIfStatementBodies,wrapLoopBodies
+--disable wrapFunctionBodies,wrapPropertyBodies,wrapSwitchCases,wrapSingleLineComments
+--disable wrapMultilineStatementBraces,wrapIfExpressionBodies,braces,elseOnSameLine
+# Rules that change meaning or intent rather than layout; a formatter should not do these.
+--disable noForceUnwrapInTests,redundantSelf,unusedArguments,hoistPatternLet,hoistTry,hoistAwait
+--disable conditionalAssignment,preferForLoop,redundantReturn,redundantType,docComments
+--disable extensionAccessControl,numberFormatting,initCoderUnavailable
+# House style the codebase already follows consistently.
+--ranges no-space
+--disable sortImports,blankLinesAtStartOfScope,indent

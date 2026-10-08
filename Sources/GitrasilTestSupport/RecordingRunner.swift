@@ -4,8 +4,8 @@ import GitrasilCore
 /// A fake `GitRunning` that records the order commands actually execute in and can run slowly,
 /// so the executor's serialization/coalescing behavior is assertable without disk.
 public actor RecordingRunner: GitRunning {
-    private(set) public var started: [String] = []
-    private(set) public var finished: [String] = []
+    public private(set) var started: [String] = []
+    public private(set) var finished: [String] = []
     private let delay: Duration
 
     public init(delay: Duration = .milliseconds(50)) { self.delay = delay }

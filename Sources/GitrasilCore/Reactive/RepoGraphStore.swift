@@ -115,7 +115,7 @@ public final class RepoGraphStore {
         do {
             let result = try await task.value
             lastError = nil
-            guard let fresh = result.graph else { return }   // nothing the graph depends on moved
+            guard let fresh = result.graph else { return } // nothing the graph depends on moved
             fingerprint = result.fingerprint
             deriveCount += 1
             if fresh != graph { graph = fresh }
@@ -168,9 +168,10 @@ public final class RepoGraphStore {
         let commonURL = (common.hasPrefix("/") ? URL(fileURLWithPath: common)
                          : repositoryURL.appendingPathComponent(common, isDirectory: true)).standardizedFileURL
         let watcher = FSEventsWatcher(paths: [commonURL.path], latency: 0.3,
-                                      filter: { RepoGraphStore.isRefPath($0) }) { [weak self] in
-            Task { @MainActor in self?.refsChanged() }
-        }
+                                      filter: { RepoGraphStore.isRefPath($0) },
+                                      onChange: { [weak self] in
+                                          Task { @MainActor in self?.refsChanged() }
+                                      })
         self.watcher = watcher
         watcher.start()
     }
@@ -183,7 +184,7 @@ extension Derivations {
     /// worktree a branch is checked out in.
     public static func refFingerprint(runner: GitRunning) async throws -> String {
         try await runner.runChecked([
-            "for-each-ref", "--format=%(objectname) %(refname) %(symref) %(worktreepath)",
+            "for-each-ref", "--format=%(objectname) %(refname) %(symref) %(worktreepath)"
         ]).stdoutString ?? ""
     }
 }

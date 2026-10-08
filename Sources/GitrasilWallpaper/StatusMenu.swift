@@ -85,7 +85,7 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         menu.addItem(.sectionHeader(title: "Arrange As"))
         for (choice, title, tip) in [
             (Arrangement.orchard, "Orchard", "A tree for each repository"),
-            (.singleTree, "Single Tree", "One trunk with a bough for each repository"),
+            (.singleTree, "Single Tree", "One trunk with a bough for each repository")
         ] {
             let entry = NSMenuItem(title: title, action: #selector(arrange(_:)), keyEquivalent: "")
             entry.target = self
@@ -99,7 +99,7 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         for (choice, title, tip) in [
             (Medium.ink, "Ink", "Brush ink on cream paper"),
             (.charcoal, "Charcoal", "Charcoal and coloured pastel on paper with a tooth"),
-            (.chalk, "Chalk", "Coloured chalk on a slate board, in light and dark mode alike"),
+            (.chalk, "Chalk", "Coloured chalk on a slate board, in light and dark mode alike")
         ] {
             let entry = NSMenuItem(title: title, action: #selector(draw(in:)), keyEquivalent: "")
             entry.target = self
@@ -308,7 +308,7 @@ private final class PinRow: NSView {
             note.centerYAnchor.constraint(equalTo: centerYAnchor),
             finder.leadingAnchor.constraint(equalTo: note.trailingAnchor, constant: 6),
             finder.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            finder.centerYAnchor.constraint(equalTo: centerYAnchor),
+            finder.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
     }
 

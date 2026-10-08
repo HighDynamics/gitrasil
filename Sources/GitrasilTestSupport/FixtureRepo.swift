@@ -12,7 +12,7 @@ public final class FixtureRepo {
         "GIT_AUTHOR_NAME": "Fixture", "GIT_AUTHOR_EMAIL": "fixture@example.com",
         "GIT_COMMITTER_NAME": "Fixture", "GIT_COMMITTER_EMAIL": "fixture@example.com",
         // Never spawn an interactive editor (rebase/cherry-pick --continue).
-        "GIT_EDITOR": "true", "GIT_SEQUENCE_EDITOR": "true",
+        "GIT_EDITOR": "true", "GIT_SEQUENCE_EDITOR": "true"
     ]
 
     public init() throws {

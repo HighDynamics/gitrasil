@@ -12,7 +12,7 @@ final class TreeLayoutTests: XCTestCase {
         var limbs = [
             RepoTree.Limb(name: "feature/low", commits: commits("l", lowCommits), parent: .trunk(node: 8), isCheckedOut: false),
             RepoTree.Limb(name: "feature/low-sub", commits: commits("s", 3), parent: .limb(index: 0, node: 2), isCheckedOut: false),
-            RepoTree.Limb(name: "feature/high", commits: commits("h", 4), parent: .trunk(node: 36), isCheckedOut: true),
+            RepoTree.Limb(name: "feature/high", commits: commits("h", 4), parent: .trunk(node: 36), isCheckedOut: true)
         ]
         if let extraLimb { limbs.append(extraLimb) }
         return RepoTree(trunkName: "main", trunk: commits("t", 40), limbs: limbs, isTrunkCheckedOut: false)
@@ -28,7 +28,7 @@ final class TreeLayoutTests: XCTestCase {
         let limbs = [
             RepoTree.Limb(name: "early-sub", commits: commits("s", 2), parent: .limb(index: 1, node: 1), isCheckedOut: false),
             RepoTree.Limb(name: "feature", commits: commits("f", 3), parent: .trunk(node: 10), isCheckedOut: false),
-            RepoTree.Limb(name: "stray", commits: commits("x", 2), parent: .limb(index: 9, node: 0), isCheckedOut: false),
+            RepoTree.Limb(name: "stray", commits: commits("x", 2), parent: .limb(index: 9, node: 0), isCheckedOut: false)
         ]
         let layout = TreeLayout(tree: RepoTree(trunkName: "main", trunk: commits("t", 20), limbs: limbs,
                                                isTrunkCheckedOut: false), seed: "ash")
@@ -130,7 +130,9 @@ final class TreeLayoutTests: XCTestCase {
     }
 
     func testLimbsOffTheTrunkBalanceTheCrown() {
-        let limbs = (0..<8).map { RepoTree.Limb(name: "b\($0)", commits: commits("c\($0)", 2), parent: .trunk(node: 10 + $0 * 3), isCheckedOut: false) }
+        let limbs = (0..<8).map {
+            RepoTree.Limb(name: "b\($0)", commits: commits("c\($0)", 2), parent: .trunk(node: 10 + $0 * 3), isCheckedOut: false)
+        }
         let sides = TreeLayout.sides(RepoTree(trunkName: "main", trunk: commits("t", 40), limbs: limbs, isTrunkCheckedOut: false))
         var lean = 0.0
         for side in sides {

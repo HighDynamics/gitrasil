@@ -107,7 +107,7 @@ extension Derivations {
         // a unix time, and a refname never do).
         let out = try await runner.runChecked([
             "for-each-ref", "--sort=-committerdate",
-            "--format=%(objectname) %(committerdate:unix) %(refname:short) %(worktreepath)", "refs/heads",
+            "--format=%(objectname) %(committerdate:unix) %(refname:short) %(worktreepath)", "refs/heads"
         ])
         var refs: [BranchRef] = []
         for record in (out.stdoutString ?? "").split(separator: "\n", omittingEmptySubsequences: true) {

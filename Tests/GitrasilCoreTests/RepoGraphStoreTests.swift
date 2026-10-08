@@ -79,7 +79,7 @@ final class RepoGraphStoreTests: XCTestCase {
         await store.start()
 
         try repo.writeFile("scratch.txt", "edit")
-        _ = try await repo.git(["add", "scratch.txt"])   // writes the index, not a ref
+        _ = try await repo.git(["add", "scratch.txt"]) // writes the index, not a ref
 
         try await Task.sleep(for: .seconds(1.5))
         XCTAssertEqual(store.deriveCount, 1)
@@ -183,7 +183,7 @@ final class RepoGraphStoreTests: XCTestCase {
         try await parent.git(["-C", "later", "commit", "-q", "--allow-empty", "-m", "root"])
 
         let ticking = Task { await store.tick() }
-        await Task.yield()   // the tick is under way, waiting on git
+        await Task.yield() // the tick is under way, waiting on git
         store.stop()
         await ticking.value
         XCTAssertFalse(store.isWatching, "a stopped store stays unwatched")

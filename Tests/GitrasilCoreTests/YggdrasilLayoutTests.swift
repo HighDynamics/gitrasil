@@ -11,7 +11,7 @@ final class YggdrasilLayoutTests: XCTestCase {
         let limbs = [
             RepoTree.Limb(name: "\(prefix)/low", commits: commits("\(prefix)l", limbCommits), parent: .trunk(node: 6), isCheckedOut: false),
             RepoTree.Limb(name: "\(prefix)/sub", commits: commits("\(prefix)s", 2), parent: .limb(index: 0, node: 2), isCheckedOut: false),
-            RepoTree.Limb(name: "\(prefix)/high", commits: commits("\(prefix)h", 3), parent: .trunk(node: trunk - 2), isCheckedOut: true),
+            RepoTree.Limb(name: "\(prefix)/high", commits: commits("\(prefix)h", 3), parent: .trunk(node: trunk - 2), isCheckedOut: true)
         ]
         return RepoTree(trunkName: "main", trunk: commits("\(prefix)t", trunk), limbs: limbs, isTrunkCheckedOut: false)
     }
@@ -48,7 +48,9 @@ final class YggdrasilLayoutTests: XCTestCase {
     }
 
     func testOuterBoughsGrowMostLimbsOutward() {
-        let limbs = (0..<9).map { RepoTree.Limb(name: "b\($0)", commits: commits("c\($0)", 2), parent: .trunk(node: 8 + $0 * 3), isCheckedOut: false) }
+        let limbs = (0..<9).map {
+            RepoTree.Limb(name: "b\($0)", commits: commits("c\($0)", 2), parent: .trunk(node: 8 + $0 * 3), isCheckedOut: false)
+        }
         let tree = RepoTree(trunkName: "main", trunk: commits("t", 40), limbs: limbs, isTrunkCheckedOut: false)
         XCTAssertGreaterThan(TreeLayout.sides(tree, outward: -1).filter { $0 < 0 }.count, 5)
         XCTAssertGreaterThan(TreeLayout.sides(tree, outward: 1).filter { $0 > 0 }.count, 5)
