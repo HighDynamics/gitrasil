@@ -159,3 +159,7 @@ in `docs/distribution.md`.
 
 - **git ≥ 2.30** (modern security baseline; all needed plumbing predates it).
 - **macOS 14 (Sonoma)** (SwiftUI + Observation).
+
+## Licence
+
+Gitrasil is released under the [MIT licence](LICENSE).
