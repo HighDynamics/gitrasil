@@ -12,7 +12,8 @@ import GitrasilCore
 // menu-bar item adds and removes the pins and holds the settings (the arrangement, the medium,
 // banners, gusts), all saved in the `com.gitrasil.background` defaults (or the suite
 // GITRASIL_BACKGROUND_DEFAULTS_SUITE names). Nothing is installed and the system wallpaper setting is
-// never touched.
+// never touched. Built into Gitrasil.app (scripts/build-app.sh), the menu can also make it open at
+// login and check for a newer release (`AppServices`).
 //
 // --benchmark, --snapshot and --frames are test aids (`Offscreen`): they draw the pinned repositories
 // offscreen, with no window or menu, print the redraw times or write images, and quit.
@@ -30,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windows: DesktopWindows?
     private var background: BackgroundModel?
     private var menu: StatusMenu?
+    private var app: AppServices?
 
     init(mode: Mode) {
         self.mode = mode
@@ -76,10 +78,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windows.start()
         self.windows = windows
         self.background = background
+        let app = AppServices.make(storage: defaults)
+        self.app = app
         self.menu = StatusMenu(pins: pins, settings: settings, gustsOverridden: background.breeze.isTurnedOff,
-                               regrow: { [weak background] in background?.regrow() })
+                               app: app, regrow: { [weak background] in background?.regrow() })
 
         background.start()
+        app?.start()
 
         if let quitAfter {
             DispatchQueue.main.asyncAfter(deadline: .now() + quitAfter) { NSApp.terminate(nil) }
