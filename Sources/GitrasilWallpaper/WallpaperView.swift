@@ -436,7 +436,7 @@ struct TreeDrawing {
             samples.count >= 2 ? taper(samples, seed: seed) : Taper()
         }
         let shapes = tapers.map(\.shape)
-        let roots = ground.map { roots(of: stems[$0], seed: rootSeed) } ?? []
+        let roots = ground.map { self.roots(of: stems[$0], seed: rootSeed) } ?? []
         let tops = stems.map(top)
         if style.layeredWood {
             strokes(stems, outlines, shapes, woodSeeds, parents: parents, roots: roots, tops: tops, in: &context)
