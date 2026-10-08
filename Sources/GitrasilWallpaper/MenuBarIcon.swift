@@ -9,12 +9,21 @@ import AppKit
 enum MenuBarIcon {
 
     static func image() -> NSImage {
-        let image = Bundle.module.url(forResource: "MenuBarIcon", withExtension: "pdf").flatMap(NSImage.init(contentsOf:))
+        let image = url().flatMap(NSImage.init(contentsOf:))
             ?? NSImage(systemSymbolName: "tree", accessibilityDescription: nil)
             ?? NSImage()
         image.size = NSSize(width: 18, height: 18)
         image.isTemplate = true
         image.accessibilityDescription = "Gitrasil Background"
         return image
+    }
+
+    /// In Gitrasil.app the file is in the app's own resources (`scripts/build-app.sh` copies it
+    /// there); run bare, it's in SwiftPM's resource bundle beside the executable. The app is asked
+    /// first: some toolchains' `Bundle.module` doesn't look inside an app, and stops the app when it
+    /// can't find its bundle.
+    private static func url() -> URL? {
+        Bundle.main.url(forResource: "MenuBarIcon", withExtension: "pdf")
+            ?? Bundle.module.url(forResource: "MenuBarIcon", withExtension: "pdf")
     }
 }

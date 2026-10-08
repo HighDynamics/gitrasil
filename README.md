@@ -37,6 +37,8 @@ layer on top.
 - **`Settings/`** — `PinnedRepositories`, the saved pins (repositories, or folders of them) and the
   repositories they put on the background; `BackgroundSettings`, the arrangement, banner and medium
   choices.
+- **`Updates/`** — `UpdateCheck`, the app's opt-in, at-most-daily look at GitHub Releases for a
+  newer version.
 - **`Layout/HandDrawn.swift`** — the seeded noise behind the hand-drawn wobble and the paper's
   textures: the same seed gives the same line on every redraw.
 
@@ -47,7 +49,8 @@ one per medium (ink, charcoal, chalk) and mode; the drawing code reads only that
 new value. `Sketch` draws a line by hand (wobbling, its width varying along it), and `Textures`
 makes the dry media's paper tooth, board dust and grain once and tiles them. The
 menu-bar icon is `Resources/MenuBarIcon.pdf`, drawn by `scripts/draw-icon.swift` (see
-`MenuBarIcon.swift` for the format).
+`MenuBarIcon.swift` for the format). `AppServices` is what it does only when run as `Gitrasil.app`:
+open at login (`SMAppService`) and schedule the update check.
 
 ## Build & test
 
@@ -130,6 +133,27 @@ test run or a preview:
 
 Ctrl-C or the menu's Quit removes it; nothing is installed and the system wallpaper is never
 changed.
+
+## The app
+
+```bash
+scripts/build-app.sh [--native] [--install]   # dist/Gitrasil.app
+scripts/package-app.sh                        # dist/Gitrasil-<version>.zip and .dmg, for a release
+```
+
+`build-app.sh` puts the release build in `Gitrasil.app` (universal, ad-hoc signed, the version from
+`VERSION`), which opens from Finder or Spotlight like any app; `--install` also copies it to
+`/Applications`. The app's menu has three more items: **Open at Login** (off until ticked), **Check
+for Updates Daily** (off until ticked; once a day it asks GitHub whether a newer release is out and
+sends nothing else) and **Check for Updates Now**. A newer release puts *Gitrasil X.Y.Z Is
+Available* at the top of the menu, which opens its page. To try the app on a throwaway suite:
+`open -n --env GITRASIL_BACKGROUND_DEFAULTS_SUITE=<suite> dist/Gitrasil.app`;
+`GITRASIL_RELEASES_REPOSITORY=<owner/name>` points the update check at another repository's
+releases.
+
+Pushing a tag `v` + `VERSION` runs `.github/workflows/release.yml`, which builds, packages and
+attaches both to a draft release. Signing, notarization, launch at login and the update choices are
+in `docs/distribution.md`.
 
 ## Toolchain floors
 

@@ -7,7 +7,8 @@ import GitrasilCore
 /// a button to reveal it in Finder; a pinned folder lists its repositories under it, ticked where
 /// they're shown. Adds repositories or folders through an open panel, holds the settings (how several
 /// are arranged, what they're drawn in, which names hang on banners and whether they sway in gusts),
-/// grows the trees again on request (as they are, or reshuffled), and quits.
+/// grows the trees again on request (as they are, or reshuffled), and quits. Run as Gitrasil.app, it
+/// also opens at login and checks for a newer release, each when asked to (`AppServices`).
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
 
@@ -17,6 +18,8 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
     private let gustsOverridden: Bool
     /// Grows the whole scene again (Watch Gitrasil Grow).
     private let regrow: () -> Void
+    /// Open at login and the update check; nil when not run as an app.
+    private let app: AppServices?
     private let item: NSStatusItem
     /// While the menu is open: the pins as listed when it opened (unticked ones too), their rows, and
     /// each listed repository of a pinned folder.
@@ -24,10 +27,12 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
     private var rows: [PinRow] = []
     private var folderEntries: [(entry: NSMenuItem, repo: URL)] = []
 
-    init(pins: PinnedRepositories, settings: BackgroundSettings, gustsOverridden: Bool, regrow: @escaping () -> Void) {
+    init(pins: PinnedRepositories, settings: BackgroundSettings, gustsOverridden: Bool, app: AppServices?,
+         regrow: @escaping () -> Void) {
         self.pins = pins
         self.settings = settings
         self.gustsOverridden = gustsOverridden
+        self.app = app
         self.regrow = regrow
         self.item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
@@ -48,6 +53,7 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         listed = pins.pins
         rows = []
         folderEntries = []
+        addUpdateNotice(to: menu)
         menu.addItem(.sectionHeader(title: "Pinned"))
         if listed.isEmpty {
             let none = NSMenuItem(title: "None yet", action: nil, keyEquivalent: "")
@@ -133,7 +139,52 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         reshuffle.toolTip = "Grows every tree again with its branches leaning and curving a new way (the same branches, kept between launches)"
         menu.addItem(reshuffle)
         menu.addItem(.separator())
+        addAppItems(to: menu)
         menu.addItem(action("Quit Gitrasil Background", #selector(quit), nil, key: "q"))
+    }
+
+    /// At the top, when a check has found a newer release: its name, opening its page.
+    private func addUpdateNotice(to menu: NSMenu) {
+        guard let app, let release = app.updates.available else { return }
+        let update = NSMenuItem(title: "Gitrasil \(release.version) Is Available", action: #selector(openRelease(_:)), keyEquivalent: "")
+        update.target = self
+        update.representedObject = release.page
+        update.toolTip = "Opens its release page on GitHub (you have \(app.version))"
+        update.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: nil)
+        menu.addItem(update)
+        menu.addItem(.separator())
+    }
+
+    /// What only the app has: under its version, Open at Login and the update checks.
+    private func addAppItems(to menu: NSMenu) {
+        guard let app else { return }
+        menu.addItem(.sectionHeader(title: "Gitrasil \(app.version)"))
+        let login = action("Open at Login", #selector(toggleOpenAtLogin), nil)
+        switch app.loginItem {
+        case .on:
+            login.state = .on
+            login.toolTip = "Opens Gitrasil when you log in (listed in System Settings → General → Login Items)"
+        case .awaitingApproval:
+            // Asked for, but not allowed yet: half on, and a click takes the request back.
+            login.state = .mixed
+            login.toolTip = "Waiting for you to allow Gitrasil in System Settings → General → Login Items; "
+                + "click to stop asking"
+        case .off:
+            login.state = .off
+            login.toolTip = app.runsFromATemporaryPlace
+                ? "Move Gitrasil to the Applications folder first: run from its download or disk image, it can’t open at login"
+                : "Opens Gitrasil when you log in (listed in System Settings → General → Login Items)"
+        }
+        menu.addItem(login)
+        let daily = action("Check for Updates Daily", #selector(toggleDailyUpdateCheck), nil)
+        daily.state = app.updates.isEnabled ? .on : .off
+        daily.toolTip = "Once a day, asks GitHub whether a newer Gitrasil has been released "
+            + "(\(app.updates.repository)); it sends nothing about you or your repositories"
+        menu.addItem(daily)
+        let now = action("Check for Updates Now", #selector(checkForUpdatesNow), nil)
+        now.toolTip = "Asks GitHub now whether a newer Gitrasil has been released"
+        menu.addItem(now)
+        menu.addItem(.separator())
     }
 
     private func action(_ title: String, _ selector: Selector, _ url: URL?, key: String = "") -> NSMenuItem {
@@ -174,12 +225,74 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         settings.reshuffle()
     }
 
+    @objc private func openRelease(_ sender: NSMenuItem) {
+        guard let page = sender.representedObject as? URL else { return }
+        NSWorkspace.shared.open(page)
+    }
+
+    @objc private func toggleOpenAtLogin() {
+        guard let app else { return }
+        // On or waiting for approval, a click unregisters it.
+        let on = app.loginItem == .off
+        do {
+            try app.setOpensAtLogin(on)
+        } catch {
+            logEvent("open at login: \(error)")
+            inform(on ? "Couldn’t make Gitrasil open at login" : "Couldn’t stop Gitrasil opening at login",
+                   error.localizedDescription)
+        }
+    }
+
+    /// Turning daily checks on checks at once, if a day has passed since the last.
+    @objc private func toggleDailyUpdateCheck() {
+        guard let app else { return }
+        app.updates.isEnabled.toggle()
+        app.checkForUpdatesIfDue()
+    }
+
+    @objc private func checkForUpdatesNow() {
+        guard let app else { return }
+        Task {
+            do {
+                switch try await app.updates.check() {
+                case .newer(let release):
+                    let alert = NSAlert()
+                    alert.messageText = "Gitrasil \(release.version) is available"
+                    alert.informativeText = "You have \(app.version). Its release page on GitHub has the download."
+                    alert.addButton(withTitle: "Open Release Page")
+                    alert.addButton(withTitle: "Later")
+                    NSApp.activate()
+                    if alert.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(release.page) }
+                case .upToDate:
+                    inform("Gitrasil is up to date", "\(app.version) is the newest version.")
+                case .noRelease:
+                    inform("No release found", "\(app.updates.repository) on GitHub has no published release of "
+                           + "Gitrasil yet, or isn’t public.")
+                }
+            } catch {
+                logEvent("update check: \(error)")
+                inform("Couldn’t check for updates", error.localizedDescription)
+            }
+        }
+    }
+
+    private func inform(_ message: String, _ detail: String) {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = detail
+        NSApp.activate()
+        alert.runModal()
+    }
+
     /// Gusts sway banners, so with none hanging (or the breeze turned off from outside) there's nothing
     /// to set; with nothing pinned there's nothing to grow.
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
         case #selector(toggleGusts): settings.hasBanners && !gustsOverridden
         case #selector(watchGrow), #selector(reshuffleBranches): !pins.shown.isEmpty
+        // Unregistering is always allowed, so a login item made before a move can be removed.
+        case #selector(toggleOpenAtLogin): app.map { !$0.runsFromATemporaryPlace || $0.loginItem != .off } ?? false
+        case #selector(checkForUpdatesNow): app.map { !$0.updates.isChecking } ?? false
         default: true
         }
     }
