@@ -488,7 +488,7 @@ struct TreeDrawing {
 
     /// A stem's centreline through its curve, smoothed (Catmull–Rom), sampled with widths in points:
     /// (point, width) pairs from base to tip.
-    private func outline(_ stem: TreeLayout.Stem) -> [(point: CGPoint, width: CGFloat)] {
+    func outline(_ stem: TreeLayout.Stem) -> [(point: CGPoint, width: CGFloat)] {
         let nodes = stem.curve
         guard nodes.count >= 2 else { return [] }
         let points = nodes.map { frame.point($0.point) }
@@ -526,6 +526,18 @@ struct TreeDrawing {
             samples = samples.map { point, width in
                 let h = frame.origin.y - point.y
                 return (point, h < flare ? width * (1 + 0.8 * pow(1 - h / flare, 2)) : width)
+            }
+        }
+        // Every stem but a shared trunk narrows to a point at its end, as it's drawn now: a limb still
+        // growing tapers to wherever it has got to.
+        if stem.tapersToTip, samples.count >= 2 {
+            var toTip = [CGFloat](repeating: 0, count: samples.count)
+            for i in samples.indices.reversed().dropFirst() {
+                toTip[i] = toTip[i + 1] + hypot(samples[i + 1].0.x - samples[i].0.x, samples[i + 1].0.y - samples[i].0.y)
+            }
+            let taper = stem.tipTaper
+            for i in samples.indices {
+                samples[i].1 *= CGFloat(taper.factor(distanceToTip: Double(toTip[i] / frame.scale)))
             }
         }
         return samples.map { (point: $0.0, width: max($0.1, 0.9)) }

@@ -294,4 +294,200 @@ final class TreeLayoutTests: XCTestCase {
         XCTAssertLessThan(TreeLayout.growIn(0.1), 0.1)
         XCTAssertGreaterThan(TreeLayout.growIn(0.9), 0.9)
     }
+
+    // MARK: Tips
+
+    /// A tree like a long-lived repository's: a 200-commit trunk, limbs from one commit to a dozen, a
+    /// limb with a sub-limb leaving at its very last commit, a bud, and a limb at the trunk's tip.
+    private func thicket() -> RepoTree {
+        let limbs = [
+            RepoTree.Limb(name: "one", commits: commits("a", 1), parent: .trunk(node: 60), isCheckedOut: false),
+            RepoTree.Limb(name: "long", commits: commits("b", 12), parent: .trunk(node: 80), isCheckedOut: false),
+            RepoTree.Limb(name: "long-sub", commits: commits("c", 3), parent: .limb(index: 1, node: 12), isCheckedOut: false),
+            RepoTree.Limb(name: "bud", commits: [], parent: .trunk(node: 40), isCheckedOut: false),
+            RepoTree.Limb(name: "mid", commits: commits("d", 5), parent: .trunk(node: 140), isCheckedOut: true),
+            RepoTree.Limb(name: "at-the-tip", commits: commits("e", 2), parent: .trunk(node: 200), isCheckedOut: false)
+        ]
+        return RepoTree(trunkName: "main", trunk: commits("t", 200), limbs: limbs, isTrunkCheckedOut: true)
+    }
+
+    /// A stem's width at its very end, as drawn: the tapered tip.
+    private func tipWidth(_ stem: TreeLayout.Stem) -> Double {
+        (stem.curve.last?.width ?? 0) * stem.tipTaper.factor(distanceToTip: 0)
+    }
+
+    /// The stem's end is a point: under 0.002 of the trunk's height (2 pt on a tree drawn a thousand
+    /// points tall), where its untapered end was 3–10.
+    private func assertPoint(_ stem: TreeLayout.Stem, _ message: String = "", line: UInt = #line) {
+        XCTAssertLessThan(tipWidth(stem), 0.002, message, line: line)
+    }
+
+    func testTheTaperEasesInAndEndsInAPoint() {
+        let taper = TreeLayout.TipTaper(stemLength: 1) { _ in 0.01 }
+        XCTAssertGreaterThan(taper.length, 0)
+        XCTAssertEqual(taper.factor(distanceToTip: taper.length), 1, accuracy: 1e-12)
+        XCTAssertEqual(taper.factor(distanceToTip: taper.length * 3), 1, "full width before it starts")
+        XCTAssertLessThan(taper.factor(distanceToTip: 0), 0.05, "a fine point at the end")
+        XCTAssertGreaterThan(taper.factor(distanceToTip: 0), 0, "never quite nothing")
+        XCTAssertGreaterThan(taper.factor(distanceToTip: taper.length * 0.97), 0.995, "no corner where it starts")
+        var last = 0.0
+        for step in 0...40 {
+            let f = taper.factor(distanceToTip: taper.length * Double(step) / 40)
+            XCTAssertGreaterThanOrEqual(f, last, "narrower the nearer the end")
+            last = f
+        }
+    }
+
+    func testALimbForkingInsideItsParentsTaperFlaresIntoTheThinWoodThatsThere() {
+        let limbs = [
+            RepoTree.Limb(name: "parent", commits: commits("p", 5), parent: .trunk(node: 30), isCheckedOut: false),
+            RepoTree.Limb(name: "child", commits: commits("c", 3), parent: .limb(index: 0, node: 4), isCheckedOut: false),
+            RepoTree.Limb(name: "at-the-end", commits: commits("e", 2), parent: .limb(index: 0, node: 5), isCheckedOut: false)
+        ]
+        let layout = TreeLayout(tree: RepoTree(trunkName: "main", trunk: commits("t", 60), limbs: limbs, isTrunkCheckedOut: false),
+                                seed: "ash")
+        let parent = stem(layout, "parent")!
+        for (name, node) in [("child", 4), ("at-the-end", 5)] {
+            let child = stem(layout, name)!, fork = child.fork!
+            let wood = parent.nodes[node]
+            XCTAssertEqual(fork.node, node)
+            XCTAssertEqual(fork.width, wood.width * parent.taperFactor(at: wood.point), accuracy: 1e-12)
+            XCTAssertLessThan(fork.width, wood.width, "\(name) forks in the taper, where the parent is narrower than its nodes say")
+            // What the child's base flares to is bounded by the wood drawn there, not the wood that
+            // would have been (it was 1.5× the parent's drawn width before).
+            let own = child.nodes[0].width
+            let flared = TreeLayout.collarWidth(at: 0, own: own, parentWidth: fork.width, angle: 0.8)
+            XCTAssertLessThanOrEqual(flared, max(own, fork.width) + 1e-12, name)
+        }
+        XCTAssertEqual(stem(layout, "at-the-end")!.fork!.width, parent.nodes[5].width * TreeLayout.TipTaper.point, accuracy: 1e-9,
+                       "a limb leaving at the very end leaves a point")
+        // A fork well back from the end, and a trunk's, are as wide as the pipe model says.
+        let long = TreeLayout(tree: thicket(), seed: "ash")
+        XCTAssertEqual(stem(long, "one")!.fork!.width, long.stems[0].nodes[60].width, accuracy: 1e-12)
+        XCTAssertEqual(stem(long, "long-sub")!.fork!.width, stem(long, "long")!.nodes[12].width * TreeLayout.TipTaper.point, accuracy: 1e-9)
+        XCTAssertEqual(long.stems[0].taperFactor(at: long.stems[0].curve[0].point), 1, accuracy: 1e-12, "a trunk's foot is untouched")
+        XCTAssertEqual(stem(long, "at-the-tip")!.fork!.width, long.stems[0].nodes[200].width * TreeLayout.TipTaper.point, accuracy: 1e-9)
+    }
+
+    func testAStemWithNothingGrownYetHasNoTaperAndDoesNotTrap() {
+        let tree = thicket()
+        // Growing in from nothing: every limb (and the trunk) has an empty curve, and some a single point.
+        let start = TreeLayout(tree: tree, seed: "ash", growIn: 0)
+        XCTAssertTrue(start.stems.contains { $0.curve.isEmpty }, "the layout does hand out empty stems at 0")
+        for growIn in [0.0, 0.0001, 0.02] {
+            for stem in TreeLayout(tree: tree, seed: "ash", growIn: growIn).stems where stem.curve.count < 2 {
+                XCTAssertEqual(stem.tipTaper.length, 0)
+                XCTAssertEqual(stem.tipTaper.factor(distanceToTip: 0), 1, "no taper to apply")
+                XCTAssertEqual(stem.taperFactor(at: .zero), 1)
+            }
+        }
+    }
+
+    func testEveryStemEndsInAFinePointNarrowerThanTheLayoutsFloor() {
+        let layout = TreeLayout(tree: thicket(), seed: "ash")
+        // The pipe model's narrowest: a limb's last node is never below this.
+        let floor = TreeLayout.width(weight: 0.5)
+        for stem in layout.stems {
+            XCTAssertTrue(stem.tapersToTip, stem.name ?? "?")
+            XCTAssertGreaterThan(stem.curve.last?.width ?? 0, floor * 0.99, "the layout's own widths keep their floor (\(stem.name ?? "?"))")
+            assertPoint(stem, "\(stem.name ?? "?") ends in a point")
+        }
+    }
+
+    func testAShortLimbIsAThornPointedOverMostOfItsLength() {
+        let layout = TreeLayout(tree: thicket(), seed: "ash")
+        for name in ["one", "bud"] {
+            let short = stem(layout, name)!
+            let length = zip(short.curve, short.curve.dropFirst()).reduce(0.0) {
+                $0 + hypot($1.1.point.x - $1.0.point.x, $1.1.point.y - $1.0.point.y)
+            }
+            XCTAssertGreaterThan(short.tipTaper.length, length * 0.6, "\(name) narrows over most of its length")
+            XCTAssertLessThanOrEqual(short.tipTaper.length, length * 0.85 + 1e-12, "but keeps a base")
+            let halfway = short.curve[short.curve.count / 2].width
+                * short.tipTaper.factor(distanceToTip: length / 2)
+            XCTAssertLessThan(halfway, short.curve[0].width, "\(name) is already narrower than its base halfway out")
+        }
+    }
+
+    func testAWideTrunkTopTapersOverALongerStretchThanAFineTwig() {
+        let layout = TreeLayout(tree: thicket(), seed: "ash")
+        let trunk = layout.stems[0], floor = TreeLayout.width(weight: 0.5)
+        XCTAssertGreaterThan(trunk.curve.last!.width, floor, "the trunk's top is wider than a limb's end")
+        XCTAssertGreaterThan(trunk.tipTaper.length, TreeLayout.TipTaper.reach * trunk.curve.last!.width,
+                             "it's asked where the taper would start, and that's wider than at the tip")
+        assertPoint(trunk)
+    }
+
+    func testALimbWithASubLimbAtItsEndStillEndsInAPoint() {
+        let layout = TreeLayout(tree: thicket(), seed: "ash")
+        let long = stem(layout, "long")!
+        XCTAssertGreaterThan(long.curve.last!.width, TreeLayout.width(weight: 0.5) * 1.5, "carries its sub-limb to the end")
+        assertPoint(long)
+    }
+
+    func testAStemStillGrowingTapersToWhereItHasGot() {
+        let tree = thicket()
+        func length(_ stem: TreeLayout.Stem) -> Double {
+            zip(stem.curve, stem.curve.dropFirst()).reduce(0.0) { $0 + hypot($1.1.point.x - $1.0.point.x, $1.1.point.y - $1.0.point.y) }
+        }
+        let finished = TreeLayout(tree: tree, seed: "ash")
+        for growIn in [0.1, 0.35, 0.6, 0.85] {
+            let layout = TreeLayout(tree: tree, seed: "ash", growIn: growIn)
+            for stem in layout.stems where stem.curve.count >= 2 {
+                let name = "\(stem.name ?? "?") at \(growIn)"
+                assertPoint(stem, "\(name) is cut at a width the finished stem only has there")
+                // The taper is sized to the stem as grown so far, not the finished one: it never
+                // outruns what's there, and the cut wood is wider than the point it's tapered to.
+                XCTAssertLessThanOrEqual(stem.tipTaper.length, TreeLayout.TipTaper.share * length(stem) + 1e-12, name)
+                XCTAssertEqual(tipWidth(stem), TreeLayout.TipTaper.point * stem.curve.last!.width, accuracy: 1e-12, name)
+                if let whole = finished.stems.first(where: { $0.name == stem.name }), stem.curve.count < whole.curve.count {
+                    XCTAssertLessThan(length(stem), length(whole), name)
+                    XCTAssertLessThan(stem.tipTaper.length, length(whole), name)
+                }
+            }
+        }
+        // A limb a few commits into growing new ones, as the model grows it.
+        let partway = TreeLayout(tree: tree, seed: "ash", grown: ["long": 4.5])
+        let long = stem(partway, "long")!, whole = stem(finished, "long")!
+        XCTAssertEqual(long.grown, 4.5)
+        assertPoint(long)
+        XCTAssertGreaterThan(long.tipTaper.length, 0)
+        XCTAssertLessThan(length(long), length(whole), "cut part way")
+        XCTAssertGreaterThan(long.curve.last!.width, whole.curve.last!.width, "nearer the base, so thicker where it's cut")
+        XCTAssertLessThanOrEqual(long.tipTaper.length, TreeLayout.TipTaper.share * length(long) + 1e-12)
+    }
+
+    func testTheTaperLeavesTheLayoutAlone() {
+        // It's applied as the wood is drawn: the nodes and curves are the pipe model's, as before.
+        let layout = TreeLayout(tree: thicket(), seed: "ash")
+        for stem in layout.stems { XCTAssertEqual(stem.curve.last, stem.nodes.last) }
+        XCTAssertEqual(stem(layout, "mid")?.nodes.last?.width ?? 0, TreeLayout.width(weight: 0.5), accuracy: 1e-12,
+                       "a childless limb still ends at the pipe model's floor")
+        // Each stem's last node as the layout placed it before the taper existed (recorded from main's
+        // node code, seed "ash"): x, y, width, heading.
+        let reference: [String: (x: Double, y: Double, width: Double, heading: Double)] = [
+            "main": (-0.02418423723063762, 1.0, 0.009474613391789283, -0.19116934729886464),
+            "one": (0.11883403307590866, 0.2861449896463577, 0.0051698484809835, 1.371484349456287),
+            "long": (0.4150207686886316, 0.7146781253086606, 0.010057480512225277, 0.26482676974655917),
+            "long-sub": (0.5372990508776461, 0.8556055366900073, 0.0051698484809835, 0.3732906309769736),
+            "bud": (-0.043805863975013154, 0.2654437674648494, 0.0051698484809835, -1.1297895137932747),
+            "mid": (-0.28674206045614836, 0.5975649663122765, 0.0051698484809835, -0.6277416490021319),
+            "at-the-tip": (-0.06234631035974431, 1.1099887859424826, 0.0051698484809835, -0.19271984873604858)
+        ]
+        XCTAssertEqual(Set(layout.stems.compactMap(\.name)), Set(reference.keys))
+        for (name, expected) in reference {
+            guard let last = stem(layout, name)?.nodes.last else { return XCTFail("no \(name)") }
+            XCTAssertEqual(last.point.x, expected.x, accuracy: 1e-9, name)
+            XCTAssertEqual(last.point.y, expected.y, accuracy: 1e-9, name)
+            XCTAssertEqual(last.width, expected.width, accuracy: 1e-9, name)
+            XCTAssertEqual(last.heading, expected.heading, accuracy: 1e-9, name)
+        }
+    }
+
+    func testASharedTrunkEndsInItsBoughsNotAPoint() {
+        let repo = YggdrasilLayout.Repo(name: "ash", tree: thicket())
+        let layout = YggdrasilLayout(repos: [repo, YggdrasilLayout.Repo(name: "elm", tree: tree())])
+        XCTAssertFalse(layout.trunk.tapersToTip)
+        for bough in layout.boughs { XCTAssertTrue(bough.layout.stems[0].tapersToTip, "a bough's trunk is a tree's and ends in a point") }
+    }
 }

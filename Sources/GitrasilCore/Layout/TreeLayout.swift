@@ -45,9 +45,50 @@ public struct TreeLayout: Sendable {
 
         public var isTrunk: Bool { level == 0 }
         public var tip: Node? { nodes.last }
+
+        /// Whether the stem ends in a point (`TipTaper`). Every stem does but a shared trunk, which has
+        /// no commits of its own and ends in the boughs it carries.
+        public var tapersToTip: Bool { !(isTrunk && commits.isEmpty && !isBud) }
+
+        /// How this stem narrows to its end, as drawn (its curve as grown so far).
+        public var tipTaper: TipTaper {
+            // Nothing grown yet, or a single point: no length to taper over.
+            guard curve.count >= 2 else { return TipTaper(stemLength: 0) { _ in 0 } }
+            let backwards = Array(curve.reversed())
+            var ends = [0.0] // each node's distance from the end
+            for (a, b) in zip(backwards, backwards.dropFirst()) {
+                ends.append(ends[ends.count - 1] + hypot(b.point.x - a.point.x, b.point.y - a.point.y))
+            }
+            return TipTaper(stemLength: ends.last ?? 0) { distance in
+                guard let i = ends.firstIndex(where: { $0 >= distance }) else { return backwards.last?.width ?? 0 }
+                guard i > 0 else { return backwards[0].width }
+                let f = (distance - ends[i - 1]) / max(ends[i] - ends[i - 1], 1e-12)
+                return backwards[i - 1].width + (backwards[i].width - backwards[i - 1].width) * f
+            }
+        }
+
+        /// How much of its width the stem keeps, as drawn, at the point of its curve nearest `point`: 1
+        /// well back from its end, narrowing to `TipTaper.point` at it. 1 for a stem that doesn't taper
+        /// or has no length yet.
+        public func taperFactor(at point: CGPoint) -> Double {
+            guard tapersToTip, curve.count >= 2 else { return 1 }
+            let nearest = curve.indices.min { a, b in
+                hypot(curve[a].point.x - point.x, curve[a].point.y - point.y)
+                    < hypot(curve[b].point.x - point.x, curve[b].point.y - point.y)
+            }!
+            var toTip = 0.0
+            for i in nearest..<(curve.count - 1) {
+                toTip += hypot(curve[i + 1].point.x - curve[i].point.x, curve[i + 1].point.y - curve[i].point.y)
+            }
+            return tipTaper.factor(distanceToTip: toTip)
+        }
     }
 
     /// Where a stem leaves its parent: what its base flares into (`collarWidth`).
+    ///
+    /// `width` is the parent's width *as drawn* there: its pipe-model width, narrowed by its own taper
+    /// (`Stem.taperFactor(at:)`) where the fork lies in it, so a limb forking near its parent's end
+    /// flares into the thin wood that's there, not into the wood the parent would have had.
     public struct Fork: Sendable, Equatable {
         /// The parent's index in `stems`; nil when the parent isn't in this layout (a bough's shared
         /// trunk).
@@ -219,7 +260,8 @@ public struct TreeLayout: Sendable {
                 lean = side * ((88 - 48 * u) + rng.next(in: -12...12)) * .pi / 180
                     + (planting.isUpright ? 0 : base.heading * 0.7)
                 parentGrown = .infinity
-                fork = Fork(parent: 0, node: min(node, trunkNodes.count - 1), width: base.width, heading: base.heading)
+                fork = Fork(parent: 0, node: min(node, trunkNodes.count - 1),
+                            width: base.width * stems[0].taperFactor(at: base.point), heading: base.heading)
             case .limb(let parentIndex, let node):
                 // `RepoTree` puts a limb's parent before it; a limb whose parent isn't laid out yet
                 // (or at all) is left out rather than crashing.
@@ -235,7 +277,7 @@ public struct TreeLayout: Sendable {
                 lean = base.heading + childSide * rng.next(in: 28...50) * .pi / 180
                 parentGrown = parent.grown >= Double(node) ? .infinity : 0
                 fork = Fork(parent: stemIndex[parentIndex], node: min(node, parent.nodes.count - 1),
-                            width: base.width, heading: base.heading)
+                            width: base.width * parent.taperFactor(at: base.point), heading: base.heading)
             }
             let full = Double(max(limb.commits.count, 1))
             var shown = min(full, grown[limb.name] ?? full, parentGrown)
@@ -501,6 +543,41 @@ public struct TreeLayout: Sendable {
             length = (k == 1 ? step * scale : length * stepDecay)
         }
         return (nodes, curve)
+    }
+
+    /// How a stem narrows to a point at its end. The layout's widths (the pipe model) never get below
+    /// a floor at the last node, which drawn as is leaves a flat cut, so the drawing multiplies a
+    /// stem's width by `factor` over its last `length`: from 1 where the taper starts (easing in, so
+    /// there's no corner there) to a fine point at the very end.
+    public struct TipTaper: Sendable, Equatable {
+        /// How far from the end the taper starts, in tree units.
+        public let length: Double
+
+        /// The taper is this many times the stem's width where it starts, ...
+        static let reach = 12.0
+        /// ... but at most this much of the stem, so a short limb or a bud is a thorn: pointed over
+        /// nearly all of it, rather than a stub with a point on.
+        static let share = 0.85
+        /// The factor at the very end: a point as fine as a line.
+        static let point = 0.04
+
+        /// - Parameters:
+        ///   - stemLength: how long the stem is as drawn (as grown so far, while it's growing).
+        ///   - widthAt: the stem's width, before tapering, `distance` from its end. It's asked where
+        ///     the taper would start, so a stem that's still wide a little way back (a trunk's top)
+        ///     tapers over a longer stretch than one that's already fine.
+        public init(stemLength: Double, widthAt: (Double) -> Double) {
+            var length = Self.reach * widthAt(0)
+            for _ in 0..<2 { length = Self.reach * widthAt(min(length, stemLength)) }
+            self.length = max(min(length, Self.share * stemLength), 0)
+        }
+
+        /// The width's multiplier `distance` from the end (0 at the end; 1 from `length` on).
+        public func factor(distanceToTip distance: Double) -> Double {
+            guard length > 0, distance < length else { return 1 }
+            let s = max(distance / length, 0)
+            return Self.point + (1 - Self.point) * sin(s * .pi / 2)
+        }
     }
 
     /// A branch collar: how wide a stem is drawn `distance` along it from its fork (tree units), where
