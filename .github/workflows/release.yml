@@ -1,0 +1,222 @@
+# Release: when a version tag (v + VERSION) on main is pushed, build Gitrasil.app, package it, and
+# attach the zip, DMG and checksums to a draft release for Daniel to read and publish
+# (docs/distribution.md). The update check only sees published releases, so nothing reaches anyone
+# until it's published.
+#
+# With no secrets it ships the app ad-hoc signed (the build job, which sees no secrets). Two switches,
+# both off until Daniel turns them on (docs/distribution.md lists what to set up first):
+#   - Developer ID signing and notarization: repository variable MACOS_SIGNING = true, and in the
+#     `release` environment (limited to v* tags) the secrets DEVELOPER_ID_P12 (base64 of the .p12),
+#     DEVELOPER_ID_P12_PASSWORD, NOTARY_KEY_P8 (base64 of the App Store Connect API key's .p8),
+#     NOTARY_KEY_ID and NOTARY_ISSUER_ID. The sign job then builds again, signed and notarized.
+#   - A separate public releases repository: repository variable RELEASES_REPO (owner/name) and secret
+#     RELEASES_TOKEN (a fine-grained token with Contents: write on that repository only).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  # Run again by hand on a tag ("Use workflow from" the tag), to replace a draft's files.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.ref_name }}
+  # Where the release goes, and so where the app's update check looks.
+  RELEASES_REPO: ${{ vars.RELEASES_REPO || github.repository }}
+
+jobs:
+  # Tested, built ad-hoc and packaged, with no secrets in reach.
+  build:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      # The Xcode CI tests with (.github/workflows/ci.yml), not whichever the image defaults to.
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # the whole history, to check the tag is on main
+
+      - name: Check the tag is v + VERSION, on main
+        id: version
+        run: |
+          if [[ $GITHUB_REF_TYPE != tag ]]; then
+            echo "::error::Run this on a version tag, not a branch"
+            exit 1
+          fi
+          version=$(tr -d '[:space:]' < VERSION)
+          if [[ $TAG != "v$version" ]]; then
+            echo "::error::The tag $TAG doesn't match VERSION ($version): tag the release v$version"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::$TAG isn't on main: release only what's been merged"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Test
+        run: swift test
+
+      - name: Build Gitrasil.app
+        run: scripts/build-app.sh
+
+      - name: Package
+        run: scripts/package-app.sh
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ad-hoc
+          path: |
+            dist/Gitrasil-*.zip
+            dist/Gitrasil-*.dmg
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+  # Developer ID: only when MACOS_SIGNING is true, and only with the release environment's secrets.
+  sign:
+    needs: build
+    if: vars.MACOS_SIGNING == 'true'
+    runs-on: macos-26
+    timeout-minutes: 60
+    environment: release
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Import the Developer ID certificate
+        id: certificate
+        env:
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          KEYCHAIN=$RUNNER_TEMP/signing.keychain-db
+          password=$(uuidgen)
+          security create-keychain -p "$password" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$password" "$KEYCHAIN"
+          base64 --decode <<< "$DEVELOPER_ID_P12" > "$RUNNER_TEMP/developer-id.p12"
+          security import "$RUNNER_TEMP/developer-id.p12" -k "$KEYCHAIN" -P "$DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/developer-id.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$KEYCHAIN" > /dev/null
+          keychains=("$KEYCHAIN")
+          while IFS= read -r line; do
+            line=${line#"${line%%[![:space:]]*}"}
+            keychains+=("${line//\"/}")
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "${keychains[@]}"
+          identity=$(security find-identity -v -p codesigning "$KEYCHAIN" | awk -F'"' '/Developer ID Application/ { print $2; exit }')
+          if [[ -z $identity ]]; then
+            echo "::error::DEVELOPER_ID_P12 holds no Developer ID Application certificate"
+            exit 1
+          fi
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+
+      - name: Build Gitrasil.app, signed
+        env:
+          CODESIGN_IDENTITY: ${{ steps.certificate.outputs.identity }}
+        run: scripts/build-app.sh
+
+      - name: Notarize the app
+        env:
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          export NOTARY_KEY_PATH=$RUNNER_TEMP/notary.p8
+          base64 --decode <<< "$NOTARY_KEY_P8" > "$NOTARY_KEY_PATH"
+          scripts/notarize.sh dist/Gitrasil.app
+
+      - name: Package, signing the DMG
+        env:
+          CODESIGN_IDENTITY: ${{ steps.certificate.outputs.identity }}
+        run: scripts/package-app.sh
+
+      - name: Notarize the DMG
+        env:
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          NOTARY_KEY_PATH=$RUNNER_TEMP/notary.p8 scripts/notarize.sh "dist/Gitrasil-$VERSION.dmg"
+          # Stapling changed the DMG.
+          (cd dist && shasum -a 256 "Gitrasil-$VERSION.zip" "Gitrasil-$VERSION.dmg" > SHA256SUMS)
+
+      - name: Remove the signing keychain and key
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/notary.p8"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed
+          path: |
+            dist/Gitrasil-*.zip
+            dist/Gitrasil-*.dmg
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+  # The signed files when signing is on, else the ad-hoc ones, on a draft release.
+  publish:
+    needs: [build, sign]
+    if: always() && needs.build.result == 'success' && (needs.sign.result == 'success' || needs.sign.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      SIGNED: ${{ needs.sign.result == 'success' }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.sign.result == 'success' && 'signed' || 'ad-hoc' }}
+          path: dist
+
+      - name: Attach to a draft release
+        env:
+          GH_TOKEN: ${{ vars.RELEASES_REPO && secrets.RELEASES_TOKEN || github.token }}
+        run: |
+          files=("dist/Gitrasil-$VERSION.zip" "dist/Gitrasil-$VERSION.dmg" dist/SHA256SUMS)
+          if draft=$(gh release view "$TAG" --repo "$RELEASES_REPO" --json isDraft --jq .isDraft 2> /dev/null); then
+            # Run again: replace a draft's files, never a published release's.
+            if [[ $draft != true ]]; then
+              echo "::error::$TAG is already published in $RELEASES_REPO; release a new version instead"
+              exit 1
+            fi
+            gh release upload "$TAG" "${files[@]}" --repo "$RELEASES_REPO" --clobber
+            exit 0
+          fi
+          {
+            echo "**Install:** download Gitrasil-$VERSION.zip, open it, and drag Gitrasil to Applications. Needs macOS 14 or later."
+            echo
+            if [[ $SIGNED == true ]]; then
+              echo "The first time it opens, macOS asks whether to open an app downloaded from the internet: click Open."
+            else
+              echo "This build isn't notarized by Apple, so the first time you open it (and each new version) macOS says it can't verify it."
+              echo "Click Done, then in System Settings → Privacy & Security, scroll down and click **Open Anyway** next to “Gitrasil” was blocked."
+            fi
+          } > "$RUNNER_TEMP/notes.md"
+          notes=(--notes-file "$RUNNER_TEMP/notes.md")
+          # GitHub writes the changes since the last release, from this repository's pull requests.
+          [[ $RELEASES_REPO == "$GITHUB_REPOSITORY" ]] && notes+=(--generate-notes)
+          gh release create "$TAG" "${files[@]}" --repo "$RELEASES_REPO" --draft --title "Gitrasil $VERSION" "${notes[@]}"
