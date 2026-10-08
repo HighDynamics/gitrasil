@@ -70,7 +70,7 @@ Written from `packaging/Info.plist` with the version filled in:
 
 | Key | Value | Why |
 | --- | --- | --- |
-| `CFBundleIdentifier` | `com.gitrasil.Gitrasil` | Fixed for good after the first release: login items, privacy grants and updates are tied to it. Deliberately not `com.gitrasil.background`, the defaults suite: a suite can't share the app's own identifier. |
+| `CFBundleIdentifier` | `io.github.highdynamics.Gitrasil` | Fixed for good after the first release: login items, privacy grants and updates are tied to it. Deliberately not `com.gitrasil.background`, the defaults suite: a suite can't share the app's own identifier. |
 | `CFBundleName`, `CFBundleDisplayName` | `Gitrasil` | What Spotlight and Finder show. |
 | `CFBundleExecutable` | `Gitrasil` | |
 | `CFBundleShortVersionString`, `CFBundleVersion` | from `VERSION` | One source of truth (below). |
@@ -277,7 +277,7 @@ defaults delete gitrasil-try            # afterwards, the throwaway suite
 - **Spotlight** indexes an app wherever it is in an indexed folder, but not under a hidden one: built
   in a worktree in `.claude/`, `mdls` reads the app's metadata (kind Application, name Gitrasil) but
   `mdfind` doesn't find it. After `--install` (or built in the main checkout's `dist/`), type
-  *Gitrasil* in Spotlight; `mdfind "kMDItemCFBundleIdentifier == 'com.gitrasil.Gitrasil'"` shows
+  *Gitrasil* in Spotlight; `mdfind "kMDItemCFBundleIdentifier == 'io.github.highdynamics.Gitrasil'"` shows
   where it's indexed.
 - **Gatekeeper, as a downloader sees it**: download the zip from a draft release in a browser (or
   `xattr -w com.apple.quarantine "0081;$(printf %x $(date +%s));Safari;" Gitrasil.app` on a copy),
@@ -306,6 +306,6 @@ Made (October 2026):
 
 Open:
 
-5. **Bundle identifier** — `com.gitrasil.Gitrasil` is permanent after the first release, so it's
+5. **Bundle identifier** — `io.github.highdynamics.Gitrasil` is permanent after the first release, so it's
    settled before the first tag. Changing it is `CFBundleIdentifier` in `packaging/Info.plist` and
    the update check's scheduler identifier in `AppServices.swift`.

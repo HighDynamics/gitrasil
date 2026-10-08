@@ -12,7 +12,7 @@ final class AppServices {
     let version: ReleaseVersion
     /// Whether a newer release is out (opt-in, at most daily).
     let updates: UpdateCheck
-    private let scheduler = NSBackgroundActivityScheduler(identifier: "com.gitrasil.Gitrasil.update-check")
+    private let scheduler = NSBackgroundActivityScheduler(identifier: "io.github.highdynamics.Gitrasil.update-check")
 
     /// The app's services, or nil when it isn't running as an app. The update check looks at the
     /// repository the Info.plist names; GITRASIL_RELEASES_REPOSITORY points it at another, to try it.
