@@ -168,9 +168,10 @@ public final class RepoGraphStore {
         let commonURL = (common.hasPrefix("/") ? URL(fileURLWithPath: common)
                          : repositoryURL.appendingPathComponent(common, isDirectory: true)).standardizedFileURL
         let watcher = FSEventsWatcher(paths: [commonURL.path], latency: 0.3,
-                                      filter: { RepoGraphStore.isRefPath($0) }) { [weak self] in
-            Task { @MainActor in self?.refsChanged() }
-        }
+                                      filter: { RepoGraphStore.isRefPath($0) },
+                                      onChange: { [weak self] in
+                                          Task { @MainActor in self?.refsChanged() }
+                                      })
         self.watcher = watcher
         watcher.start()
     }

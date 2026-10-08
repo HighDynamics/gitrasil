@@ -130,7 +130,9 @@ final class TreeLayoutTests: XCTestCase {
     }
 
     func testLimbsOffTheTrunkBalanceTheCrown() {
-        let limbs = (0..<8).map { RepoTree.Limb(name: "b\($0)", commits: commits("c\($0)", 2), parent: .trunk(node: 10 + $0 * 3), isCheckedOut: false) }
+        let limbs = (0..<8).map {
+            RepoTree.Limb(name: "b\($0)", commits: commits("c\($0)", 2), parent: .trunk(node: 10 + $0 * 3), isCheckedOut: false)
+        }
         let sides = TreeLayout.sides(RepoTree(trunkName: "main", trunk: commits("t", 40), limbs: limbs, isTrunkCheckedOut: false))
         var lean = 0.0
         for side in sides {

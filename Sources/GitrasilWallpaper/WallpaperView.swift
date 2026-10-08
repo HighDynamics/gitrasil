@@ -22,8 +22,10 @@ struct WallpaperView: View {
         let seeds = PinnedRepositories.seeds(panes.map(\.repoURL))
         // Read each pane here so Observation redraws when one publishes a new tree or growth, and
         // when the scene stops waiting for its trees.
+        // swiftlint:disable:next redundant_discardable_let - `_ =` would be a view in a ViewBuilder
         let _ = background.isAwaitingTrees
         let growing = background.isGrowingIn || panes.contains { pane in
+            // swiftlint:disable:next redundant_discardable_let - `_ =` would be a view in a ViewBuilder
             let _ = (pane.tree, pane.growth, pane.problem)
             return pane.growthStart != nil
         }
@@ -179,6 +181,7 @@ struct WallpaperView: View {
 /// starting or ending, a grow-in, the hourly tick).
 final class PlanCache {
     struct Key: Equatable {
+        // swiftlint:disable:next nesting - a helper of Key alone, nowhere else to put it
         struct Tree: Equatable {
             let id: String
             let tree: RepoTree?
@@ -859,6 +862,7 @@ struct TreeDrawing {
         tints.clip(to: Path(bounds.insetBy(dx: -2, dy: -2)))
         tints.drawLayer { layer in
             // Per stem: the base and tip of its gradient, where it starts and with what, and its ink.
+            // swiftlint:disable:next large_tuple - a throwaway record local to this closure
             var ramps: [(base: CGPoint, tip: CGPoint, from: Double, start: Double, ink: Color, alpha: Double)?] = []
             for (index, stem) in stems.enumerated() {
                 guard !stem.isTrunk, let base = outlines[index].first, let tip = outlines[index].last else { ramps.append(nil); continue }

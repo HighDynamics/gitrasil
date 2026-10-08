@@ -51,7 +51,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings = BackgroundSettings(storage: MemorySettings(defaults.dictionaryRepresentation()))
         }
         let background = BackgroundModel(pins: pins, settings: settings)
-        logEvent("defaults \(suite), \(pins.pins.count) pinned (\(pins.shown.count) shown), \(settings.arrangement.rawValue), \(settings.medium.rawValue)")
+        logEvent("defaults \(suite), \(pins.pins.count) pinned (\(pins.shown.count) shown), "
+            + "\(settings.arrangement.rawValue), \(settings.medium.rawValue)")
 
         // Follows the system's light/dark mode; GITRASIL_BACKGROUND_APPEARANCE=light|dark pins one (the
         // background and the menu), to preview the other mode without changing the system setting.
