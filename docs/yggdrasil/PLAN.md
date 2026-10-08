@@ -1,6 +1,6 @@
 # Yggdrasil — plan
 
-Task (from Arbor): turn the live background from a branch graph into a tree. Main is the trunk;
+Task: turn the live background from a branch graph into a tree. Main is the trunk;
 branches and worktrees grow off it as curving, tapering limbs, with sub-branches where history
 forks again, foliage at the tips, and only branch names as text. Keep the ink-on-paper feel,
 per-branch inks, light and dark, displays, pins, ref-only watching and 0% idle.
@@ -105,7 +105,7 @@ comes from its own history (sapling vs full tree). The repo name is a plate capt
 - Unit tests for `RepoTree` (parents, fork points, buds, sub-branches) and `TreeLayout` (determinism,
   a new commit leaves existing nodes where they were, a new branch doesn't move the others).
 - Run against throwaway repos with many branches and merges, and read-only against a couple of
-  Daniel's repos in `~/repos`, pinned in a throwaway defaults suite. Screenshots of the app's own
+  the owner's repos in `~/repos`, pinned in a throwaway defaults suite. Screenshots of the app's own
   windows only, saved here.
 - `swift build` and `swift test` on the final commit.
 
@@ -115,7 +115,7 @@ Screenshots (the app's own windows only, captured by window id):
 
 - `ash-light.jpg` — the throwaway repo `ash` (144 trunk commits, 13 branches with sub-branches,
   merges, two worktrees) on the 1440×900 display, light mode.
-- `grove-dark.jpg` — `ash`, the sapling `rowan` and Daniel's `gitrasil` (read-only) as a grove on
+- `grove-dark.jpg` — `ash`, the sapling `rowan` and the owner's `gitrasil` (read-only) as a grove on
   the 3440×1440 display, dark mode.
 - `growing.jpg` — mid-growth: three commits on `spike/physics` and a new four-commit
   `feature/sprout`, a fraction of a second after the refs settled.
@@ -125,18 +125,18 @@ Findings:
 - **Updates**: a burst of three commits plus a new branch was one derive and one redraw; the two
   grown limbs animated and every other limb stayed pixel-identical.
 - **Energy**: idle afterwards was 0.0% CPU (0.01 s of CPU over 20 s), ~64 MB resident.
-- **Real repos** (pinned read-only in a throwaway suite): `dnd-app` (200 trunk commits, 14 limbs)
+- **Real repos** (pinned read-only in a throwaway suite): a large repo (200 trunk commits, 14 limbs)
   is a full tree; `gitrasil` and `love-scribe-journal` (6 trunk commits each, 7–8 limbs) are
   saplings with a crown at the top. Repos with many similarly named branches (`worktree-review-*`)
   crowd their labels; some names are left out.
-- `dnd-app`'s trunk resolves to `origin/master` (its `origin/HEAD`), so local `main` is drawn as a
+- That 200-commit repo's trunk resolves to `origin/master` (its `origin/HEAD`), so local `main` is drawn as a
   limb. That's the existing trunk detection, unchanged here.
 - `GraphLayout` is no longer used by the background; it stays in Core (with its tests) for now.
   (Removed in round 4.)
 
 ## Round 2: an orchard or a single tree
 
-Daniel (via Arbor): "I want an option to display all pinned repos as a single tree or as an
+The owner asked: "I want an option to display all pinned repos as a single tree or as an
 orchard. Otherwise, this direction seems pretty neat."
 
 **The setting.** The menu-bar menu, where the pins are, gains an *Arrange As* section: **Orchard**
@@ -189,7 +189,7 @@ Idle after a growth was 0.0% CPU, as before.
 
 ## Round 3: banners, growing in, the icon, branch collars, pins
 
-Daniel tried round 2 by hand. Five things, each its own commit.
+Trying round 2 by hand turned up five things, each its own commit.
 
 **1. Names on hanging banners.** "The branch/worktree names are often obscured by the tree itself.
 Can those be banners that 'hang off', and/or 'blow in the wind'?"
@@ -220,9 +220,9 @@ view (orchard vs single) or when I pin a new repo."
 - 2.4 s, eased, ≤30 fps in the existing TimelineView, then back to drawing only on change. Banners
   are hidden while their stem grows and fade in after. The grow-in for new commits is unchanged.
 
-**3. The menu-bar icon.** Search every branch, stash, `~/Downloads/gitrasil`, the old transcripts
-and Spotlight for the Gitrasil icon. If it's found, use it as a template image; if not, draw a small
-tree glyph as a placeholder (template, so it follows the menu bar) and say where we looked.
+**3. The menu-bar icon.** Look for the existing Gitrasil icon in the repository's branches
+and history. If it's found, use it as a template image; if not, draw a small tree glyph as a
+placeholder (template, so it follows the menu bar).
 
 **4. Branch collars.** "Can the connected branches look more integrated into the trunk? Right now it
 looks like clip art slapped on top of the trunk."
@@ -284,14 +284,7 @@ moves them onto ribbons).
 
 ![growing in](grow-in.jpg)
 
-**3. The icon.** Not found. I searched:
-- the repository (every branch, all history, no stashes);
-- `~/Downloads/gitrasil` (screenshots of the old worktree GUI and briefs);
-- the gitrasil, canopy and arbor session transcripts;
-- the Obsidian arbor notes;
-- Spotlight (`mdfind -name gitrasil`) and a `find` of `~/repos`, `~/Desktop`, `~/Documents`,
-  `~/Pictures` and `~/Downloads`;
-- the claude.ai artifacts.
+**3. The icon.** Not found in the repository (every branch, all history).
 
 `MenuBarIcon` draws a placeholder template glyph: a leafy crown with branches cut through it, on a
 trunk flaring into roots. Swap it for the real icon when that turns up. (Round 4 moves it into
@@ -322,11 +315,11 @@ wood meets wood:
 
 ## Round 4: settings, repository ribbons, the icon, and ready for review
 
-Daniel (via Arbor) kept the round 3 behaviour (the gusts, the grow-in at launch, every bough
+The owner kept the round 3 behaviour (the gusts, the grow-in at launch, every bough
 regrowing on a new pin in the single tree, folders showing their most recently active
 repositories) and asked for four things, then for the branch to be made ready for a PR. After a
-first pass he asked for the repository names to have their own setting, and for the icon to be
-recreated from a screenshot.
+first pass came a request for the repository names to have their own setting, and for the icon to
+be recreated from a screenshot.
 
 **1 and 2. Menu settings for the banners.** The menu gains a *Banners* section under *Arrange As*:
 - **Branch Names**: the branch pennants.
@@ -363,9 +356,9 @@ under the bough's first stretch.
 
 ![repository ribbons, light](repo-ribbons-light.jpg) ![repository ribbons, dark](repo-ribbons-dark.jpg)
 
-**4. The icon.** Daniel couldn't export the original, so it's recreated from his 50×54 px
+**4. The icon.** The original couldn't be exported, so it's recreated from a 50×54 px
 screenshot: a crown of four lobes with a small hole in each, a straight trunk, and a ground line
-that runs out both ways and curls up at the right end. (Arbor's brief called the ground an L; the
+that runs out both ways and curls up at the right end. (The brief called the ground an L; the
 screenshot shows it on both sides, so this follows the screenshot.) `scripts/draw-icon.swift`
 draws it as vector paths in the screenshot's own pixel coordinates and writes:
 - `Sources/GitrasilWallpaper/Resources/MenuBarIcon.pdf`, the menu-bar template: one page,
@@ -401,9 +394,9 @@ in the menu bar as a template, in the bar's own tint.
 
 ## Round 5 (spike): a hand-drawn look, and charcoal and chalk beside the ink
 
-Daniel (via Arbor): every border and edge is very precise; he'd like the look more hand-drawn,
-and to see the ink on cream as charcoal or chalk. An exploration: build both so he can compare
-them with the ink, then he picks. Branch `spike/hand-drawn`, cut from `main` (97d243f).
+The owner asked for a more hand-drawn look, since every border and edge was very precise, and to
+see the ink on cream as charcoal or chalk. An exploration: build both so they can be compared with
+the ink, then one is picked. Branch `spike/hand-drawn`, cut from `main` (97d243f).
 
 Kept as decided: a distinct colour per branch, the organic shapes, names at the tips, older commits
 fading, the orchard and the single tree, the gusts.
@@ -498,15 +491,15 @@ redraw (the layered wood and the grain pass) and 2–4 ms to the banners.
 
 ### Decided (Oct 7)
 
-Daniel picked **chalk as the default**: with no `medium` saved (or an unreadable one), the
+The owner picked **chalk as the default**: with no `medium` saved (or an unreadable one), the
 background is chalk; a saved choice is kept, and ink and charcoal stay in the menu. No screenshots
 go in the repo: the media are described in words above.
 
 ## Round 6: seamless joins in every medium, and gusts off by default
 
-Daniel (Oct 7), after a few days with the hand-drawn look in chalk: "finesse the connecting branches
+The owner (Oct 7), after a few days with the hand-drawn look in chalk: "finesse the connecting branches
 again in all of the aesthetics. It's obvious they are being stacked again with the opacity drop in
-some of the aesthetics." And gusts should be off unless he turns them on. Branch `joins-and-gusts`,
+some of the aesthetics." And gusts should be off unless turned on. Branch `joins-and-gusts`,
 from `main` (a54582c).
 
 **What's stacking.** Rounds 2 and 3 made the ink's wood one shape in one layer, so wood meeting wood
@@ -629,7 +622,7 @@ and no gust timer runs; a saved choice (on or off) is kept.
 
 ## Round 7: the whole tree animated, re-growing on demand, reshuffled branches, a gust at once
 
-Daniel (Oct 7), via Arbor: "The tree(s) draw up to a certain point, and then the rest *pops* in. Can
+The owner (Oct 7): "The tree(s) draw up to a certain point, and then the rest *pops* in. Can
 the whole thing be animated?" "When a repo is dropped from the selections, everything should be
 re-animated instead of just one tree or branch poofing away." "Add a 'Watch Gitrasil Grow' option
 that redraws the whole thing (just for fun)." "How deterministic/random is the structure of the tree?
@@ -762,13 +755,13 @@ with nothing growing every clock is paused.
 
 ## Round 8: branch tips that look like big stubs
 
-Daniel (via Arbor): some branch ends look like big blunt stubs instead of tapering off, most on
-`dnd-app`. Branch `fix/branch-tips`, from `main` (c1f2dc1).
+Reported: some branch ends look like big blunt stubs instead of tapering off, most on
+a large repo. Branch `fix/branch-tips`, from `main` (c1f2dc1).
 
-**Reproduced.** Rendered `dnd-app` with `--snapshot` in every medium, both arrangements, in a
+**Reproduced.** Rendered that large repo with `--snapshot` in every medium, both arrangements, in a
 throwaway suite (alone, and with `love-scribe-journal` and `gitrasil`). It no longer has 14 limbs:
 its old branches have aged out of the 120-day window or are gone, so today it draws 200 trunk commits
-and three limbs. The stubs are still plain on the single tree's `dnd-app` bough, whose top is a
+and three limbs. The stubs are still plain on the large repo's bough in the single tree, whose top is a
 fat column cut off flat under its leaves, and they're there, smaller, on every limb of every tree.
 Before and after images: `tips/side-by-side-*.jpg`.
 
@@ -850,18 +843,18 @@ wrong end, the taper applied before the collar) was put in by hand and fails one
 and `swift test` (120 core and 5 wallpaper tests) pass.
 
 **Looked at.** Full 1440×900@2x renders (light mode, the throwaway instance only), before and
-after, kept outside the repo: `dnd-app` alone in every medium and both arrangements, a throwaway
+after, kept outside the repo: the large repo alone in every medium and both arrangements, a throwaway
 `thicket` repository (200 trunk commits and 11 limbs: one- and two-commit limbs, a bud, a limb with
-sub-limbs at its end) in chalk and ink, and `dnd-app` with `love-scribe-journal` and `gitrasil` as a
+sub-limbs at its end) in chalk and ink, and the large repo with `love-scribe-journal` and `gitrasil` as a
 single tree. The side-by-sides (`tips/side-by-side-*`, before on the left) are in the repo: zoomed
-crops of the dnd-app bough's top in each medium, short limbs in chalk and ink, a mid-grow-in frame,
+crops of the large repo's bough top in each medium, short limbs in chalk and ink, a mid-grow-in frame,
 and two whole screens.
 
-![dnd-app's bough, chalk](tips/side-by-side-dnd-app-bough-chalk.jpg)
+![the large repo's bough, chalk](tips/side-by-side-large-repo-bough-chalk.jpg)
 ![short limbs, ink](tips/side-by-side-short-limbs-ink.jpg)
 ![growing](tips/side-by-side-growing.jpg)
 
-**Redraw times**, median of 15 offscreen renders (ms, release, four pins: `dnd-app`, `thicket`,
+**Redraw times**, median of 15 offscreen renders (ms, release, four pins: the large repo, `thicket`,
 `love-scribe-journal`, `gitrasil`), `main` (c1f2dc1) then this branch, two runs each, light (dark is
 within 0.3 ms): no difference beyond the noise, in trees, the grow-in frame or the banners. The fork
 width adds one `taperFactor` per child stem to the layout, which doesn't show.

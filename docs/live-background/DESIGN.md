@@ -273,7 +273,7 @@ Known gaps in the spike:
 
 ## Phase 2
 
-### Decisions (Daniel, via Arbor)
+### Decisions
 
 - The worktree GUI is removed from the repo, along with SwiftTerm; it stays in git history.
 - Repos are a list the user pins from a menu-bar item, saved between launches. There's no automatic
@@ -366,7 +366,7 @@ Not covered:
 ### The pinning bug: an inherited `GIT_DIR`
 
 Daniel pinned a repo in `~/repos` and saw `gitrasil-sandbox`. A second pin was then refused as
-"already pinned, as /Users/danieldenton/gitrasil-sandbox".
+"already pinned, as ~/gitrasil-sandbox".
 
 - **Cause.** Daniel's running background had inherited `GIT_DIR=~/gitrasil-sandbox/.git` and
   `GIT_WORK_TREE=~/gitrasil-sandbox`, along with `GIT_EXTERNAL_DIFF=git-difftool--helper`,
