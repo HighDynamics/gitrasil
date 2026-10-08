@@ -8,10 +8,13 @@ import UniformTypeIdentifiers
 // Coordinates are the screenshot's pixels (y down); `draw` maps them onto any box.
 //
 // Usage: swiftc -O scripts/draw-icon.swift -o /tmp/draw-icon
-//        /tmp/draw-icon Sources/GitrasilWallpaper/Resources/MenuBarIcon.pdf docs/yggdrasil [screenshot.png]
+//        /tmp/draw-icon Sources/GitrasilWallpaper/Resources/MenuBarIcon.pdf docs/yggdrasil \
+//            [--iconset /tmp/AppIcon.iconset] [screenshot.png]
 //   writes the 18×18 pt template PDF, and in the docs folder icon-template.png and icon-colour.png;
 //   given the screenshot, also icon-compare.png (the screenshot, the glyph traced over it, the
-//   colour glyph at the same scale, and the template, side by side).
+//   colour glyph at the same scale, and the template, side by side). With --iconset, also the app
+//   icon at every size; `iconutil -c icns /tmp/AppIcon.iconset -o packaging/AppIcon.icns` makes the
+//   .icns scripts/build-app.sh puts in Gitrasil.app.
 
 let copper = CGColor(srgbRed: 187 / 255, green: 117 / 255, blue: 69 / 255, alpha: 1)
 let paper = CGColor(srgbRed: 248 / 255, green: 244 / 255, blue: 238 / 255, alpha: 1)
@@ -74,7 +77,13 @@ func save(_ image: CGImage, _ path: String) {
     CGImageDestinationFinalize(dest)
 }
 
-let args = CommandLine.arguments
+var args = CommandLine.arguments
+var iconset: String?
+if let flag = args.firstIndex(of: "--iconset"), flag + 1 < args.count {
+    iconset = args[flag + 1]
+    args.removeSubrange(flag...(flag + 1))
+}
+
 let outDir = args[2]
 
 // The template: 18×18 pt, glyph 16 pt tall, black on transparent. Holes a touch larger so they
@@ -112,6 +121,26 @@ func colourImage(_ side: Int) -> CGImage {
 
 save(templateImage(512), "\(outDir)/icon-template.png")
 save(colourImage(1024), "\(outDir)/icon-colour.png")
+
+/// The app icon: the colour icon, its tile on Apple's grid (824 of 1024, so macOS 26 shows it as
+/// drawn rather than inside a grey tile), with a soft shadow beneath so the pale tile holds its edge
+/// on a white Finder window.
+func appIconImage(_ side: Int) -> CGImage {
+    let ctx = bitmap(side, side)
+    let s = CGFloat(side)
+    ctx.setShadow(offset: CGSize(width: 0, height: -s * 0.01), blur: s * 0.02,
+                  color: CGColor(gray: 0, alpha: 0.3))
+    ctx.draw(colourImage(side), in: CGRect(x: 0, y: 0, width: s, height: s))
+    return ctx.makeImage()!
+}
+
+if let iconset {
+    try FileManager.default.createDirectory(atPath: iconset, withIntermediateDirectories: true)
+    for points in [16, 32, 128, 256, 512] {
+        save(appIconImage(points), "\(iconset)/icon_\(points)x\(points).png")
+        save(appIconImage(points * 2), "\(iconset)/icon_\(points)x\(points)@2x.png")
+    }
+}
 
 guard args.count > 3 else { exit(0) }
 
