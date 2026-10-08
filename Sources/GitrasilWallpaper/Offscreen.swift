@@ -22,7 +22,7 @@ enum Offscreen {
 
     static let screens = [
         Screen(name: "1440×900@2x", size: CGSize(width: 1440, height: 900), scale: 2),
-        Screen(name: "3440×1440@1x", size: CGSize(width: 3440, height: 1440), scale: 1),
+        Screen(name: "3440×1440@1x", size: CGSize(width: 3440, height: 1440), scale: 1)
     ]
 
     /// Times each part of a redraw, rendered to a bitmap (`ImageRenderer`, so on the CPU), `runs`

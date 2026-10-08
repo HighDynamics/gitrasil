@@ -17,7 +17,7 @@ final class DesktopWindow: NSWindow {
         ignoresMouseEvents = true
         isOpaque = true
         hasShadow = false
-        backgroundColor = .windowBackgroundColor   // follows light/dark until the first frame
+        backgroundColor = .windowBackgroundColor // follows light/dark until the first frame
         isReleasedWhenClosed = false
         animationBehavior = .none
         setFrame(screen.frame, display: false)

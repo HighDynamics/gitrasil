@@ -35,7 +35,7 @@ final class RepoGraphDerivationTests: XCTestCase {
 
     func testIsWholeRepoNotRelativeToTheCheckedOutBranch() async throws {
         let repo = try await trunkRepo()
-        try await repo.git(["checkout", "-q", "-b", "feature", "HEAD~2"])   // off m2
+        try await repo.git(["checkout", "-q", "-b", "feature", "HEAD~2"]) // off m2
         try await repo.commitFile("f1.txt", "1", message: "f1")
 
         let graph = try await Derivations.repoGraph(runner: repo.runner, now: soon)
@@ -72,7 +72,7 @@ final class RepoGraphDerivationTests: XCTestCase {
         try await repo.commitFile("o.txt", "1", message: "o1")
         try await repo.checkout("main")
         try await repo.createBranch("current")
-        try await repo.commitFile("c.txt", "1", message: "c1")   // stays checked out
+        try await repo.commitFile("c.txt", "1", message: "c1") // stays checked out
 
         let graph = try await Derivations.repoGraph(runner: repo.runner, now: later)
 
@@ -97,8 +97,8 @@ final class RepoGraphDerivationTests: XCTestCase {
 
     func testBranchWithNoOwnCommitsIsABudOnlyWhenItsTipIsDrawn() async throws {
         let repo = try await trunkRepo()
-        try await repo.git(["branch", "parked", "main~1"])   // on the spine
-        try await repo.git(["branch", "ancient", "main~4"])  // below a 3-commit window
+        try await repo.git(["branch", "parked", "main~1"]) // on the spine
+        try await repo.git(["branch", "ancient", "main~4"]) // below a 3-commit window
 
         let graph = try await Derivations.repoGraph(
             runner: repo.runner, options: RepoGraphOptions(trunkCommits: 3), now: soon)

@@ -63,7 +63,7 @@ public extension GitRunner {
     /// - `GIT_OPTIONAL_LOCKS=0` keeps our frequent reads truly read-only, so a watcher on the git
     ///   dir isn't woken by our own `git status` refreshing the index (an FSEvents lock-loop).
     static let appEnvironment: [String: String] = [
-        "GIT_EDITOR": "true", "GIT_SEQUENCE_EDITOR": "true", "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_EDITOR": "true", "GIT_SEQUENCE_EDITOR": "true", "GIT_OPTIONAL_LOCKS": "0"
     ]
 
     /// Inherited variables that point git at a repository other than the runner's working
@@ -75,7 +75,7 @@ public extension GitRunner {
         "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT",
         "GIT_OBJECT_DIRECTORY", "GIT_DIR", "GIT_WORK_TREE", "GIT_IMPLICIT_WORK_TREE", "GIT_GRAFT_FILE",
         "GIT_INDEX_FILE", "GIT_NO_REPLACE_OBJECTS", "GIT_REPLACE_REF_BASE", "GIT_PREFIX",
-        "GIT_SHALLOW_FILE", "GIT_COMMON_DIR",
+        "GIT_SHALLOW_FILE", "GIT_COMMON_DIR"
     ]
 
     /// The environment a runner launches git with: the inherited one without the repository

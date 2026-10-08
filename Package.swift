@@ -9,7 +9,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "GitrasilCore", targets: ["GitrasilCore"]),
-        .executable(name: "GitrasilWallpaper", targets: ["GitrasilWallpaper"]),
+        .executable(name: "GitrasilWallpaper", targets: ["GitrasilWallpaper"])
     ],
     targets: [
         .target(name: "GitrasilCore"),
@@ -22,6 +22,6 @@ let package = Package(
         .testTarget(
             name: "GitrasilCoreTests",
             dependencies: ["GitrasilCore", "GitrasilTestSupport"]
-        ),
+        )
     ]
 )

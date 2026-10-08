@@ -183,6 +183,7 @@ final class PlanCache {
             let id: String
             let tree: RepoTree?
         }
+
         let dark: Bool
         /// Each medium writes names in its own hand, so their banners are sized differently.
         let medium: Medium

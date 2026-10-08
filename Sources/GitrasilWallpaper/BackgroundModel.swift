@@ -261,7 +261,6 @@ final class BackgroundModel {
             if let trunk = trunkGrowIn, trunk.addingTimeInterval(Self.trunkDuration) <= now { trunkGrowIn = nil }
         }
     }
-
 }
 
 /// A line in the run log (stdout), stamped with the time.

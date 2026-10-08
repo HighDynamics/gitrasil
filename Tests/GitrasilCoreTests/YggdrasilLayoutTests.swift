@@ -11,7 +11,7 @@ final class YggdrasilLayoutTests: XCTestCase {
         let limbs = [
             RepoTree.Limb(name: "\(prefix)/low", commits: commits("\(prefix)l", limbCommits), parent: .trunk(node: 6), isCheckedOut: false),
             RepoTree.Limb(name: "\(prefix)/sub", commits: commits("\(prefix)s", 2), parent: .limb(index: 0, node: 2), isCheckedOut: false),
-            RepoTree.Limb(name: "\(prefix)/high", commits: commits("\(prefix)h", 3), parent: .trunk(node: trunk - 2), isCheckedOut: true),
+            RepoTree.Limb(name: "\(prefix)/high", commits: commits("\(prefix)h", 3), parent: .trunk(node: trunk - 2), isCheckedOut: true)
         ]
         return RepoTree(trunkName: "main", trunk: commits("\(prefix)t", trunk), limbs: limbs, isTrunkCheckedOut: false)
     }

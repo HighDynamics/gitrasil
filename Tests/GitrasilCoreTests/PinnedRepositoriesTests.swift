@@ -117,7 +117,7 @@ final class PinnedRepositoriesTests: XCTestCase {
     func testAFolderHoldingRepositoriesIsPinnedAsAFolder() async throws {
         let root = try folder(["elm": nil, "ash": nil, "work/rowan": nil, "ash-wasm": "ash", "elsewhere-wt": "gone",
                                "notes": nil])
-        try FileManager.default.removeItem(at: root.appendingPathComponent("notes/.git"))   // a plain folder
+        try FileManager.default.removeItem(at: root.appendingPathComponent("notes/.git")) // a plain folder
         let pins = PinnedRepositories(storage: storage)
 
         let pin = try await pins.add(root)
@@ -196,9 +196,9 @@ final class PinnedRepositoriesTests: XCTestCase {
         // can't see into the new one.
         try FileManager.default.removeItem(at: root)
         try FileManager.default.createDirectory(at: root.appendingPathComponent("elm/.git"), withIntermediateDirectories: true)
-        pins.refresh()   // the hourly refresh, or the menu opening
+        pins.refresh() // the hourly refresh, or the menu opening
         XCTAssertEqual(pins.shown.map(\.lastPathComponent), ["elm"])
-        try await Task.sleep(for: .seconds(1))   // the old watcher's last events have settled
+        try await Task.sleep(for: .seconds(1)) // the old watcher's last events have settled
 
         try FileManager.default.createDirectory(at: root.appendingPathComponent("oak/.git"), withIntermediateDirectories: true)
         let deadline = Date().addingTimeInterval(5)

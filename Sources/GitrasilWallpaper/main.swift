@@ -102,6 +102,7 @@ if let flag = arguments.firstIndex(of: "--quit-after"), flag + 1 < arguments.cou
     quitAfter = TimeInterval(arguments[flag + 1])
     arguments.removeSubrange(flag...(flag + 1))
 }
+
 var mode = Mode.background(quitAfter: quitAfter)
 if arguments.first == "--benchmark" {
     mode = .benchmark(runs: arguments.dropFirst().first.flatMap { Int($0) } ?? 15)
@@ -113,6 +114,7 @@ if arguments.first == "--benchmark" {
     mode = .frames(URL(fileURLWithPath: arguments[1]))
     arguments.removeFirst(2)
 }
+
 guard arguments.isEmpty else {
     FileHandle.standardError.write(Data("""
         usage: GitrasilWallpaper [--quit-after <seconds>]
