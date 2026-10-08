@@ -126,7 +126,7 @@ Findings:
   grown limbs animated and every other limb stayed pixel-identical.
 - **Energy**: idle afterwards was 0.0% CPU (0.01 s of CPU over 20 s), ~64 MB resident.
 - **Real repos** (pinned read-only in a throwaway suite): a large repo (200 trunk commits, 14 limbs)
-  is a full tree; `gitrasil` and `love-scribe-journal` (6 trunk commits each, 7–8 limbs) are
+  is a full tree; `gitrasil` and a small repo (6 trunk commits each, 7–8 limbs) are
   saplings with a crown at the top. Repos with many similarly named branches (`worktree-review-*`)
   crowd their labels; some names are left out.
 - That 200-commit repo's trunk resolves to `origin/master` (its `origin/HEAD`), so local `main` is drawn as a
@@ -759,7 +759,7 @@ Reported: some branch ends look like big blunt stubs instead of tapering off, mo
 a large repo. Branch `fix/branch-tips`, from `main` (c1f2dc1).
 
 **Reproduced.** Rendered that large repo with `--snapshot` in every medium, both arrangements, in a
-throwaway suite (alone, and with `love-scribe-journal` and `gitrasil`). It no longer has 14 limbs:
+throwaway suite (alone, and with a small repo and `gitrasil`). It no longer has 14 limbs:
 its old branches have aged out of the 120-day window or are gone, so today it draws 200 trunk commits
 and three limbs. The stubs are still plain on the large repo's bough in the single tree, whose top is a
 fat column cut off flat under its leaves, and they're there, smaller, on every limb of every tree.
@@ -845,7 +845,7 @@ and `swift test` (120 core and 5 wallpaper tests) pass.
 **Looked at.** Full 1440×900@2x renders (light mode, the throwaway instance only), before and
 after, kept outside the repo: the large repo alone in every medium and both arrangements, a throwaway
 `thicket` repository (200 trunk commits and 11 limbs: one- and two-commit limbs, a bud, a limb with
-sub-limbs at its end) in chalk and ink, and the large repo with `love-scribe-journal` and `gitrasil` as a
+sub-limbs at its end) in chalk and ink, and the large repo with a small repo and `gitrasil` as a
 single tree. The side-by-sides (`tips/side-by-side-*`, before on the left) are in the repo: zoomed
 crops of the large repo's bough top in each medium, short limbs in chalk and ink, a mid-grow-in frame,
 and two whole screens.
@@ -855,7 +855,7 @@ and two whole screens.
 ![growing](tips/side-by-side-growing.jpg)
 
 **Redraw times**, median of 15 offscreen renders (ms, release, four pins: the large repo, `thicket`,
-`love-scribe-journal`, `gitrasil`), `main` (c1f2dc1) then this branch, two runs each, light (dark is
+a small repo, `gitrasil`), `main` (c1f2dc1) then this branch, two runs each, light (dark is
 within 0.3 ms): no difference beyond the noise, in trees, the grow-in frame or the banners. The fork
 width adds one `taperFactor` per child stem to the layout, which doesn't show.
 
