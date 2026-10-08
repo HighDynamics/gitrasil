@@ -19,6 +19,7 @@ struct WallpaperView: View {
         let showsRepoNames = background.settings.showsRepoNames
         let now = background.now
         let shuffle = background.settings.layoutSeed
+        let forest = background.settings.forest
         let seeds = PinnedRepositories.seeds(panes.map(\.repoURL))
         // Read each pane here so Observation redraws when one publishes a new tree or growth, and
         // when the scene stops waiting for its trees.
@@ -46,7 +47,7 @@ struct WallpaperView: View {
                         }
                         let trunkGrowIn = background.trunkGrowIn(at: date)
                         Canvas { context, size in
-                            Landscape(style: style, now: now, size: size, shuffle: shuffle, trunkGrowIn: trunkGrowIn)
+                            Landscape(style: style, now: now, size: size, shuffle: shuffle, trunkGrowIn: trunkGrowIn, forest: forest)
                                 .draw(panes, arrangement: arrangement, in: &context)
                         }
                     }
@@ -54,10 +55,11 @@ struct WallpaperView: View {
                         // The names hang where the full-grown trees put them, planned only when a tree or
                         // what's shown changes, not on every redraw.
                         let key = PlanCache.Key(dark: colorScheme == .dark, medium: medium, size: proxy.size, now: now,
-                                                shuffle: shuffle, arrangement: arrangement, branchNames: showsBranchNames,
-                                                repoNames: showsRepoNames, trees: panes.map { .init(id: $0.repoURL.path, tree: $0.tree) })
+                                                shuffle: shuffle, arrangement: arrangement, forest: forest,
+                                                branchNames: showsBranchNames, repoNames: showsRepoNames,
+                                                trees: panes.map { .init(id: $0.repoURL.path, tree: $0.tree) })
                         let plan = plans.plan(for: key) {
-                            Landscape(style: style, now: now, size: proxy.size, shuffle: shuffle, trunkGrowIn: nil).plan(
+                            Landscape(style: style, now: now, size: proxy.size, shuffle: shuffle, trunkGrowIn: nil, forest: forest).plan(
                                 zip(panes, seeds).map { Pane($0, seed: $1) },
                                 arrangement: arrangement, branchNames: showsBranchNames, repoNames: showsRepoNames)
                         }
@@ -195,6 +197,7 @@ final class PlanCache {
         /// The trees' layout seed: a reshuffle moves every limb, and its banner with it.
         let shuffle: Int
         let arrangement: Arrangement
+        let forest: ForestMode
         let branchNames: Bool
         let repoNames: Bool
         let trees: [Tree]
@@ -262,12 +265,24 @@ struct Landscape {
     let shuffle: Int
     /// How far the single tree's shared trunk has risen, while it's rising.
     let trunkGrowIn: Double?
+    /// How a crowd of trees is spread over the screen (the forest spike); the orchard as it is by default.
+    var forest: ForestMode = .off
 
     /// A pane's full-grown tree and where it stands on the screen.
     struct Planted {
         let index: Int
         let full: TreeLayout
         let frame: TreeFrame
+        /// The forest layouts' extras: the style it's drawn in (faded into the paper at the back), the
+        /// line it stands on (0 in front) and the width its name may take. Nil in the orchard.
+        var forest: ForestPlanted?
+    }
+
+    struct ForestPlanted {
+        let style: WallpaperStyle
+        let line: Int
+        let slot: CGFloat
+        let fade: Double
     }
 
     /// The trees in `arrangement`, broken up by the medium's grain.
@@ -292,6 +307,7 @@ struct Landscape {
     /// screen's height or spills well past its plot. Each is planted a seeded touch off its plot's
     /// centre, so the row isn't ruled.
     func orchard(_ panes: [Pane]) -> [Planted] {
+        if forest.isPacked { return orchardPlanted(panes) }
         let plot = size.width / CGFloat(panes.count)
         let tall = Composition.groundY(size.height) - Composition.top - TreeFrame.margin
         let shared = min(tall / Composition.nominalHeight, plot / Composition.plotWidth)
@@ -313,15 +329,28 @@ struct Landscape {
                 problemText(problem, at: CGPoint(x: plot * (CGFloat(index) + 0.5), y: size.height / 2), in: &context)
             }
         }
-        for planted in orchard(panes) {
+        let planted: [Planted]
+        if forest.isPacked {
+            let scene = forestScene(panes)
+            planted = scene.planted
+            drawForestGrounds(scene.plan, in: &context)
+        } else {
+            planted = orchard(panes)
+        }
+        // Back to front, so a tree in front covers the foot of the one behind it.
+        for planted in planted.sorted(by: { ($0.forest?.line ?? 0) > ($1.forest?.line ?? 0) }) {
             let pane = panes[planted.index], tree = pane.tree!
             let layout = pane.growIn.map { TreeLayout(tree: tree, seed: pane.seed, growIn: $0, shuffle: shuffle) }
                 ?? (pane.grown.isEmpty ? planted.full : TreeLayout(tree: tree, seed: pane.seed, grown: pane.grown, shuffle: shuffle))
-            let drawing = TreeDrawing(style: style, now: now, frame: planted.frame)
+            let drawing = TreeDrawing(style: planted.forest?.style ?? style, now: now, frame: planted.frame)
             // Its shadow and name come with it, not before it starts to grow.
             if pane.growIn != 0 {
                 drawing.shadow(width: planted.full.bounds.width, in: &context)
-                drawing.plate(pane.name, in: &context)
+                if let forest = planted.forest {
+                    drawing.forestPlate(pane.name, line: forest.line, slot: forest.slot, in: &context)
+                } else {
+                    drawing.plate(pane.name, in: &context)
+                }
             }
             drawing.draw(layout.stems, seeds: layout.stems.map { _ in pane.seed }, parents: layout.stems.map { $0.fork?.parent },
                          rootedAt: layout.stems.isEmpty ? nil : 0, rootSeed: pane.seed, in: &context)
@@ -386,13 +415,23 @@ struct TreeFrame {
     let size: CGSize
     let scale: CGFloat
     let origin: CGPoint
+    /// The smallest `detail` (a forest of small trees lets leaves and names shrink further).
+    var detailFloor: CGFloat = 0.62
 
     /// Room kept around the crown for leaves and the names at the tips.
     static let margin: CGFloat = 40
 
     /// How large leaves and names are drawn: in step with the tree, within limits, so a small tree in a
     /// narrow plot isn't buried under them.
-    var detail: CGFloat { min(max(scale / 520, 0.62), 1.15) }
+    var detail: CGFloat { min(max(scale / 520, detailFloor), 1.15) }
+
+    /// A tree the forest layout has already fitted: this big, standing at `x` on `ground`.
+    init(size: CGSize, scale: CGFloat, x: CGFloat, ground: CGFloat, detailFloor: CGFloat) {
+        self.size = size
+        self.scale = max(scale, 1)
+        origin = CGPoint(x: x, y: ground)
+        self.detailFloor = detailFloor
+    }
 
     init(size: CGSize, bounds: CGRect, nominalHeight: Double, scale: CGFloat, maxWidth: CGFloat, x: CGFloat) {
         self.size = size

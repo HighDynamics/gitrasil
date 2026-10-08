@@ -47,12 +47,22 @@ struct BannerPlan {
 
 extension Landscape {
 
+    /// A tree whose names are being placed: `allowance` is how many branch names may hang on it (nil for
+    /// all; the forest layouts cut it).
+    private struct Standing {
+        let pane: String
+        let stems: [TreeLayout.Stem]
+        let schedule: TreeLayout.GrowInSchedule
+        let frame: TreeFrame
+        let allowance: Int?
+    }
+
     /// Where the names hang over the trees as they stand (`panes` with their full trees): the branches'
     /// pennants and, in the single tree, the repositories' ribbons, each only if shown.
     func plan(_ panes: [Pane], arrangement: Arrangement, branchNames: Bool, repoNames: Bool) -> BannerPlan {
         var plan = BannerPlan()
         // Each tree by its pane's id.
-        var trees: [(pane: String, stems: [TreeLayout.Stem], schedule: TreeLayout.GrowInSchedule, frame: TreeFrame)] = []
+        var trees: [Standing] = []
         var obstacles: [CGRect] = []
         var taken: [CGRect] = []
         if isSingleTree(panes, arrangement: arrangement) {
@@ -60,7 +70,8 @@ extension Landscape {
             let (full, frame) = singleTree(ready)
             obstacles += crown([full.trunk], frame: frame)
             for (pane, bough) in zip(ready, full.boughs) {
-                trees.append((pane.id, bough.layout.stems, bough.layout.schedule, frame))
+                trees.append(Standing(pane: pane.id, stems: bough.layout.stems, schedule: bough.layout.schedule, frame: frame,
+                                      allowance: nil))
                 obstacles += crown(bough.layout.stems, frame: frame)
             }
             // The repositories' ribbons first, so they hang in the same places whether or not the
@@ -71,7 +82,11 @@ extension Landscape {
             }
         } else {
             for planted in orchard(panes) {
-                trees.append((panes[planted.index].id, planted.full.stems, planted.full.schedule, planted.frame))
+                trees.append(Standing(pane: panes[planted.index].id, stems: planted.full.stems, schedule: planted.full.schedule,
+                                      frame: planted.frame,
+                                      allowance: planted.forest.flatMap {
+                                          ForestLayout.pennantAllowance(scale: planted.frame.scale, fade: $0.fade)
+                                      }))
                 obstacles += crown(planted.full.stems, frame: planted.frame)
             }
         }
@@ -82,8 +97,18 @@ extension Landscape {
             let drawing = TreeDrawing(style: style, now: now, frame: tree.frame)
             let fontSize = max(10, (style.labelSize * tree.frame.detail).rounded())
             let font = style.labelMetricsFont(fontSize)
+            // The trunk and checked-out branches first, then the most recently active, up to the allowance.
+            var allowed: Set<String>?
+            if let allowance = tree.allowance {
+                let ranked = tree.stems.filter { $0.name != nil }.sorted { a, b in
+                    if a.isTrunk != b.isTrunk { return a.isTrunk }
+                    if a.isCheckedOut != b.isCheckedOut { return a.isCheckedOut }
+                    return (a.commits.last?.date ?? .distantPast) > (b.commits.last?.date ?? .distantPast)
+                }
+                allowed = Set(ranked.prefix(allowance).compactMap(\.name))
+            }
             for stem in tree.stems {
-                guard let name = stem.name, let tip = stem.tip else { continue }
+                guard let name = stem.name, let tip = stem.tip, allowed?.contains(name) ?? true else { continue }
                 let text = (name as NSString).size(withAttributes: [.font: font])
                 let size = CGSize(width: ceil(text.width) + Pennant.padding * 2 + Pennant.notch(height: text.height + 6),
                                   height: ceil(text.height) + 6)

@@ -16,8 +16,9 @@ final class BackgroundModel {
     /// idle desktop; a graph change redraws with the current time anyway.
     private(set) var now = Date()
 
-    /// More than this side by side gets too narrow to read.
-    static let maxPanes = 4
+    /// More than this side by side gets too narrow to read. (The forest spike lifts it for a run with
+    /// GITRASIL_BACKGROUND_MAX_PANES.)
+    static let maxPanes = ProcessInfo.processInfo.environment["GITRASIL_BACKGROUND_MAX_PANES"].flatMap { Int($0) }.map { max($0, 1) } ?? 4
 
     /// Trees growing in from nothing: when each pane's tree (or, in the single tree, its bough)
     /// started, and when the single tree's shared trunk did. Empty when nothing is growing in.
