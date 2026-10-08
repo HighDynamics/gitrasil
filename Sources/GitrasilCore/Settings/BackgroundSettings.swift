@@ -86,6 +86,10 @@ public final class BackgroundSettings {
         didSet { if layoutSeed != oldValue { storage.set(layoutSeed, forKey: Self.layoutSeedKey) } }
     }
 
+    /// How a crowd of trees is spread over the screen (the forest spike, docs/forest/PLAN.md). Not
+    /// saved: `GITRASIL_BACKGROUND_FOREST` picks one for a run, and the default is the orchard as it is.
+    public var forest: ForestMode = .off
+
     /// A new layout seed, never 0 or the one in use.
     public func reshuffle() {
         var next: Int
