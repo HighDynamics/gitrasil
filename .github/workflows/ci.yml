@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel a superseded run on a PR, but never a run on main: a push is keyed on its own commit, so
+# two pushes to main never share a group.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+# The same commands run locally as `scripts/check.sh <name>` (see docs/ci-quality.md). Each job is a
+# separate check with a stable name so it can be marked as required. None of them need secrets.
+# The Xcode version is pinned (it sets the Swift toolchain and SDK) rather than left to the image's
+# default, which moves.
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
+jobs:
+  format:
+    name: Format
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build/tools
+          key: tools-${{ runner.os }}-${{ hashFiles('scripts/tool-versions.sh') }}
+      - run: scripts/check.sh format
+
+  lint:
+    name: Lint
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build/tools
+          key: tools-${{ runner.os }}-${{ hashFiles('scripts/tool-versions.sh') }}
+      - run: scripts/check.sh lint
+
+  build:
+    name: Build
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          key: build-${{ runner.os }}-${{ env.DEVELOPER_DIR }}-${{ hashFiles('Package.swift', 'Sources/**') }}
+          restore-keys: build-${{ runner.os }}-${{ env.DEVELOPER_DIR }}-
+      - run: scripts/check.sh build
+
+  test:
+    name: Test
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .build
+          key: test-${{ runner.os }}-${{ env.DEVELOPER_DIR }}-${{ hashFiles('Package.swift', 'Sources/**', 'Tests/**') }}
+          restore-keys: test-${{ runner.os }}-${{ env.DEVELOPER_DIR }}-
+      - run: scripts/check.sh test
