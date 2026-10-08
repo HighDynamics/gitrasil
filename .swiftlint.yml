@@ -1,0 +1,56 @@
+# SwiftLint config. Run through scripts/check.sh (pinned version, see docs/ci-quality.md).
+# The defaults are the starting point; each deviation below says why.
+included:
+  - Sources
+  - Tests
+  - scripts
+excluded:
+  - .build
+
+# Opt-in rules that catch real mistakes or cheap wins rather than style.
+opt_in_rules:
+  - empty_count
+  - first_where
+  - contains_over_first_not_nil
+  - sorted_first_last
+  - fatal_error_message
+  - overridden_super_call
+
+# Geometry, noise and drawing code is written in the maths' own notation (a, b, t, x, y, p0, dL),
+# so one-letter names are fine. Overlong names still flag.
+identifier_name:
+  min_length: 1
+  max_length:
+    warning: 50
+    error: 60
+
+# Most lines are within 120, but long test assertions and hand-written maths run to ~150; the
+# rule is there to catch the runaway line, and comments and URLs are not counted.
+line_length:
+  warning: 150
+  error: 200
+  ignores_comments: true
+  ignores_urls: true
+
+# The size and shape metrics are kept as ceilings well above today's worst case instead of at the
+# defaults: the layout and drawing code is long, linear and deliberate, and splitting it up to
+# satisfy a counter would be a behaviour-risking refactor with nothing found by it.
+file_length:
+  warning: 1200
+  error: 1500
+type_body_length:
+  warning: 600
+  error: 800
+function_body_length:
+  warning: 120
+  error: 200
+function_parameter_count:
+  warning: 10
+  error: 12
+cyclomatic_complexity:
+  warning: 15
+  error: 25
+# Tuples carry small geometry results (a point and two handles); three or four members read fine.
+large_tuple:
+  warning: 4
+  error: 5
