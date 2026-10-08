@@ -59,6 +59,21 @@ swift test
 Tests stand up real git repositories in temp dirs (`GitrasilTestSupport`) and assert on the
 derived values — no mocking of git.
 
+## Quality checks
+
+```bash
+scripts/check.sh          # everything CI runs: format, lint, build, test
+scripts/check.sh format   # SwiftFormat, check only (`scripts/check.sh fix` rewrites the files)
+scripts/check.sh lint     # SwiftLint --strict
+scripts/check.sh build    # release build with warnings as errors
+scripts/check.sh test     # swift test
+```
+
+SwiftFormat and SwiftLint are downloaded at pinned, checksummed versions into `.build/tools/` on
+first use, so local and CI results match. CI (`.github/workflows/ci.yml`) runs the same four
+checks, as the jobs **Format**, **Lint**, **Build** and **Test**, on every pull request and push to
+main. Which tools, and why: `docs/ci-quality.md`.
+
 ## Run the background
 
 ```bash
