@@ -22,6 +22,12 @@ let package = Package(
         .testTarget(
             name: "GitrasilCoreTests",
             dependencies: ["GitrasilCore", "GitrasilTestSupport"]
+        ),
+        // The drawing's own geometry (what the wood's outline is made of), where it can be asserted
+        // without a screen.
+        .testTarget(
+            name: "GitrasilWallpaperTests",
+            dependencies: ["GitrasilWallpaper", "GitrasilCore"]
         )
     ]
 )
