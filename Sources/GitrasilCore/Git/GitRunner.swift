@@ -103,7 +103,9 @@ public struct GitRunner: GitRunning {
     }
 
     public func run(_ args: [String]) async throws -> GitOutput {
-        try await withCheckedThrowingContinuation { continuation in
+        await GitGate.shared.enter()
+        defer { GitGate.shared.leave() }
+        return try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = ["git"] + args
