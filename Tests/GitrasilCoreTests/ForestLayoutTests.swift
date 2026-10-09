@@ -8,10 +8,13 @@ final class ForestLayoutTests: XCTestCase {
 
     /// `count` trees of varied crowns and ages, in groups of five folders.
     private func trees(_ count: Int) -> [ForestTree] {
-        (0..<count).map { i in
-            ForestTree(id: String(format: "tree%02d", i), group: "/work/group\(i % 5)", left: -0.2 - Double(i % 4) * 0.1,
-                       right: 0.25 + Double(i % 3) * 0.15, height: 1.0 + Double(i % 5) * 0.1,
-                       lastActive: now.addingTimeInterval(-Double((i * 7) % 40) * 86_400 * 3))
+        (0..<count).map { (i: Int) -> ForestTree in
+            let left: Double = -0.2 - Double(i % 4) * 0.1
+            let right: Double = 0.25 + Double(i % 3) * 0.15
+            let height: Double = 1.0 + Double(i % 5) * 0.1
+            let days: Double = Double((i * 7) % 40) * 3
+            return ForestTree(id: String(format: "tree%02d", i), group: "/work/group\(i % 5)", left: left, right: right,
+                              height: height, lastActive: now.addingTimeInterval(-days * 86_400))
         }
     }
 
