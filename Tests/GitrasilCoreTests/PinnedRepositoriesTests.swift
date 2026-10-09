@@ -151,6 +151,19 @@ final class PinnedRepositoriesTests: XCTestCase {
         XCTAssertEqual(pins.shown.map(\.lastPathComponent), ["b", "c", "d", "f"], "re-ranked when refreshed")
     }
 
+    func testChangingTheLimitShowsMoreOrFewer() throws {
+        let root = try folder(["a": nil, "b": nil, "c": nil, "d": nil])
+        for (name, days) in [("a", 4.0), ("b", 3), ("c", 2), ("d", 1)] { try touch(root.appendingPathComponent(name), daysAgo: days) }
+        storage.pins = [Pin(.folder, root)]
+        let pins = PinnedRepositories(storage: storage, limit: 2)
+        XCTAssertEqual(pins.shown.map(\.lastPathComponent), ["c", "d"])
+
+        pins.limit = 4
+        XCTAssertEqual(pins.shown.map(\.lastPathComponent), ["a", "b", "c", "d"])
+        pins.limit = 3
+        XCTAssertEqual(pins.shown.map(\.lastPathComponent), ["b", "c", "d"])
+    }
+
     func testPinsExpandInOrderUpToTheLimitAndARepositoryShowsOnce() {
         let folder = URL(fileURLWithPath: "/r"), x = URL(fileURLWithPath: "/x")
         let inside = ["a", "b", "c"].map { URL(fileURLWithPath: "/r/\($0)") }

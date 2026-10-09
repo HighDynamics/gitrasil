@@ -11,65 +11,27 @@ final class ForestLayoutTests: XCTestCase {
         (0..<count).map { i in
             ForestTree(id: String(format: "tree%02d", i), group: "/work/group\(i % 5)", left: -0.2 - Double(i % 4) * 0.1,
                        right: 0.25 + Double(i % 3) * 0.15, height: 1.0 + Double(i % 5) * 0.1,
-                       lastActive: now.addingTimeInterval(-Double((i * 7) % 40) * 86_400 * 3), activity: Double((i * 5) % 11))
+                       lastActive: now.addingTimeInterval(-Double((i * 7) % 40) * 86_400 * 3))
         }
     }
 
-    func testPlainAndOffPlaceNothing() {
-        XCTAssertTrue(ForestLayout.plan(trees(8), mode: .plain, screen: screen).placements.isEmpty)
-        XCTAssertTrue(ForestLayout.plan(trees(8), mode: .off, screen: screen).placements.isEmpty)
-    }
-
-    func testEveryModePlacesEveryTreeOnScreenOnce() {
-        for mode in ForestMode.allCases where mode.isPacked {
-            for count in [1, 4, 17, 64] {
-                let plan = ForestLayout.plan(trees(count), mode: mode, screen: screen)
-                XCTAssertEqual(plan.placements.map(\.index).sorted(), Array(0..<count), "\(mode) \(count)")
-                for place in plan.placements {
-                    XCTAssertGreaterThan(place.x, 0, "\(mode) \(count)")
-                    XCTAssertLessThan(place.x, screen.size.width, "\(mode) \(count)")
-                    XCTAssertLessThanOrEqual(place.ground, screen.groundY, "\(mode) \(count)")
-                    // The crown stays under the top.
-                    let height = CGFloat(trees(count)[place.index].height) * place.scale
-                    XCTAssertGreaterThanOrEqual(place.ground - height, screen.top, "\(mode) \(count) tree \(place.index)")
-                }
-            }
-        }
-    }
-
-    func testTheRowFitsTheScreen() {
-        for mode in [ForestMode.canopy, .activity] {
-            let plan = ForestLayout.plan(trees(40), mode: mode, screen: screen)
-            let items = trees(40)
+    func testEveryTreeStandsOnScreenOnceUnderTheTop() {
+        for count in [1, 4, 17, 64] {
+            let plan = ForestLayout.rows(trees(count), screen: screen)
+            XCTAssertEqual(plan.placements.map(\.index).sorted(), Array(0..<count), "\(count)")
             for place in plan.placements {
-                let (left, right) = ForestLayout.span(items[place.index])
-                let factor = place.scale / plan.scale
-                XCTAssertGreaterThanOrEqual(place.x - CGFloat(left) * plan.scale * factor, screen.margin - 8, "\(mode)")
-                XCTAssertLessThanOrEqual(place.x + CGFloat(right) * plan.scale * factor, screen.size.width - screen.margin + 8, "\(mode)")
+                XCTAssertGreaterThan(place.x, 0, "\(count)")
+                XCTAssertLessThan(place.x, screen.size.width, "\(count)")
+                XCTAssertLessThanOrEqual(place.ground, screen.groundY, "\(count)")
+                let height = CGFloat(trees(count)[place.index].height) * place.scale
+                XCTAssertGreaterThanOrEqual(place.ground - height, screen.top, "\(count) tree \(place.index)")
             }
         }
-    }
-
-    func testCanopyGivesRoomByCrownNotEqualPlots() {
-        var slim = trees(6), wide = trees(6)
-        for i in slim.indices { slim[i].left = -0.1; slim[i].right = 0.1; wide[i].left = -0.6; wide[i].right = 0.6 }
-        let a = ForestLayout.plan(slim, mode: .canopy, screen: screen), b = ForestLayout.plan(wide, mode: .canopy, screen: screen)
-        XCTAssertGreaterThan(a.scale, b.scale * 1.5, "narrow crowns stand bigger on the same ground")
-    }
-
-    func testActivitySizesBusyTreesBiggerThanQuietOnes() {
-        var items = trees(6)
-        for i in items.indices { items[i].left = -0.3; items[i].right = 0.3; items[i].activity = i == 0 ? 20 : 0 }
-        let plan = ForestLayout.plan(items, mode: .activity, screen: screen)
-        let busy = plan.placements.first { $0.index == 0 }!, quiet = plan.placements.first { $0.index == 1 }!
-        XCTAssertGreaterThan(busy.scale, quiet.scale * 2)
-        XCTAssertEqual(ForestLayout.sizeFactor(activity: 20), 1)
-        XCTAssertLessThan(ForestLayout.sizeFactor(activity: 0), ForestLayout.sizeFactor(activity: 1))
     }
 
     func testRowsPutTheMostRecentlyActiveInFrontAndFadeTheRest() {
         let items = trees(40)
-        let plan = ForestLayout.plan(items, mode: .rows, screen: screen)
+        let plan = ForestLayout.rows(items, screen: screen)
         XCTAssertGreaterThan(plan.lines, 1)
         let front = plan.placements.filter { $0.line == 0 }, back = plan.placements.filter { $0.line > 0 }
         let newestFront = front.map { items[$0.index].lastActive }.min()!
@@ -85,51 +47,62 @@ final class ForestLayoutTests: XCTestCase {
     }
 
     func testRowsUseOneLineWhileTheyFitComfortably() {
-        XCTAssertEqual(ForestLayout.plan(trees(3), mode: .rows, screen: screen).lines, 1)
-        XCTAssertGreaterThan(ForestLayout.plan(trees(60), mode: .rows, screen: screen).lines, 2)
+        XCTAssertEqual(ForestLayout.rows(trees(3), screen: screen).lines, 1)
+        XCTAssertGreaterThan(ForestLayout.rows(trees(60), screen: screen).lines, 2)
     }
 
-    func testGrovesClusterByFolder() {
-        let items = trees(30)
-        let plan = ForestLayout.plan(items, mode: .groves, screen: screen)
-        XCTAssertEqual(plan.groves.count, 5)
-        XCTAssertEqual(plan.groves.map(\.count).reduce(0, +), 30)
-        // Each tree stands inside its own folder's stretch, and the stretches don't overlap.
-        for place in plan.placements {
-            let grove = plan.groves.first { $0.name == items[place.index].group }!
-            XCTAssertGreaterThanOrEqual(place.x, grove.from - 40)
-            XCTAssertLessThanOrEqual(place.x, grove.to + 40)
+    func testAFolderStandsTogetherWithinALine() {
+        let items = trees(40)
+        let plan = ForestLayout.rows(items, screen: screen)
+        for line in 0..<plan.lines {
+            let standing = plan.placements.filter { $0.line == line }.sorted { $0.x < $1.x }.map { items[$0.index] }
+            let keys = standing.map { "\($0.group)\u{1F}\($0.id)" }
+            XCTAssertEqual(keys, keys.sorted(), "line \(line)")
         }
-        for (a, b) in zip(plan.groves, plan.groves.dropFirst()) { XCTAssertLessThan(a.to, b.from) }
     }
 
     func testPlacementsAreDeterministic() {
-        for mode in ForestMode.allCases where mode.isPacked {
-            XCTAssertEqual(ForestLayout.plan(trees(33), mode: mode, screen: screen), ForestLayout.plan(trees(33), mode: mode, screen: screen))
+        XCTAssertEqual(ForestLayout.rows(trees(33), screen: screen), ForestLayout.rows(trees(33), screen: screen))
+    }
+
+    func testAGapKeepsTheMiddleClearAndEveryTreeOnScreen() {
+        var beside = screen
+        beside.gap = 600
+        beside.minFade = 0.4
+        for count in [3, 20, 52] {
+            let items = trees(count)
+            let plan = ForestLayout.rows(items, screen: beside)
+            XCTAssertEqual(plan.placements.count, count)
+            for place in plan.placements {
+                // The foot is out of the gap, whichever side; the crown's own width may reach into it.
+                XCTAssertFalse(abs(place.x - screen.size.width / 2) < 300 - 1, "\(count): tree at \(place.x)")
+                XCTAssertGreaterThanOrEqual(place.fade, 0.4, "even the front line stands back")
+                XCTAssertGreaterThan(place.x, 0)
+                XCTAssertLessThan(place.x, screen.size.width)
+            }
+            // The lines are narrower, so the trees stand smaller than without a gap.
+            XCTAssertLessThanOrEqual(plan.scale, ForestLayout.rows(items, screen: screen).scale)
         }
     }
 
-    /// How much moves when one repository commits: the row's most recent commit lands in a quiet one.
-    func testACommitMovesFewTreesInTheFixedLayouts() {
-        var items = trees(32)
-        for mode in [ForestMode.canopy, .groves] {
-            let before = ForestLayout.plan(items, mode: mode, screen: screen)
-            items[7].lastActive = now
-            let after = ForestLayout.plan(items, mode: mode, screen: screen)
-            let moved = zip(before.placements, after.placements).filter { abs($0.x - $1.x) > 1 || $0.line != $1.line }.count
-            // Recency only orders the groves' lines, so a commit may reseat its own folder's trees but never another's.
-            XCTAssertLessThanOrEqual(moved, mode == .canopy ? 0 : items.filter { $0.group == items[7].group }.count, "\(mode)")
-        }
+    func testAGroundLineBehindIsCutAtTheGap() {
+        var beside = screen
+        beside.gap = 500
+        let plan = ForestLayout.rows(trees(52), screen: beside)
+        let middle = screen.size.width / 2
+        XCTAssertGreaterThan(plan.grounds.count, plan.lines - 1, "a line with trees both sides has two pieces")
+        for ground in plan.grounds { XCTAssertFalse(ground.from < middle - 1 && ground.to > middle + 1, "no piece crosses the middle") }
     }
 
     /// Rows rank by the day of the last commit, so a commit in a back-row repo re-packs every line it
     /// passes through, and the lines it doesn't touch drift a few points because the scale is shared
-    /// (the known cost of ranking: docs/forest/PLAN.md). No other tree changes line.
+    /// (the known cost of ranking, which is why the app freezes the ranking: docs/forest/PLAN.md). No
+    /// other tree changes line.
     func testACommitInRowsRepacksOnlyTheLinesItCrosses() {
         var items = trees(40)
-        let before = ForestLayout.plan(items, mode: .rows, screen: screen)
+        let before = ForestLayout.rows(items, screen: screen)
         items[7].lastActive = now
-        let after = ForestLayout.plan(items, mode: .rows, screen: screen)
+        let after = ForestLayout.rows(items, screen: screen)
         XCTAssertEqual(before.lines, after.lines)
         let from = before.placements.first { $0.index == 7 }!.line, to = after.placements.first { $0.index == 7 }!.line
         XCTAssertLessThan(to, from, "a commit today brings the repo forward")
@@ -146,12 +119,51 @@ final class ForestLayoutTests: XCTestCase {
         XCTAssertEqual(ForestLayout.pennantAllowance(scale: 400, fade: 0.5), 0)
     }
 
-    func testActivityCountsFreshCommitsMost() {
+    func testLastActiveIsTheNewestCommit() {
         let fresh = RepoTree.Commit(sha: "a", date: now), old = RepoTree.Commit(sha: "b", date: now.addingTimeInterval(-90 * 86_400))
-        let busy = RepoTree(trunkName: "main", trunk: [fresh, fresh, fresh], limbs: [], isTrunkCheckedOut: false)
-        let quiet = RepoTree(trunkName: "main", trunk: [old, old, old], limbs: [], isTrunkCheckedOut: false)
-        XCTAssertGreaterThan(busy.activity(now: now), 2.9)
-        XCTAssertLessThan(quiet.activity(now: now), 0.1)
-        XCTAssertEqual(busy.lastActive, now)
+        let tree = RepoTree(trunkName: "main", trunk: [old, fresh, old], limbs: [], isTrunkCheckedOut: false)
+        XCTAssertEqual(tree.lastActive, now)
+        XCTAssertEqual(RepoTree(trunkName: "main", trunk: [], limbs: [], isTrunkCheckedOut: false).lastActive, .distantPast)
+    }
+}
+
+final class ForestPolicyTests: XCTestCase {
+
+    private let day: TimeInterval = 86_400
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    func testTheOrchardPacksOnlyPastItsLimit() {
+        let policy = ForestPolicy(plainLimit: 12)
+        XCTAssertFalse(ForestMode.auto.packs(12, policy: policy))
+        XCTAssertTrue(ForestMode.auto.packs(13, policy: policy))
+        XCTAssertFalse(ForestMode.off.packs(64, policy: policy))
+        XCTAssertTrue(ForestMode.rows.packs(2, policy: policy))
+    }
+
+    func testTheTreeHoldsMoreOnATallerDisplay() {
+        let policy = ForestPolicy()
+        XCTAssertEqual(policy.treeCapacity(for: CGSize(width: 1440, height: 900)), 12)
+        XCTAssertEqual(policy.treeCapacity(for: CGSize(width: 3440, height: 1440)), 20)
+        XCTAssertEqual(policy.treeCapacity(for: CGSize(width: 2560, height: 1440)), 20)
+        XCTAssertEqual(policy.treeCapacity(for: CGSize(width: 800, height: 400)), 8, "never fewer than a handful")
+        XCTAssertEqual(ForestPolicy(fixedTreeCapacity: 5).treeCapacity(for: CGSize(width: 3440, height: 1440)), 5)
+    }
+
+    func testRankingGoesByDayThenName() {
+        let entries: [(id: String, lastActive: Date)] = [
+            ("b", now.addingTimeInterval(-10 * day)), ("d", now), ("a", now.addingTimeInterval(-10 * day)), ("c", now.addingTimeInterval(-60))
+        ]
+        // c and d are the same day (two commits in a day don't swap places): by name.
+        XCTAssertEqual(ForestPolicy.rank(entries).map { entries[$0].id }, ["c", "d", "a", "b"])
+    }
+
+    func testTheFitBlendsFromStandardToWideByCount() {
+        XCTAssertEqual(YggdrasilLayout.Fit.fitting(count: 2), .standard)
+        XCTAssertEqual(YggdrasilLayout.Fit.fitting(count: 4), .standard)
+        XCTAssertEqual(YggdrasilLayout.Fit.fitting(count: 8), .wide)
+        XCTAssertEqual(YggdrasilLayout.Fit.fitting(count: 20), .wide)
+        let six = YggdrasilLayout.Fit.fitting(count: 6)
+        XCTAssertGreaterThan(six.footSpread, YggdrasilLayout.Fit.standard.footSpread)
+        XCTAssertLessThan(six.footSpread, YggdrasilLayout.Fit.wide.footSpread)
     }
 }

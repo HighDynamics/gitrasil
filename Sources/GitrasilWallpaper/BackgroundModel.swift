@@ -16,9 +16,18 @@ final class BackgroundModel {
     /// idle desktop; a graph change redraws with the current time anyway.
     private(set) var now = Date()
 
-    /// More than this side by side gets too narrow to read. (The forest spike lifts it for a run with
-    /// GITRASIL_BACKGROUND_MAX_PANES.)
-    static let maxPanes = ProcessInfo.processInfo.environment["GITRASIL_BACKGROUND_MAX_PANES"].flatMap { Int($0) }.map { max($0, 1) } ?? 4
+    /// The most repositories shown: a dozen (`ForestPolicy.plainLimit`), or with the Forest on as many as
+    /// the policy allows, past a dozen standing in the forest.
+    static func paneLimit(for settings: BackgroundSettings) -> Int {
+        let policy = ForestPolicy.standard
+        return settings.forest == .off ? policy.plainLimit : policy.paneLimit
+    }
+
+    /// When each repository (by path) last had a commit, as it stood at launch and at the first hourly
+    /// tick after each midnight: what the forest and the single tree rank by. Frozen in between, so a
+    /// commit grows its limb but never moves a tree; a repository pinned later is added as it arrives.
+    private(set) var ranking: [String: Date] = [:]
+    private var rankedOn = Calendar.current.startOfDay(for: Date())
 
     /// Trees growing in from nothing: when each pane's tree (or, in the single tree, its bough)
     /// started, and when the single tree's shared trunk did. Empty when nothing is growing in.
@@ -67,6 +76,7 @@ final class BackgroundModel {
             MainActor.assumeIsolated {
                 self?.now = Date()
                 for pane in self?.panes ?? [] { pane.tick() }
+                self?.reRankAfterMidnight()
                 // A pinned folder with more repositories than fit shows the most recently active.
                 self?.pins.refresh()
             }
@@ -91,16 +101,24 @@ final class BackgroundModel {
     /// blows one at once, so it shows what it does).
     private func observeSettings() {
         let arrangement = settings.arrangement, medium = settings.medium, layoutSeed = settings.layoutSeed
+        let forest = settings.forest
         let names = (settings.showsBranchNames, settings.showsRepoNames, settings.gusts)
         withObservationTracking {
             _ = (settings.arrangement, settings.medium, settings.showsBranchNames, settings.showsRepoNames, settings.gusts,
-                 settings.layoutSeed)
+                 settings.layoutSeed, settings.forest)
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
                 if self.settings.arrangement != arrangement {
                     logEvent("arrangement: \(self.settings.arrangement.rawValue)")
                     self.growInFromTheGround()
+                }
+                if self.settings.forest != forest {
+                    logEvent("forest: \(self.settings.forest.rawValue)")
+                    // More (or fewer) repositories are shown: read the new ones, then everything grows again.
+                    self.pins.limit = Self.paneLimit(for: self.settings)
+                    self.reconcile()
+                    self.regrow()
                 }
                 if self.settings.layoutSeed != layoutSeed {
                     logEvent("layout seed: \(self.settings.layoutSeed)")
@@ -221,15 +239,60 @@ final class BackgroundModel {
     /// the shared trunk rises first and the boughs follow from the crotch.
     private func growInFromTheGround() {
         guard isVisible else { return }
+        takeRanking()
         let now = Date()
         if settings.arrangement == .singleTree, ready.count > 1 {
             trunkGrowIn = now
-            let boughs = now.addingTimeInterval(Self.trunkDuration * 0.85)
-            for pane in ready { growIns[pane.repoURL] = boughs }
+            growIns = startTimes(from: now.addingTimeInterval(Self.trunkDuration * 0.85), for: ready)
         } else {
-            for pane in ready { growIns[pane.repoURL] = now }
+            growIns = startTimes(from: now, for: ready)
         }
         finishGrowingIn()
+    }
+
+    /// A dozen trees grow in together; past them the rest follow in a wave, a tree every `waveStep` in
+    /// ranking order from `waveLead` on, so no more than a score are ever growing at once: the forest
+    /// builds up behind the tree instead of every layer redrawing on the same frames.
+    static let waveFrom = 12
+    static let waveLead: TimeInterval = 1.0
+    static let waveStep: TimeInterval = 0.12
+    static let waveSpan: TimeInterval = 4.0
+
+    /// When each of `panes` starts growing in, for a whole-scene grow-in whose first trees start at `base`.
+    private func startTimes(from base: Date, for panes: [WallpaperModel]) -> [URL: Date] {
+        guard panes.count > Self.waveFrom else { return Dictionary(uniqueKeysWithValues: panes.map { ($0.repoURL, base) }) }
+        let place = Dictionary(rankedOrder(ranking).enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        let step = min(Self.waveStep, Self.waveSpan / Double(panes.count - Self.waveFrom))
+        let ordered = panes.sorted {
+            (place[$0.repoURL.path] ?? .max, $0.repoURL.path) < (place[$1.repoURL.path] ?? .max, $1.repoURL.path)
+        }
+        return Dictionary(uniqueKeysWithValues: ordered.enumerated().map { index, pane in
+            (pane.repoURL, index < Self.waveFrom ? base : base.addingTimeInterval(Self.waveLead + Double(index - Self.waveFrom) * step))
+        })
+    }
+
+    /// Rank every repository as it stands now.
+    private func takeRanking() {
+        ranking = Dictionary(panes.compactMap { pane in pane.tree.map { (pane.repoURL.path, $0.lastActive) } },
+                             uniquingKeysWith: { first, _ in first })
+        rankedOn = Calendar.current.startOfDay(for: Date())
+    }
+
+    /// The order the ranking puts repositories in (by path).
+    private func rankedOrder(_ ranking: [String: Date]) -> [String] {
+        let entries = ranking.map { (id: $0.key, lastActive: $0.value) }
+        return ForestPolicy.rank(entries).map { entries[$0].id }
+    }
+
+    /// The first hourly tick after midnight takes the ranking again; if it put the repositories in a
+    /// new order the trees stand again from the ground, as when the layout changes.
+    private func reRankAfterMidnight() {
+        guard Calendar.current.startOfDay(for: Date()) > rankedOn, !isAwaitingTrees else { return }
+        let before = rankedOrder(ranking)
+        takeRanking()
+        guard rankedOrder(ranking) != before else { return }
+        logEvent("midnight: the ranking changed, the trees stand again")
+        growInFromTheGround()
     }
 
     /// A pane's first tree: just pinned, or just started. In the orchard it grows in on its own plot.
@@ -238,14 +301,17 @@ final class BackgroundModel {
     private func treeArrived(_ url: URL) {
         guard isVisible else { return }
         guard !isAwaitingTrees else { return paneSettled() }
+        // A repository pinned now ranks on its own history; the others keep their places.
+        if ranking[url.path] == nil, let tree = panes.first(where: { $0.repoURL == url })?.tree { ranking[url.path] = tree.lastActive }
         let now = Date()
         switch (settings.arrangement, ready.count) {
         case (.singleTree, 2):
             growInFromTheGround()
             return
         case (.singleTree, 3...):
-            // Boughs waiting on a rising trunk keep waiting.
-            for pane in ready { growIns[pane.repoURL] = max(growIns[pane.repoURL] ?? now, now) }
+            // Every limb moves, so they grow again; boughs waiting on a rising trunk keep waiting.
+            let boughs = trunkGrowIn.map { max($0.addingTimeInterval(Self.trunkDuration * 0.85), now) } ?? now
+            growIns = startTimes(from: boughs, for: ready)
         default:
             growIns[url] = now
         }

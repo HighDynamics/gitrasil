@@ -9,6 +9,7 @@ struct WallpaperView: View {
     let background: BackgroundModel
     @Environment(\.colorScheme) private var colorScheme
     @State private var plans = PlanCache()
+    @State private var forestCache = ForestCache()
 
     var body: some View {
         let medium = background.settings.medium
@@ -20,6 +21,7 @@ struct WallpaperView: View {
         let now = background.now
         let shuffle = background.settings.layoutSeed
         let forest = background.settings.forest
+        let ranking = background.ranking
         let seeds = PinnedRepositories.seeds(panes.map(\.repoURL))
         // Read each pane here so Observation redraws when one publishes a new tree or growth, and
         // when the scene stops waiting for its trees.
@@ -40,26 +42,52 @@ struct WallpaperView: View {
                         .font(style.captionFont.weight(.regular))
                         .foregroundStyle(style.captionInk)
                 } else {
+                    // What the plans below are made from: the trees, the screen and what's shown.
+                    let key = PlanCache.Key(dark: colorScheme == .dark, medium: medium, size: proxy.size, now: now,
+                                            shuffle: shuffle, arrangement: arrangement, forest: forest, ranking: ranking,
+                                            branchNames: showsBranchNames, repoNames: showsRepoNames,
+                                            trees: panes.map { .init(id: $0.repoURL.path, tree: $0.tree) })
+                    let resting = zip(panes, seeds).map { Pane($0, seed: $1) }
+                    // The forest's trees are planned once, each a layer of its own (`ForestTreeLayer`).
+                    let stands = forestCache.stands(for: key) {
+                        Landscape(style: style, now: now, size: proxy.size, shuffle: shuffle, trunkGrowIn: nil, forest: forest,
+                                  ranking: ranking).forestStands(resting, arrangement: arrangement)
+                    }
                     TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !growing)) { timeline in
                         let date = timeline.date
+                        // The forest's small trees grow at fifteen frames a second, which the eye can't tell from thirty
+                        // there: each layer is redrawn half as often.
+                        let forestIDs = Set(stands?.stands.map(\.id) ?? [])
+                        let slowDate = Date(timeIntervalSinceReferenceDate: (date.timeIntervalSinceReferenceDate * 15).rounded(.down) / 15)
                         let panes = zip(panes, seeds).map { pane, seed in
-                            Pane(pane, seed: seed, grown: pane.grown(at: date), growIn: background.growIn(pane.repoURL, at: date))
+                            let at = forestIDs.contains(pane.repoURL.path) ? slowDate : date
+                            return Pane(pane, seed: seed, grown: pane.grown(at: at), growIn: background.growIn(pane.repoURL, at: at))
                         }
                         let trunkGrowIn = background.trunkGrowIn(at: date)
-                        Canvas { context, size in
-                            Landscape(style: style, now: now, size: size, shuffle: shuffle, trunkGrowIn: trunkGrowIn, forest: forest)
-                                .draw(panes, arrangement: arrangement, in: &context)
+                        let landscape = Landscape(style: style, now: now, size: proxy.size, shuffle: shuffle, trunkGrowIn: trunkGrowIn,
+                                                  forest: forest, ranking: ranking, layered: true)
+                        ZStack {
+                            if let stands {
+                                ForestGroundsLayer(landscape: landscape, plan: stands.grounds, generation: stands.generation).equatable()
+                                let byID = Dictionary(panes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                                ForEach(stands.stands) { stand in
+                                    if let pane = byID[stand.id] {
+                                        ForestTreeLayer(landscape: landscape, stand: stand, pane: pane, generation: stands.generation)
+                                            .equatable()
+                                    }
+                                }
+                            }
+                            MainTreeLayer(landscape: landscape, panes: panes, arrangement: arrangement,
+                                          forestIDs: forestIDs, generation: forestCache.generation)
+                                .equatable()
                         }
                     }
                     if showsBranchNames || showsRepoNames {
                         // The names hang where the full-grown trees put them, planned only when a tree or
                         // what's shown changes, not on every redraw.
-                        let key = PlanCache.Key(dark: colorScheme == .dark, medium: medium, size: proxy.size, now: now,
-                                                shuffle: shuffle, arrangement: arrangement, forest: forest,
-                                                branchNames: showsBranchNames, repoNames: showsRepoNames,
-                                                trees: panes.map { .init(id: $0.repoURL.path, tree: $0.tree) })
                         let plan = plans.plan(for: key) {
-                            Landscape(style: style, now: now, size: proxy.size, shuffle: shuffle, trunkGrowIn: nil, forest: forest).plan(
+                            Landscape(style: style, now: now, size: proxy.size, shuffle: shuffle, trunkGrowIn: nil, forest: forest,
+                                      ranking: ranking).plan(
                                 zip(panes, seeds).map { Pane($0, seed: $1) },
                                 arrangement: arrangement, branchNames: showsBranchNames, repoNames: showsRepoNames)
                         }
@@ -178,60 +206,10 @@ struct WallpaperView: View {
     }
 }
 
-/// The last banner plan a window made, kept until anything it was planned from changes. Planning
-/// measures every banner against the whole crown, so it's too slow to redo on every redraw (a growth
-/// starting or ending, a grow-in, the hourly tick).
-final class PlanCache {
-    struct Key: Equatable {
-        // swiftlint:disable:next nesting - a helper of Key alone, nowhere else to put it
-        struct Tree: Equatable {
-            let id: String
-            let tree: RepoTree?
-        }
-
-        let dark: Bool
-        /// Each medium writes names in its own hand, so their banners are sized differently.
-        let medium: Medium
-        let size: CGSize
-        let now: Date
-        /// The trees' layout seed: a reshuffle moves every limb, and its banner with it.
-        let shuffle: Int
-        let arrangement: Arrangement
-        let forest: ForestMode
-        let branchNames: Bool
-        let repoNames: Bool
-        let trees: [Tree]
-    }
-
-    private var key: Key?
-    private var plan = BannerPlan()
-
-    func plan(for key: Key, make: () -> BannerPlan) -> BannerPlan {
-        if key != self.key {
-            plan = make()
-            self.key = key
-        }
-        return plan
-    }
-}
-
-/// Where things sit on the screen, shared by the ground and every tree so they meet.
-enum Composition {
-    /// The ground line: high enough off the bottom to clear the Dock's usual reach.
-    static func groundY(_ height: CGFloat) -> CGFloat { height - max(96, height * 0.13) }
-    /// Clear of the menu bar.
-    static let top: CGFloat = 44
-    /// The height a full-grown tree is drawn for, crown included, in tree units (`TreeLayout`).
-    static let nominalHeight = 1.45
-    /// An orchard plot's width in tree units: the trees share one scale, so each is drawn as big as
-    /// its own history makes it, and a crown a little wider than its plot reaches into the next.
-    static let plotWidth = 1.3
-}
-
 // MARK: - Arrangements
 
 /// One repository as it's drawn this frame.
-struct Pane {
+struct Pane: Equatable {
     /// Its path: what its banners are keyed by, since two repositories can share a name.
     let id: String
     /// Its folder's name, as written under its tree or on its ribbon.
@@ -265,8 +243,17 @@ struct Landscape {
     let shuffle: Int
     /// How far the single tree's shared trunk has risen, while it's rising.
     let trunkGrowIn: Double?
-    /// How a crowd of trees is spread over the screen (the forest spike); the orchard as it is by default.
-    var forest: ForestMode = .off
+    /// How a crowd of trees is spread over the screen: by default the policy decides (`ForestMode.auto`).
+    var forest: ForestMode = .auto
+    var policy: ForestPolicy = .standard
+    /// How the single tree's boughs fan out; by default by how many there are (`Fit.fitting`).
+    var treeFit: YggdrasilLayout.Fit?
+    /// When each repository (by pane id) last had a commit, as the ranking last took it: frozen at launch
+    /// and at midnight, so a commit never reshuffles the trees. One not listed ranks on its own tree.
+    var ranking: [String: Date] = [:]
+    /// Whether the forest's trees are drawn as views of their own (`ForestTreeLayer`), which the
+    /// canvas then leaves out: a tree that isn't growing isn't redrawn.
+    var layered = false
 
     /// A pane's full-grown tree and where it stands on the screen.
     struct Planted {
@@ -289,11 +276,21 @@ struct Landscape {
     func draw(_ panes: [Pane], arrangement: Arrangement, in context: inout GraphicsContext) {
         Textures.grained(style, in: &context, size: size) { context in
             if isSingleTree(panes, arrangement: arrangement) {
-                drawSingleTree(panes, in: &context)
+                let scene = scene(panes, arrangement: arrangement)
+                if !scene.forest.isEmpty, !layered { drawForestBehind(scene, in: &context) }
+                drawSingleTree(scene.tree, problems: panes, narrowed: !scene.forest.isEmpty, in: &context)
             } else {
                 drawOrchard(panes, in: &context)
             }
         }
+    }
+
+    /// The repositories that didn't fit on the single tree, standing behind it on either side.
+    private func drawForestBehind(_ scene: Scene, in context: inout GraphicsContext) {
+        let (full, frame) = singleTree(scene.tree, narrowed: true)
+        let forest = forestScene(scene.forest, crown: CGFloat(full.bounds.width) * frame.scale)
+        drawForestGrounds(forest.plan, in: &context)
+        drawPlanted(forest.planted, of: scene.forest, in: &context)
     }
 
     /// The single tree takes two trees at least; with one it's that tree, in the orchard.
@@ -307,7 +304,7 @@ struct Landscape {
     /// screen's height or spills well past its plot. Each is planted a seeded touch off its plot's
     /// centre, so the row isn't ruled.
     func orchard(_ panes: [Pane]) -> [Planted] {
-        if forest.isPacked { return orchardPlanted(panes) }
+        if isPacked(panes) { return forestScene(panes).planted }
         let plot = size.width / CGFloat(panes.count)
         let tall = Composition.groundY(size.height) - Composition.top - TreeFrame.margin
         let shared = min(tall / Composition.nominalHeight, plot / Composition.plotWidth)
@@ -322,6 +319,9 @@ struct Landscape {
         }
     }
 
+    /// Whether an orchard of `panes` is too many for equal plots, so they stand in depth rows.
+    func isPacked(_ panes: [Pane]) -> Bool { forest.packs(panes.filter { $0.tree != nil }.count, policy: policy) }
+
     func drawOrchard(_ panes: [Pane], in context: inout GraphicsContext) {
         let plot = size.width / CGFloat(panes.count)
         for (index, pane) in panes.enumerated() where pane.tree == nil {
@@ -330,57 +330,73 @@ struct Landscape {
             }
         }
         let planted: [Planted]
-        if forest.isPacked {
+        if isPacked(panes) {
+            // Layered, each tree is a view of its own (`ForestTreeLayer`).
+            guard !layered else { return }
             let scene = forestScene(panes)
             planted = scene.planted
             drawForestGrounds(scene.plan, in: &context)
         } else {
             planted = orchard(panes)
         }
+        drawPlanted(planted, of: panes, in: &context)
+    }
+
+    /// Each planted tree, with its shadow and name.
+    func drawPlanted(_ planted: [Planted], of panes: [Pane], in context: inout GraphicsContext) {
         // Back to front, so a tree in front covers the foot of the one behind it.
         for planted in planted.sorted(by: { ($0.forest?.line ?? 0) > ($1.forest?.line ?? 0) }) {
-            let pane = panes[planted.index], tree = pane.tree!
-            let layout = pane.growIn.map { TreeLayout(tree: tree, seed: pane.seed, growIn: $0, shuffle: shuffle) }
-                ?? (pane.grown.isEmpty ? planted.full : TreeLayout(tree: tree, seed: pane.seed, grown: pane.grown, shuffle: shuffle))
-            let drawing = TreeDrawing(style: planted.forest?.style ?? style, now: now, frame: planted.frame)
-            // Its shadow and name come with it, not before it starts to grow.
-            if pane.growIn != 0 {
-                drawing.shadow(width: planted.full.bounds.width, in: &context)
-                if let forest = planted.forest {
-                    drawing.forestPlate(pane.name, line: forest.line, slot: forest.slot, in: &context)
-                } else {
-                    drawing.plate(pane.name, in: &context)
-                }
+            drawStand(planted, pane: panes[planted.index], in: &context)
+        }
+    }
+
+    /// One planted tree as `pane` has it now: its shadow and name, then the tree.
+    func drawStand(_ planted: Planted, pane: Pane, in context: inout GraphicsContext) {
+        let tree = pane.tree!
+        let layout = pane.growIn.map { TreeLayout(tree: tree, seed: pane.seed, growIn: $0, shuffle: shuffle) }
+            ?? (pane.grown.isEmpty ? planted.full : TreeLayout(tree: tree, seed: pane.seed, grown: pane.grown, shuffle: shuffle))
+        let drawing = TreeDrawing(style: planted.forest?.style ?? style, now: now, frame: planted.frame)
+        // Its shadow and name come with it, not before it starts to grow.
+        if pane.growIn != 0 {
+            drawing.shadow(width: planted.full.bounds.width, in: &context)
+            if let forest = planted.forest {
+                drawing.forestPlate(pane.name, line: forest.line, slot: forest.slot, in: &context)
+            } else {
+                drawing.plate(pane.name, in: &context)
             }
-            drawing.draw(layout.stems, seeds: layout.stems.map { _ in pane.seed }, parents: layout.stems.map { $0.fork?.parent },
-                         rootedAt: layout.stems.isEmpty ? nil : 0, rootSeed: pane.seed, in: &context)
-            if let problem = pane.problem {
-                problemText(problem, at: CGPoint(x: planted.frame.origin.x, y: size.height / 2), in: &context)
-            }
+        }
+        drawing.draw(layout.stems, seeds: layout.stems.map { _ in pane.seed }, parents: layout.stems.map { $0.fork?.parent },
+                     rootedAt: layout.stems.isEmpty ? nil : 0, rootSeed: pane.seed, in: &context)
+        if let problem = pane.problem {
+            problemText(problem, at: CGPoint(x: planted.frame.origin.x, y: size.height / 2), in: &context)
         }
     }
 
     /// One tree for every repository with a tree (`ready`): a shared trunk, a bough each, fanned in
-    /// pin order, and where it stands.
-    func singleTree(_ ready: [Pane]) -> (full: YggdrasilLayout, frame: TreeFrame) {
+    /// pin order, and where it stands. A forest standing beside it (`narrowed`) leaves it less of the width.
+    func singleTree(_ ready: [Pane], narrowed: Bool = false) -> (full: YggdrasilLayout, frame: TreeFrame) {
         // A bough's name is its seed: it sets the bough's lean.
-        let full = YggdrasilLayout(repos: ready.map { .init(name: $0.seed, tree: $0.tree!) }, shuffle: shuffle)
+        let full = YggdrasilLayout(repos: ready.map { .init(name: $0.seed, tree: $0.tree!) }, shuffle: shuffle,
+                                   fit: fit(for: ready.count))
         let tall = Composition.groundY(size.height) - Composition.top - TreeFrame.margin
         // Its boughs lean, so it's rarely as tall as its trees would be on their own.
         let nominal = YggdrasilLayout.crotchHeight + Composition.nominalHeight * 0.82
+        let width = narrowed ? size.width * Self.crownShare : size.width - 2 * TreeFrame.margin
         let frame = TreeFrame(size: size, bounds: full.bounds, nominalHeight: nominal, scale: tall / nominal,
-                              maxWidth: size.width - 2 * TreeFrame.margin, x: size.width / 2)
+                              maxWidth: width, x: size.width / 2)
         return (full, frame)
     }
 
-    /// The single tree (each repository's name hangs on its ribbon over it: `BannerLayer`).
-    func drawSingleTree(_ panes: [Pane], in context: inout GraphicsContext) {
-        let ready = panes.filter { $0.tree != nil }
-        let (full, frame) = singleTree(ready)
+    func fit(for count: Int) -> YggdrasilLayout.Fit { treeFit ?? .fitting(count: count) }
+
+    /// The single tree (each repository's name hangs on its ribbon over it: `BannerLayer`); `panes`
+    /// are every pane's, for the problems written under it.
+    func drawSingleTree(_ ready: [Pane], problems panes: [Pane], narrowed: Bool, in context: inout GraphicsContext) {
+        let (full, frame) = singleTree(ready, narrowed: narrowed)
         let still = trunkGrowIn == nil && ready.allSatisfy { $0.grown.isEmpty && $0.growIn == nil }
         let layout = still ? full : YggdrasilLayout(repos: ready.map {
             .init(name: $0.seed, tree: $0.tree!, grown: $0.grown, growIn: $0.growIn)
-        }, trunkGrowIn: trunkGrowIn, shuffle: shuffle)
+        }, trunkGrowIn: trunkGrowIn, shuffle: shuffle, fit: fit(for: ready.count))
         let drawing = TreeDrawing(style: style, now: now, frame: frame)
         let stems = [layout.trunk] + layout.boughs.flatMap(\.layout.stems)
         // Each bough's stems are seeded from its repository, as an orchard tree's are.
@@ -401,7 +417,7 @@ struct Landscape {
         }
     }
 
-    private func problemText(_ text: String, at point: CGPoint, in context: inout GraphicsContext) {
+    func problemText(_ text: String, at point: CGPoint, in context: inout GraphicsContext) {
         context.draw(Text(text).font(style.captionFont).foregroundColor(style.captionInk), at: point, anchor: .center)
     }
 }

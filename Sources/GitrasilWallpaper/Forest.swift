@@ -2,24 +2,55 @@ import AppKit
 import SwiftUI
 import GitrasilCore
 
-// The forest spike (docs/forest/PLAN.md): the orchard's trees laid out by `ForestLayout` instead of in
-// equal plots. Opt-in (`GITRASIL_BACKGROUND_FOREST`); nothing here runs in the default orchard.
+// The forest (docs/forest/PLAN.md): trees laid out by `ForestLayout` in depth rows instead of equal
+// plots, once the orchard has more than `ForestPolicy.plainLimit` of them, and in the single tree the
+// repositories that don't fit on it, standing behind it on either side.
 
 extension Landscape {
 
-    /// A forest's trees and where `ForestLayout` stands them, with the extra ground lines and groves.
-    func forestScene(_ panes: [Pane]) -> (planted: [Planted], plan: ForestPlan) {
+    /// Where the repositories are drawn: on the single tree, in the forest, or (a plain orchard) neither.
+    struct Scene {
+        /// On the single tree, in pin order (its bough is its place in this list).
+        var tree: [Pane] = []
+        /// In the forest, in pin order.
+        var forest: [Pane] = []
+    }
+
+    /// The share of the screen's width the single tree may take when a forest stands beside it, and
+    /// the share of its crown's width kept clear of forest trees (lower down they'd meet its roots).
+    static let crownShare: CGFloat = 0.66
+    static let clearShare: CGFloat = 0.8
+    /// How much of the height the forest beside a tree may fill, and how pale its nearest trees stand.
+    static let besideHeight: CGFloat = env("GITRASIL_FOREST_BESIDE", 0.58, 0.3...1)
+    static let besideFade = 0.42
+
+    /// Splits `panes` between the single tree and the forest: the tree takes the display's capacity,
+    /// the most recently active first (by the ranking: frozen, so a commit doesn't move trees).
+    func scene(_ panes: [Pane], arrangement: Arrangement) -> Scene {
+        let ready = panes.filter { $0.tree != nil }
+        guard isSingleTree(panes, arrangement: arrangement) else { return Scene(tree: [], forest: isPacked(panes) ? ready : []) }
+        guard forest != .off, ready.count > policy.treeCapacity(for: size) else { return Scene(tree: ready, forest: []) }
+        let onTree = policy.onTree(ready.map { ($0.seed, ranking[$0.id] ?? $0.tree?.lastActive ?? .distantPast) }, size: size)
+        return Scene(tree: ready.enumerated().filter { onTree.contains($0.offset) }.map(\.element),
+                     forest: ready.enumerated().filter { !onTree.contains($0.offset) }.map(\.element))
+    }
+
+    /// A forest's trees and where `ForestLayout` stands them, with the extra ground lines. Beside a
+    /// single tree (`crown`: how wide its crown stands), they keep clear of it, stand lower and paler.
+    func forestScene(_ panes: [Pane], crown: CGFloat? = nil) -> (planted: [Planted], plan: ForestPlan) {
         let ready = panes.indices.filter { panes[$0].tree != nil }
         let layouts = ready.map { TreeLayout(tree: panes[$0].tree!, seed: panes[$0].seed, shuffle: shuffle) }
         let trees = zip(ready, layouts).map { index, layout -> ForestTree in
             let pane = panes[index], tree = pane.tree!
             return ForestTree(id: pane.seed, group: Self.folder(of: pane.id), left: layout.bounds.minX, right: layout.bounds.maxX,
-                              height: layout.bounds.maxY, lastActive: tree.lastActive, activity: tree.activity(now: now))
+                              height: layout.bounds.maxY, lastActive: ranking[pane.id] ?? tree.lastActive)
         }
+        let beside = crown != nil
         let screen = ForestScreen(size: size, groundY: Composition.groundY(size.height), top: Composition.top,
                                   margin: TreeFrame.margin, nominalHeight: Composition.nominalHeight,
-                                  heightShare: Self.heightShare)
-        let plan = ForestLayout.plan(trees, mode: forest, screen: screen)
+                                  heightShare: beside ? Self.besideHeight : Self.heightShare,
+                                  gap: (crown ?? 0) * Self.clearShare, minFade: beside ? Self.besideFade : 0)
+        let plan = ForestLayout.rows(trees, screen: screen)
         var faded: [Double: WallpaperStyle] = [:]
         let planted = plan.placements.map { place -> Planted in
             let frame = TreeFrame(size: size, scale: place.scale, x: place.x, ground: place.ground, detailFloor: 0.2)
@@ -31,18 +62,20 @@ extension Landscape {
         return (planted, plan)
     }
 
-    /// GITRASIL_FOREST_HEIGHT (0.4…1): how much of the screen's height the forest may fill.
-    static let heightShare: CGFloat = ProcessInfo.processInfo.environment["GITRASIL_FOREST_HEIGHT"]
-        .flatMap { Double($0) }.map { CGFloat(min(max($0, 0.4), 1)) } ?? 1
+    /// GITRASIL_FOREST_HEIGHT (0.4…1): how much of the screen's height a forest on its own may fill.
+    static let heightShare: CGFloat = env("GITRASIL_FOREST_HEIGHT", 1, 0.4...1)
 
-    func orchardPlanted(_ panes: [Pane]) -> [Planted] { forestScene(panes).planted }
+    private static func env(_ key: String, _ standard: CGFloat, _ range: ClosedRange<CGFloat>) -> CGFloat {
+        ProcessInfo.processInfo.environment[key].flatMap { Double($0) }.map { min(max(CGFloat($0), range.lowerBound), range.upperBound) }
+            ?? standard
+    }
 
     /// The folder a repository sits in.
     static func folder(of path: String) -> String {
         (path as NSString).deletingLastPathComponent
     }
 
-    /// The ground under each line behind the front one, and each grove's caption.
+    /// The ground under each line behind the front one.
     func drawForestGrounds(_ plan: ForestPlan, in context: inout GraphicsContext) {
         for ground in plan.grounds {
             var line = Path()
@@ -55,18 +88,6 @@ extension Landscape {
             let look = style.faded(ground.fade)
             Sketch(look).stroke(line, with: .color(look.ink.opacity(0.4)), width: look.lineWidth * 0.9,
                                 seed: HandDrawn.seed("ground\(Int(ground.y))"), in: &context)
-        }
-        for grove in plan.groves {
-            let y = grove.y + 74
-            var bracket = Path()
-            bracket.move(to: CGPoint(x: grove.from, y: y - 8))
-            bracket.addLine(to: CGPoint(x: grove.from, y: y))
-            bracket.addLine(to: CGPoint(x: grove.to, y: y))
-            bracket.addLine(to: CGPoint(x: grove.to, y: y - 8))
-            context.stroke(bracket, with: .color(style.ink.opacity(0.28)), lineWidth: style.lineWidth)
-            let caption = Text("\((grove.name as NSString).lastPathComponent) · \(grove.count)")
-                .font(style.captionFont).foregroundColor(style.captionInk)
-            context.draw(caption, at: CGPoint(x: (grove.from + grove.to) / 2, y: y + 6), anchor: .top)
         }
     }
 }

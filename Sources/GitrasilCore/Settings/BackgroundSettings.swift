@@ -53,6 +53,7 @@ public final class BackgroundSettings {
     static let gustsKey = "gusts"
     static let mediumKey = "medium"
     static let layoutSeedKey = "layoutSeed"
+    static let forestKey = "forest"
 
     public var arrangement: Arrangement {
         didSet { if arrangement != oldValue { storage.set(arrangement.rawValue, forKey: Self.arrangementKey) } }
@@ -86,9 +87,19 @@ public final class BackgroundSettings {
         didSet { if layoutSeed != oldValue { storage.set(layoutSeed, forKey: Self.layoutSeedKey) } }
     }
 
-    /// How a crowd of trees is spread over the screen (the forest spike, docs/forest/PLAN.md). Not
-    /// saved: `GITRASIL_BACKGROUND_FOREST` picks one for a run, and the default is the orchard as it is.
-    public var forest: ForestMode = .off
+    /// Whether more repositories than the plain layout holds (`ForestPolicy.plainLimit`) are shown: the
+    /// single tree keeps the most recently active and the rest stand in a forest behind it, the orchard
+    /// goes into rows (docs/forest/PLAN.md). Off, the background shows at most that many.
+    public var showsForest: Bool {
+        didSet { if showsForest != oldValue { storage.set(showsForest, forKey: Self.forestKey) } }
+    }
+
+    /// `GITRASIL_BACKGROUND_FOREST` forces a mode for one run, whatever `showsForest` says. Not saved.
+    public var forestOverride: ForestMode?
+
+    /// How a crowd of trees is spread over the screen: the policy decides (`ForestPolicy`) when the
+    /// Forest is on, never when it's off.
+    public var forest: ForestMode { forestOverride ?? (showsForest ? .auto : .off) }
 
     /// A new layout seed, never 0 or the one in use.
     public func reshuffle() {
@@ -115,5 +126,6 @@ public final class BackgroundSettings {
         showsRepoNames = storage.object(forKey: Self.repoNamesKey) as? Bool ?? true
         gusts = storage.object(forKey: Self.gustsKey) as? Bool ?? false
         layoutSeed = storage.object(forKey: Self.layoutSeedKey) as? Int ?? 0
+        showsForest = storage.object(forKey: Self.forestKey) as? Bool ?? false
     }
 }

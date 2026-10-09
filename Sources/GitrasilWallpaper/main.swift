@@ -44,7 +44,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let suite = PinnedRepositories.appSuiteName()
         let defaults = UserDefaults(suiteName: suite) ?? .standard
-        let pins = PinnedRepositories(storage: defaults, limit: BackgroundModel.maxPanes)
         // The offscreen aids try each arrangement and medium in turn: on a copy of the saved settings,
         // so a run never changes them. The pins are only read.
         let settings: BackgroundSettings
@@ -53,9 +52,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             settings = BackgroundSettings(storage: MemorySettings(defaults.dictionaryRepresentation()))
         }
-        if let forest = ProcessInfo.processInfo.environment["GITRASIL_BACKGROUND_FOREST"].flatMap(ForestMode.init(rawValue:)) {
-            settings.forest = forest
-        }
+        settings.forestOverride = ProcessInfo.processInfo.environment["GITRASIL_BACKGROUND_FOREST"].flatMap(ForestMode.init(rawValue:))
+        let pins = PinnedRepositories(storage: defaults, limit: BackgroundModel.paneLimit(for: settings))
         let background = BackgroundModel(pins: pins, settings: settings)
         logEvent("defaults \(suite), \(pins.pins.count) pinned (\(pins.shown.count) shown), "
             + "\(settings.arrangement.rawValue), \(settings.medium.rawValue)")
