@@ -128,7 +128,7 @@ public struct YggdrasilLayout: Sendable {
 
         boughs = repos.enumerated().map { index, repo in
             let planting = Self.planting(index: index, of: repos.count, name: SeededRandom.key(repo.name, shuffle: shuffle),
-                                         trunk: nodes, fit: fit)
+                                         width: TreeLayout.footWidth(repo.tree), trunk: nodes, fit: fit)
             return Bough(name: repo.name,
                          layout: TreeLayout(tree: repo.tree, seed: repo.name, grown: repo.grown, planting: planting,
                                             growIn: repo.growIn, shuffle: shuffle),
@@ -165,8 +165,9 @@ public struct YggdrasilLayout: Sendable {
     /// into its top, a touch toward its side and a seeded hair higher or lower, so the boughs grow out
     /// of the wood rather than sitting on it, and don't all spring from one point. A crowded tree
     /// (`Fit.footSpread`) stands the feet down the head of the trunk instead, the outer boughs lowest
-    /// and furthest to their side, each still inside the trunk's width at its height.
-    static func planting(index: Int, of count: Int, name: String, trunk: [TreeLayout.Node],
+    /// and furthest to their side, each still inside the trunk's width at its height. `width` is the
+    /// bough's own base width (`TreeLayout.footWidth`): it must fit, not only its middle.
+    static func planting(index: Int, of count: Int, name: String, width: Double, trunk: [TreeLayout.Node],
                          fit: Fit = .standard) -> TreeLayout.Planting {
         var rng = SeededRandom(name, -5)
         let crotch = trunk[trunk.count - 1]
@@ -177,7 +178,8 @@ public struct YggdrasilLayout: Sendable {
         let y = crotch.point.y - 0.03 - footDrop * spreadOut * abs(spread) + rng.next(in: -0.012...0.012)
         let wood = wood(at: y, in: trunk)
         let reach = (1 - spreadOut) * sin(heading) * 0.012 + spreadOut * spread * footRoom * wood.width
-        let limit = footRoom * wood.width
+        // Its whole base, `width` across, stays inside the trunk: a big repository stands nearer the middle.
+        let limit = min(footRoom * wood.width, max(wood.width - width, 0) / 2)
         let foot = CGPoint(x: wood.x + min(max(reach, -limit), limit), y: y)
         let outward: Double = abs(spread) < 0.2 ? 0 : (spread < 0 ? -1 : 1)
         let fork = TreeLayout.Fork(parent: nil, node: trunk.lastIndex { $0.point.y <= y } ?? 0, width: wood.width, heading: wood.heading)
