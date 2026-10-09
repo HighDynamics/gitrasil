@@ -75,7 +75,8 @@ scripts/check.sh test     # swift test
 SwiftFormat and SwiftLint are downloaded at pinned, checksummed versions into `.build/tools/` on
 first use, so local and CI results match. CI (`.github/workflows/ci.yml`) runs the same four
 checks, as the jobs **Format**, **Lint**, **Build** and **Test**, on every pull request and push to
-main. Which tools, and why: `docs/ci-quality.md`.
+main; a ruleset on `main` requires all four, and pull requests merge with merge commits only.
+Which tools, and why: `docs/ci-quality.md`.
 
 ## Run the background
 

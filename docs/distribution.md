@@ -8,7 +8,7 @@ no bundle, version, icon or signature.
 Researched in October 2026 (macOS 26.6, Xcode 27, Swift 6.4). Apple's and Homebrew's rules change;
 the dates below say when each fact was true.
 
-**Status.** Built as far as it goes without a paid Apple Developer account: `scripts/build-app.sh`,
+**Status (current).** Built as far as it goes without a paid Apple Developer account: `scripts/build-app.sh`,
 `scripts/package-app.sh`, `scripts/notarize.sh`, `.github/workflows/release.yml`, launch at login and
 an opt-in update check in the menu. The bundle identifier is settled; what's left is under
 *Decisions* (the end of this file).
@@ -22,8 +22,8 @@ that adds a *Gitrasil 0.2.0 Is Available* item to the menu, which opens the rele
 no hosting beyond GitHub, nothing to lose, nothing that phones home unless asked.
 
 This needs one thing first: **the downloads have to be public.** On a private repository, releases
-(and the Releases API) are visible only to collaborators. `HighDynamics/gitrasil` is therefore made
-public under the MIT licence; the workflow keeps a switch for publishing releases to a separate
+(and the Releases API) are visible only to collaborators. `HighDynamics/gitrasil` is therefore public,
+under the MIT licence; the workflow keeps a switch for publishing releases to a separate
 public repository instead (below).
 
 If Gitrasil spreads past a few friends, or the *Open Anyway* step on every update gets old, join the
@@ -244,7 +244,7 @@ With no secrets it does the ad-hoc path. Two switches, both off:
   fine-grained token with *Contents: write* on that repository only). Then the release is made there
   and the app's update check looks there.
 
-**Before turning signing on** (nothing here is set up on GitHub yet). The workflow's checks run in
+**Before turning signing on** (none of this is set up on GitHub yet; releases are ad-hoc signed for now). The workflow's checks run in
 the workflow file, which anyone who can push a branch could change; these settings hold whatever the
 file says:
 
@@ -288,7 +288,7 @@ defaults delete gitrasil-try            # afterwards, the throwaway suite
   answer: it waits for Developer ID. (Before registering, `SMAppService.mainApp.status` reads
   *not found* for the ad-hoc app in `dist/`, which the menu shows as unticked; the launch log says
   `open at login not found`.)
-- **Update check**: before the first release (or with the repository private), *Check for Updates
+- **Update check**: before the first release, *Check for Updates
   Now* says no release was found. `--env GITRASIL_RELEASES_REPOSITORY=<owner/name>` points the check
   at another repository to see the found-a-newer-one path: checked here against
   `sparkle-project/Sparkle`, whose 2.10.0 the app took for a newer Gitrasil and kept in the suite
@@ -311,3 +311,5 @@ Made (October 2026):
    `packaging/Info.plist` and in the update check's scheduler identifier in `AppServices.swift`. The
    defaults suite stays `com.gitrasil.background`, so pins and settings saved before the change
    carry over.
+6. **Merging** — a ruleset on `main` requires the CI checks (Format, Lint, Build and Test), and pull
+   requests merge with merge commits only. Releases are tagged from `main`.

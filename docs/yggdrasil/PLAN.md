@@ -8,7 +8,8 @@ per-branch inks, light and dark, displays, pins, ref-only watching and 0% idle.
 Branch `spike/yggdrasil`, cut from `spike/live-background` (ce20fcb); renamed `feature/yggdrasil`
 for review after round 4.
 
-**Status.** Built through round 4 (at the end). The rounds are kept as they were planned and
+**Status.** A historical record: the design as it was planned and built, through round 8 (at the end);
+the README describes the current behaviour. The rounds are kept as they were planned and
 built; where a later round changed something, a note says so. Since round 3 the old branch-graph
 drawing is gone: `GraphLayout` (lanes and rows) and the derivations only it used were removed, and
 the store's `HistoryGraph` became `RepoGraph` (trunk, branches, buds), which is all the tree needs.

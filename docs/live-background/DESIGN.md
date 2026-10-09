@@ -3,7 +3,7 @@
 > Kept as the record of the research and the first spike. The background has since moved on
 > (it draws trees, not a branch graph); `docs/yggdrasil/PLAN.md` describes what is built.
 
-Status: phase 2 on `spike/live-background`. The background is the `GitrasilWallpaper` target, run
+Status when written: phase 2 on `spike/live-background`. The background is the `GitrasilWallpaper` target, run
 with `scripts/run-wallpaper.sh`; repos are pinned from its menu-bar item. Sections 1–5 are the
 phase 1 research; "Phase 2" near the end records what was decided and built since.
 
