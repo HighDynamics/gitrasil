@@ -29,6 +29,8 @@ public enum GitError: Error, Sendable {
     /// git ran longer than the runner's timeout (a sleeping network volume, files not yet downloaded)
     /// and was stopped.
     case timedOut(args: [String], seconds: Double)
+    /// An earlier call in this repository timed out, so this one wasn't tried: not before `retryAt`.
+    case backingOff(retryAt: Date)
 }
 
 /// Everything that shells out to `git` goes through this. A protocol so tests can inject
@@ -50,14 +52,6 @@ public extension GitRunning {
         }
         return out
     }
-}
-
-/// Holds the two drained pipe buffers. Each is written by exactly one I/O queue and read only
-/// after `DispatchGroup.wait()` establishes the happens-before, so the access is race-free —
-/// `@unchecked` because the compiler can't see that ordering.
-private final class DataBox: @unchecked Sendable {
-    var out = Data()
-    var err = Data()
 }
 
 public extension GitRunner {
@@ -90,15 +84,22 @@ public extension GitRunner {
     }
 }
 
-/// One `git` invocation in flight: finished by whichever comes first of its exit, its timeout and its
-/// task's cancellation, once; the others find it done. A stop doesn't wait for git's pipes to close (a
-/// child it started can hold them open), and kills the process if it hasn't gone after a moment.
+/// One `git` invocation in flight: finished by whichever comes first of its exit with its output read,
+/// its timeout and its task's cancellation, once; the others find it done. Output is read as it arrives
+/// (no thread waits on a pipe), so a stop closes the pipes and nothing stays blocked behind a child of
+/// git that holds them open; the process is terminated, and killed if it hasn't gone after a moment.
 private final class Call: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<GitOutput, Error>?
     private var process: Process?
+    private var pipes: [Pipe] = []
+    private var timer: DispatchSourceTimer?
     private var stopped: Error?
     private var done = false
+    private var out = Data()
+    private var err = Data()
+    private var openPipes = 2
+    private var status: Int32?
 
     var isStopped: Bool { lock.withLock { stopped != nil } }
 
@@ -110,32 +111,83 @@ private final class Call: @unchecked Sendable {
         if let error { continuation.resume(throwing: error) }
     }
 
-    func attach(_ process: Process) {
+    /// The process is running: read its output and time it. Called once, after `process.run()` succeeded.
+    func attach(_ process: Process, _ pipes: (out: Pipe, err: Pipe), timeout: TimeInterval, onTimeout: @escaping @Sendable () -> Void) {
+        let timer = DispatchSource.makeTimerSource(queue: .global())
+        timer.schedule(deadline: .now() + timeout)
+        timer.setEventHandler(handler: onTimeout)
         let doomed = lock.withLock { () -> Bool in
             self.process = process
-            return stopped != nil
+            self.pipes = [pipes.out, pipes.err]
+            self.timer = timer
+            return stopped != nil || done
         }
-        if doomed { Self.kill(process) }
+        // A timer must be resumed once before it's released, even when it's cancelled at once.
+        timer.resume()
+        if doomed {
+            timer.cancel()
+            if isStopped { Self.kill(process); closePipes() }
+            return
+        }
+        for (pipe, isError) in [(pipes.out, false), (pipes.err, true)] {
+            pipe.fileHandleForReading.readabilityHandler = { [self] handle in
+                let data = handle.availableData
+                if data.isEmpty { handle.readabilityHandler = nil }
+                read(data, isError: isError)
+            }
+        }
+    }
+
+    private func read(_ data: Data, isError: Bool) {
+        lock.withLock {
+            if data.isEmpty { openPipes -= 1 } else if isError { err.append(data) } else { out.append(data) }
+        }
+        finishIfComplete()
+    }
+
+    func exited(_ status: Int32) {
+        lock.withLock { self.status = status }
+        finishIfComplete()
+    }
+
+    /// Done once the process has exited and both its pipes have run dry.
+    private func finishIfComplete() {
+        let output = lock.withLock { () -> GitOutput? in
+            guard let status, openPipes <= 0, !done else { return nil }
+            return GitOutput(status: status, stdout: out, stderr: err)
+        }
+        if let output { finish(.success(output)) }
     }
 
     func finish(_ result: Result<GitOutput, Error>) {
-        let continuation = lock.withLock { () -> CheckedContinuation<GitOutput, Error>? in
+        let (continuation, timer) = lock.withLock { () -> (CheckedContinuation<GitOutput, Error>?, DispatchSourceTimer?) in
             done = true
-            defer { self.continuation = nil }
-            return self.continuation
+            defer { self.continuation = nil; self.timer = nil }
+            return (self.continuation, self.timer)
         }
+        timer?.cancel()
         continuation?.resume(with: result)
     }
 
     func stop(_ error: Error) {
-        let (continuation, process) = lock.withLock { () -> (CheckedContinuation<GitOutput, Error>?, Process?) in
-            guard !done, stopped == nil else { return (nil, nil) }
+        let (continuation, process, timer) = lock.withLock { () -> (CheckedContinuation<GitOutput, Error>?, Process?, DispatchSourceTimer?) in
+            guard !done, stopped == nil else { return (nil, nil, nil) }
             stopped = error
-            defer { self.continuation = nil }
-            return (self.continuation, self.process)
+            defer { self.continuation = nil; self.timer = nil }
+            return (self.continuation, self.process, self.timer)
         }
+        timer?.cancel()
         continuation?.resume(throwing: error)
         if let process { Self.kill(process) }
+        closePipes()
+    }
+
+    private func closePipes() {
+        let pipes = lock.withLock { self.pipes }
+        for pipe in pipes {
+            pipe.fileHandleForReading.readabilityHandler = nil
+            try? pipe.fileHandleForReading.close()
+        }
     }
 
     private static func kill(_ process: Process) {
@@ -154,9 +206,11 @@ public struct GitRunner: GitRunning {
     private let extraEnvironment: [String: String]
     private let timeout: TimeInterval
     private let gate: GitGate
+    private let command: [String]
 
     /// How long a git process may run before it's stopped (GITRASIL_GIT_TIMEOUT seconds; default 60). The
-    /// app only reads: a `git log` taking a minute is a repository that isn't answering.
+    /// app only reads: a `git log` taking a minute is a repository that isn't answering. A repository
+    /// that times out isn't tried again for a while (`GitGate`'s back-off).
     static let defaultTimeout: TimeInterval = ProcessInfo.processInfo.environment["GITRASIL_GIT_TIMEOUT"].flatMap { Double($0) } ?? 60
 
     /// - Parameters:
@@ -167,32 +221,44 @@ public struct GitRunner: GitRunning {
         self.init(workdir: workdir, extraEnvironment: extraEnvironment, timeout: Self.defaultTimeout, gate: .shared)
     }
 
-    init(workdir: URL, extraEnvironment: [String: String] = [:], timeout: TimeInterval, gate: GitGate) {
+    /// `command` is what's launched with the arguments after it: git through `env`; a test swaps in a program that hangs.
+    init(workdir: URL, extraEnvironment: [String: String] = [:], timeout: TimeInterval, gate: GitGate,
+         command: [String] = ["/usr/bin/env", "git"]) {
         self.workdir = workdir
         self.extraEnvironment = extraEnvironment
         self.timeout = timeout
         self.gate = gate
+        self.command = command
     }
 
     public func run(_ args: [String]) async throws -> GitOutput {
+        let key = workdir.path
+        try gate.checkBackoff(key)
         try await gate.enter()
         defer { gate.leave() }
         let call = Call()
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                call.begin(continuation)
-                guard !call.isStopped else { return }
-                launch(args, call)
+        do {
+            let output = try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    call.begin(continuation)
+                    guard !call.isStopped else { return }
+                    launch(args, call)
+                }
+            } onCancel: {
+                call.stop(CancellationError())
             }
-        } onCancel: {
-            call.stop(CancellationError())
+            gate.succeeded(key)
+            return output
+        } catch let error as GitError {
+            if case .timedOut = error { gate.timedOut(key) }
+            throw error
         }
     }
 
     private func launch(_ args: [String], _ call: Call) {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git"] + args
+        process.executableURL = URL(fileURLWithPath: command[0])
+        process.arguments = Array(command.dropFirst()) + args
         process.currentDirectoryURL = workdir
 
         // The workdir decides the repository, never an inherited GIT_DIR.
@@ -203,21 +269,7 @@ public struct GitRunner: GitRunning {
         let errPipe = Pipe()
         process.standardOutput = outPipe
         process.standardError = errPipe
-
-        // Drain both pipes concurrently to avoid the classic fill-the-buffer deadlock
-        // (a full stderr pipe stalling the child while we block reading stdout).
-        let box = DataBox()
-        let group = DispatchGroup()
-        let ioQueue = DispatchQueue(label: "gitrasil.git.io", attributes: .concurrent)
-        group.enter()
-        ioQueue.async { box.out = outPipe.fileHandleForReading.readDataToEndOfFile(); group.leave() }
-        group.enter()
-        ioQueue.async { box.err = errPipe.fileHandleForReading.readDataToEndOfFile(); group.leave() }
-
-        process.terminationHandler = { proc in
-            group.wait()
-            call.finish(.success(GitOutput(status: proc.terminationStatus, stdout: box.out, stderr: box.err)))
-        }
+        process.terminationHandler = { proc in call.exited(proc.terminationStatus) }
 
         do {
             try process.run()
@@ -225,10 +277,9 @@ public struct GitRunner: GitRunning {
             call.finish(.failure(GitError.launchFailed(underlying: String(describing: error))))
             return
         }
-        call.attach(process)
         let seconds = timeout
-        DispatchQueue.global().asyncAfter(deadline: .now() + seconds) {
-            call.stop(GitError.timedOut(args: args, seconds: seconds))
+        call.attach(process, (outPipe, errPipe), timeout: seconds) { [weak call] in
+            call?.stop(GitError.timedOut(args: args, seconds: seconds))
         }
     }
 }

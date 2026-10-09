@@ -13,7 +13,39 @@ final class GitGate: @unchecked Sendable {
     private var waiting: [(id: UInt64, continuation: CheckedContinuation<Void, Error>)] = []
     private var nextID: UInt64 = 0
 
-    init(limit: Int) { free = max(limit, 1) }
+    /// A repository (by folder) that timed out isn't tried again at once: its next call fails fast until
+    /// `base` seconds have passed, twice as long for each timeout in a row, at most `ceiling`. The one call
+    /// let through after that is the test: a success forgets the failures. So a volume that stays hung costs
+    /// one stopped process now and then, not a new one for every refresh.
+    private var failures: [String: (count: Int, until: Date)] = [:]
+    private let base: TimeInterval
+    private let ceiling: TimeInterval
+
+    init(limit: Int, backoff base: TimeInterval = 30, ceiling: TimeInterval = 600) {
+        free = max(limit, 1)
+        self.base = base
+        self.ceiling = ceiling
+    }
+
+    /// Throws `GitError.backingOff` while `key` is waiting out a timeout.
+    func checkBackoff(_ key: String) throws {
+        let until = lock.withLock { failures[key]?.until }
+        if let until, until > Date() { throw GitError.backingOff(retryAt: until) }
+    }
+
+    func timedOut(_ key: String) {
+        lock.withLock {
+            let count = (failures[key]?.count ?? 0) + 1
+            failures[key] = (count, Date().addingTimeInterval(min(base * pow(2, Double(count - 1)), ceiling)))
+        }
+    }
+
+    func succeeded(_ key: String) {
+        lock.withLock { _ = failures.removeValue(forKey: key) }
+    }
+
+    /// The places taken and the waiters queued, for tests to wait on.
+    var occupancy: (free: Int, waiting: Int) { lock.withLock { (free, waiting.count) } }
 
     /// Waits for a place; throws `CancellationError` if the task is cancelled first, holding none.
     func enter() async throws {
