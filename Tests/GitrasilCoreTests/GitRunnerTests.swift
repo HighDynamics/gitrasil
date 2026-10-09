@@ -18,7 +18,7 @@ final class GitRunnerTests: XCTestCase {
         XCTAssertEqual(environment["GIT_EDITOR"], "true", "extra wins over inherited")
     }
 
-    /// Daniel launched the background from a terminal whose editor had been opened by
+    /// The background was once launched from a terminal whose editor had been opened by
     /// `git difftool` in another repository, so the app inherited GIT_DIR/GIT_WORK_TREE for it and
     /// every pin resolved to that repository. The workdir must decide.
     @MainActor

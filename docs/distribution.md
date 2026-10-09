@@ -288,7 +288,7 @@ defaults delete gitrasil-try            # afterwards, the throwaway suite
   answer: it waits for Developer ID. (Before registering, `SMAppService.mainApp.status` reads
   *not found* for the ad-hoc app in `dist/`, which the menu shows as unticked; the launch log says
   `open at login not found`.)
-- **Update check**: with the repository private (or before the first release), *Check for Updates
+- **Update check**: before the first release (or with the repository private), *Check for Updates
   Now* says no release was found. `--env GITRASIL_RELEASES_REPOSITORY=<owner/name>` points the check
   at another repository to see the found-a-newer-one path: checked here against
   `sparkle-project/Sparkle`, whose 2.10.0 the app took for a newer Gitrasil and kept in the suite

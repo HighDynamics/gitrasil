@@ -11,7 +11,7 @@
 #
 # Usage: scripts/notarize.sh dist/Gitrasil.app | dist/Gitrasil-<version>.dmg
 #
-# Untested: it needs Daniel's Developer ID certificate and API key, which don't exist yet.
+# Untested: it needs a Developer ID certificate and API key, which don't exist yet.
 set -euo pipefail
 
 target=${1:?usage: scripts/notarize.sh <Gitrasil.app | .dmg>}

@@ -105,7 +105,7 @@ comes from its own history (sapling vs full tree). The repo name is a plate capt
 - Unit tests for `RepoTree` (parents, fork points, buds, sub-branches) and `TreeLayout` (determinism,
   a new commit leaves existing nodes where they were, a new branch doesn't move the others).
 - Run against throwaway repos with many branches and merges, and read-only against a couple of
-  the owner's repos in `~/repos`, pinned in a throwaway defaults suite. Screenshots of the app's own
+  a couple of repos in `~/repos`, pinned in a throwaway defaults suite. Screenshots of the app's own
   windows only, saved here.
 - `swift build` and `swift test` on the final commit.
 
@@ -115,7 +115,7 @@ Screenshots (the app's own windows only, captured by window id):
 
 - `ash-light.jpg` — the throwaway repo `ash` (144 trunk commits, 13 branches with sub-branches,
   merges, two worktrees) on the 1440×900 display, light mode.
-- `grove-dark.jpg` — `ash`, the sapling `rowan` and the owner's `gitrasil` (read-only) as a grove on
+- `grove-dark.jpg` — `ash`, the sapling `rowan` and `gitrasil` (read-only) as a grove on
   the 3440×1440 display, dark mode.
 - `growing.jpg` — mid-growth: three commits on `spike/physics` and a new four-commit
   `feature/sprout`, a fraction of a second after the refs settled.

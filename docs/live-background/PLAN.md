@@ -30,7 +30,7 @@ Branch `spike/live-background`, cut from `origin/main` (a35509c). Local `main` i
 
 ## Steps
 
-1. [x] Read README, HistoryGraphView, Core (Derive/, Reactive/), roadmap memory.
+1. [x] Read README, HistoryGraphView, Core (Derive/, Reactive/).
 2. [x] Write this plan.
 3. [x] Extract the row/lane layout into `GitrasilCore/Layout/GraphLayout.swift` as public
        `GraphRow` / `GraphLayout.rows(for:expanded:)`; `HistoryGraphView` uses it unchanged in
@@ -114,7 +114,7 @@ settings.
        code that is no longer used: `WorktreeStore`, the snapshot, `historyGraph` and lineage.
        (Built: `WorktreeStore`, the snapshot, `StatusBadge` and `isBehind` were dropped.
        `historyGraph` and lineage stay, because `GraphLayout`'s worktree-relative cases and its
-       tests still use them. That's an open question for Daniel in DESIGN.md.)
+       tests still use them. That's an open question in DESIGN.md.)
 5. [x] **Pinned repos**:
        - `PinnedRepositories` lives in Core. It validates with `git rev-parse --show-toplevel`,
          removes duplicates, and persists to `UserDefaults`. Tests use a throwaway suite.
