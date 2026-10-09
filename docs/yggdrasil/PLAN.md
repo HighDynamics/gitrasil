@@ -136,7 +136,7 @@ Findings:
 
 ## Round 2: an orchard or a single tree
 
-The owner asked: "I want an option to display all pinned repos as a single tree or as an
+The maintainer asked: "I want an option to display all pinned repos as a single tree or as an
 orchard. Otherwise, this direction seems pretty neat."
 
 **The setting.** The menu-bar menu, where the pins are, gains an *Arrange As* section: **Orchard**
@@ -315,7 +315,7 @@ wood meets wood:
 
 ## Round 4: settings, repository ribbons, the icon, and ready for review
 
-The owner kept the round 3 behaviour (the gusts, the grow-in at launch, every bough
+The maintainer kept the round 3 behaviour (the gusts, the grow-in at launch, every bough
 regrowing on a new pin in the single tree, folders showing their most recently active
 repositories) and asked for four things, then for the branch to be made ready for a PR. After a
 first pass came a request for the repository names to have their own setting, and for the icon to
@@ -394,7 +394,7 @@ in the menu bar as a template, in the bar's own tint.
 
 ## Round 5 (spike): a hand-drawn look, and charcoal and chalk beside the ink
 
-The owner asked for a more hand-drawn look, since every border and edge was very precise, and to
+The maintainer asked for a more hand-drawn look, since every border and edge was very precise, and to
 see the ink on cream as charcoal or chalk. An exploration: build both so they can be compared with
 the ink, then one is picked. Branch `spike/hand-drawn`, cut from `main` (97d243f).
 
@@ -491,13 +491,13 @@ redraw (the layered wood and the grain pass) and 2–4 ms to the banners.
 
 ### Decided (Oct 7)
 
-The owner picked **chalk as the default**: with no `medium` saved (or an unreadable one), the
+The maintainer picked **chalk as the default**: with no `medium` saved (or an unreadable one), the
 background is chalk; a saved choice is kept, and ink and charcoal stay in the menu. No screenshots
 go in the repo: the media are described in words above.
 
 ## Round 6: seamless joins in every medium, and gusts off by default
 
-The owner (Oct 7), after a few days with the hand-drawn look in chalk: "finesse the connecting branches
+The maintainer (Oct 7), after a few days with the hand-drawn look in chalk: "finesse the connecting branches
 again in all of the aesthetics. It's obvious they are being stacked again with the opacity drop in
 some of the aesthetics." And gusts should be off unless turned on. Branch `joins-and-gusts`,
 from `main` (a54582c).
@@ -622,7 +622,7 @@ and no gust timer runs; a saved choice (on or off) is kept.
 
 ## Round 7: the whole tree animated, re-growing on demand, reshuffled branches, a gust at once
 
-The owner (Oct 7): "The tree(s) draw up to a certain point, and then the rest *pops* in. Can
+The maintainer (Oct 7): "The tree(s) draw up to a certain point, and then the rest *pops* in. Can
 the whole thing be animated?" "When a repo is dropped from the selections, everything should be
 re-animated instead of just one tree or branch poofing away." "Add a 'Watch Gitrasil Grow' option
 that redraws the whole thing (just for fun)." "How deterministic/random is the structure of the tree?

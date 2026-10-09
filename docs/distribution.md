@@ -305,7 +305,7 @@ Made (October 2026):
 3. **Updates** — the built opt-in daily check of the Releases API (*Updates*, above). Sparkle with
    Developer ID, later.
 4. **Homebrew** — no cask yet; a personal tap once releases are notarized.
-5. **Bundle identifier** — `io.github.highdynamics.Gitrasil` (reverse-DNS of the owner's GitHub
+5. **Bundle identifier** — `io.github.highdynamics.Gitrasil` (reverse-DNS of the maintainer's GitHub
    Pages domain, the convention for an app with no domain of its own). It is permanent after the
    first release, so it was settled before the first tag. It lives in `CFBundleIdentifier` in
    `packaging/Info.plist` and in the update check's scheduler identifier in `AppServices.swift`. The

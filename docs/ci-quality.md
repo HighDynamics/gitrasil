@@ -77,7 +77,7 @@ What Gitrasil's checks are, why those, and what was left out. Run them with `scr
 
 ### Tests: `swift test`
 
-The existing 110 tests, unchanged. No display or secrets are needed. Not added: coverage gates
+The existing test suite, unchanged. No display or secrets are needed. Not added: coverage gates
 (a threshold on a personal project would invite tests written for the number).
 
 ### Dependency and security audit

@@ -50,7 +50,7 @@ Branch `spike/live-background`, cut from `origin/main` (a35509c). Local `main` i
        CGWindowList check of level/onscreen; screenshot if permitted). Measure idle CPU. Kill it.
 6. [x] Write `docs/live-background/DESIGN.md` (display options, visuals, live updates, energy, reuse).
 7. [x] `swift build` + `swift test` on final commit. Commit spike + docs.
-8. [x] Summarise the findings for the owner (2026-10-05).
+8. [x] Summarise the findings for the maintainer (2026-10-05).
 
 ## Status log
 
@@ -68,7 +68,7 @@ Decisions:
 - Remove the worktree GUI; it stays in git history. Drop SwiftTerm.
 - Repos are a list the user pins from a menu-bar UI, saved between launches.
 - The look is still undecided. Night transit stays as a placeholder, and the drawing must be easy
-  to restyle. *Later the same day:* the owner picked **ink on cream**, keeping a distinct colour per
+  to restyle. *Later the same day:* the maintainer picked **ink on cream**, keeping a distinct colour per
   branch/worktree, so that replaced night transit within this phase.
 - Don't build launch at login or setting a still image as the wallpaper.
 
@@ -134,4 +134,4 @@ settings.
          window level, the status item, that a burst gives one redraw, and the idle cost. Delete
          the throwaway suite afterwards.
        - Update DESIGN.md and the README. Commit.
-7. [ ] Summarise the results for the owner.
+7. [ ] Summarise the results for the maintainer.
