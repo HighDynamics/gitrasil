@@ -98,10 +98,14 @@ public final class RepoGraphStore {
         watcher = nil
         settleTask?.cancel()
         settleTask = nil
+        // Reads still queued, or waiting for a place at the gate, are dropped, not run.
+        let executor = executor
+        Task { await executor.cancelReads() }
     }
 
     /// Re-derive now (no settle). Skipped when the ref fingerprint is unchanged.
     public func refresh() async {
+        guard !isStopped else { return }
         let options = self.options
         let known = graph == nil ? nil : fingerprint
         let date = now()

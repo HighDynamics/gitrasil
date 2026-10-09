@@ -65,6 +65,11 @@ public actor WorktreeExecutor {
         return task
     }
 
+    /// Cancel every outstanding read, queued or running (the repository was dropped). Mutations run on.
+    public func cancelReads() {
+        for cancel in readCancels.values { cancel() }
+    }
+
     private func clearRead(_ kind: ReadKind, generation: Int) {
         if readGenerations[kind] == generation {
             readCancels[kind] = nil
