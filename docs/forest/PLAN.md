@@ -4,7 +4,7 @@ Task (from Arbor, for Daniel): "what it takes to put **far more trees** on the s
 limit of spacing to see what we can do". An exploration: measure the limits, prototype layouts, bring
 back renders, numbers and a recommendation. **Nothing ships from this round**: every prototype is
 opt-in, the defaults Daniel sees are untouched. Branch `spike/forest`, cut from `origin/main`
-(5f8b515). Not pushed.
+(5f8b515). Round 1 is below; **round 2** (what shipped, on Daniel's answers) is at the end.
 
 ## Questions
 
@@ -205,3 +205,113 @@ second of the machine's boot). Memory grows ~2.4 MB per repo (77 → 219 MB at 6
 3. **Names.** Recommend front line plates + pennants for the front 8–12 only, and a hover name for the rest.
 4. **Groves as an order.** Recommend: sort within a line by folder, don't draw captions.
 5. **Cap.** Recommend 12 by default for the plain orchard (where it still looks like today's), not the 4.
+
+---
+
+# Round 2 — shipping the Forest
+
+Daniel's answers to the round-1 decisions: ship rows, opt-in as **Forest**; trees are sorted at launch and
+at midnight, not live, and regrow when their place changes; names on the front line only (the main tree and the
+forest's front line), no hover names; folders only order trees within a line, no captions; the plain layout's
+cap goes from 4 to 12. The brief for this round added: the most repos on the single "Yggdrasil" tree, overflow
+into a depth-rows forest behind it, idle CPU still 0, grow-in smooth at the new limits.
+
+## What it does
+
+- **Forest off (the default).** At most **12** repositories (`ForestPolicy.plainLimit`, was 4), in either
+  arrangement: the orchard in equal plots, or one tree. Nothing else changes.
+- **Forest on** (menu: Arrange As → Forest, saved as `forest`). Up to **64** repositories
+  (`ForestPolicy.paneLimit`). Settings changes read the new repositories, then the whole scene grows again.
+- **Single tree.** It keeps the most recently active repositories, **12** on a display 900 pt tall, **20** on
+  1440 pt and taller (`ForestPolicy.treeCapacity`, clamped 8…24). The rest stand in a **depth-rows forest on
+  both sides of the tree**: the tree is narrowed to 0.66 of the screen's width, the gap between the two halves
+  is its crown width × 0.8, and the forest takes 0.58 of the screen's height, back lines smaller and paler (min fade 0.42).
+  The tree's names stay clear of the forest; only the forest's front line has plates, the lines behind are
+  texture. A bough with no ribbon room gets its name on the trunk pennant ("repo · main") instead of losing it.
+- **Orchard.** Equal plots to 12; beyond that, the same rows as the forest across the whole width.
+- **Order.** `ForestPolicy.rank`: last commit by UTC day (so a commit today doesn't outrank one an hour older),
+  then the repository's id. Within a line, trees stand by folder, then name; the folder is never drawn.
+- **When the order is taken.** At launch (every whole-scene grow-in: arrangement change, Forest toggle, Reshuffle,
+  Watch Gitrasil Grow) and at the first hourly tick after local midnight. A commit in between grows its limb but
+  moves no tree. A repository pinned later ranks on its own history until the next re-sort.
+- **Regrow.** When the midnight re-sort changes the order, or the arrangement or Forest changes, **the whole
+  scene grows again from the ground**, not only the trees that moved. Why: the ranking decides which tree is on the
+  tree, which forest line a tree is on and each line's packing and shared scale, so a rank change moves nearly
+  every tree (in the test, one commit moved 39 of 40 placements); regrowing a subset would still leave most of the
+  scene moving, and a whole-scene grow-in is the one animation that already exists and is smooth. The midnight
+  grow-in only happens when the order actually changed (compared as an order, not as dates), so most midnights are silent.
+- **Menu.** The "N in the Forest" list from the first cut is gone (names on the front line only, no hover names:
+  the wallpaper window takes no pointer).
+
+Overrides for testing, never saved: `GITRASIL_BACKGROUND_FOREST=off|auto|rows`, `GITRASIL_BACKGROUND_MAX_PANES`,
+`GITRASIL_FOREST_PLAIN`, `GITRASIL_TREE_CAPACITY`, `GITRASIL_FOREST_BESIDE`, `GITRASIL_FOREST_HEIGHT`,
+`GITRASIL_GIT_READERS`, `GITRASIL_BACKGROUND_FRAMELOG=1` (draw tallies per second).
+
+**Dropped modes:** `canopy`, `activity`, `groves` and the `plain` lift (code and the study aid's options), leaving
+`ForestMode` = auto / off / rows (`rows` = forced, for the study aid).
+
+## The limit, per display (single tree, Forest on)
+
+Tree px/unit is the main tree's height (full-grown trunk = 1 unit); forest px/unit its front line. Chalk, light.
+
+| display | on the tree | N=16 | N=32 | N=64 |
+|---|---|---|---|---|
+| 1440×900@2x | **12** | 12+4, tree 405, forest 280 (1 line) | 12+20, 405 / 187 (2) | 12+52, 446 / 200 (5) |
+| 3440×1440@1x | **20** | all on the tree, 644 | 20+12, 653 / 468 (1) | 20+44, 653 / 452 (3) |
+| 5120×2880@2x (2560×1440 pt) | **20** | all on the tree, 644 | 20+12, 653 / 392 (1) | 20+44, 653 / 383 (4) |
+
+Why 12 and 20: they are where the ribbons start to run out of room (a bough without one names itself on the
+trunk pennant): 1 of 12 on the laptop, 4 of 20 on the ultrawide and 5K. Below its limit the tree takes everything,
+so a dozen repositories never see a forest.
+
+## Performance (release, this machine)
+
+**Launch** (real app, 60 s, two runs each, folder of 64 synthetic repositories):
+
+| | CPU s (user+sys) | peak RSS MB | git processes |
+|---|---|---|---|
+| main, 4 repos | 1.8 | 69 | 53 |
+| Forest off, 12 | 4.5 | 83 | 159 |
+| Forest on, 16 | 5.8 | 90 | 207 |
+| Forest on, 64 | 19.2 | 131 | 780 |
+
+Round 1 measured 22.8 s and 219 MB for 64: `GitGate` now allows five `git` processes at a time
+(`GITRASIL_GIT_READERS`), which spreads the same work out and holds memory down.
+
+**Idle: 0.** At 64 repositories the process's CPU time did not move over 30 s after the grow-in (6.23 s at 25 s and
+at 55 s). Nothing polls; the timeline is paused unless something grows.
+
+**Grow-in at 64 (live, `GITRASIL_BACKGROUND_FRAMELOG=1`).** Before round 2's layers, one 64-repo grow-in was
+69 ms a frame (10 fps). Now:
+
+- Every forest tree is its own cached layer (`ForestTreeLayer`, Equatable), and the main tree is its own
+  (`MainTreeLayer`): a frame redraws only what changed. A finished forest tree is never redrawn until the
+  scene changes, and the main tree's canvas stops redrawing when its own boughs finish.
+- A dozen trees grow in together; the rest follow in a wave from one second later, one every 0.12 s (at most
+  4 s in all), in ranking order, so about 18 forest trees grow at once, not 52. The forest's layers advance at
+  15 frames a second (invisible at that size), the tree at 30.
+- Measured busy time per second of wall clock (main thread): peak 530 ms during the 2 s the tree grows
+  (a 20-bough tree is ~20 ms a frame, which is also why it runs at ~20 fps then); the wave afterwards costs
+  190–300 ms a second for ~4 s; before it was ~1,100 layer draws a second, now ~300–470.
+  So the grow-in at 64 is about 6 s of 20–50% of one core, then 0.
+- Redraw of the whole scene offscreen (`ImageRenderer`; slower than the live GPU canvas): 126 ms at 64 on the
+  laptop, 29 ms at 12, 15 ms for today's 4-tree orchard. Plan (banners) 23 ms at 64, paid on a change only.
+- Gusts only turn the banner layers, as before (round 1: 0.7–1.3 s CPU per 7 s gust, a gust every ~45 s on mains
+  power). Not re-measured; the forest has no pennants behind the front line.
+
+## Decisions for Daniel
+
+1. **Limits and the cap of 64.** Recommend keeping 12 on the tree for 900 pt displays, 20 from 1440 pt, and 64 in
+   all with Forest on. 64 costs ~19 s of CPU once at launch and ~130 MB.
+2. **Midnight timing.** The re-sort happens on the first hourly tick after midnight, so up to an hour late, and
+   only if the display is on. Recommend leaving it; an exact timer would add a wakeup to an app whose idle CPU is 0.
+3. **Day-level ranking.** Two repositories committed to on the same UTC day are ordered by name, not time. Recommend it
+   (it keeps a commit from moving trees all day); the other choice is ranking by the minute and re-sorting
+   less often.
+4. **Whole-scene regrow** on a changed order (above). Recommend it; the alternative (only the moved trees) leaves
+   most trees moving anyway.
+5. **Forest on turns the cap from 12 to 64 for everything** (folders too): a folder with 60 repositories shows all 60.
+   Recommend; "Pinned" lists say "Forest shows more" when it is off.
+6. **Not yet verified by eye on a real desktop**: the Forest toggle's regrow and the midnight regrow (I covered
+   them with unit tests and the live launch, not by waiting for midnight). Worth watching once.
+
