@@ -42,13 +42,13 @@ public struct ForestPolicy: Sendable, Equatable {
         Set(Self.rank(entries).prefix(treeCapacity(for: size)))
     }
 
-    /// The order repositories stand in: the most recently active first, by the day of the last commit
-    /// (so two commits in a day don't swap places), then by name. Indices into `entries`.
-    public static func rank(_ entries: [(id: String, lastActive: Date)]) -> [Int] {
-        func day(_ date: Date) -> Int { Int((date.timeIntervalSince1970 / 86_400).rounded(.down)) }
+    /// The order repositories stand in: the most recently active first, by the local day of the last commit
+    /// (so two commits in a day don't swap places), then by name. Indices into `entries`. `calendar` says
+    /// where a day begins and ends: the user's, unless a test pins one.
+    public static func rank(_ entries: [(id: String, lastActive: Date)], calendar: Calendar = .current) -> [Int] {
+        let days = entries.map { calendar.startOfDay(for: $0.lastActive) }
         return entries.indices.sorted { a, b in
-            let (x, y) = (day(entries[a].lastActive), day(entries[b].lastActive))
-            return x != y ? x > y : entries[a].id < entries[b].id
+            days[a] != days[b] ? days[a] > days[b] : entries[a].id < entries[b].id
         }
     }
 }

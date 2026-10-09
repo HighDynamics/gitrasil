@@ -39,7 +39,7 @@ final class ForestLayoutTests: XCTestCase {
         let front = plan.placements.filter { $0.line == 0 }, back = plan.placements.filter { $0.line > 0 }
         let newestFront = front.map { items[$0.index].lastActive }.min()!
         let newestBack = back.map { items[$0.index].lastActive }.max()!
-        XCTAssertGreaterThanOrEqual(Int(newestFront.timeIntervalSince1970 / 86_400), Int(newestBack.timeIntervalSince1970 / 86_400))
+        XCTAssertGreaterThanOrEqual(Calendar.current.startOfDay(for: newestFront), Calendar.current.startOfDay(for: newestBack))
         XCTAssertEqual(front.map(\.fade).max(), 0)
         for place in back {
             XCTAssertGreaterThan(place.fade, 0)
@@ -152,12 +152,28 @@ final class ForestPolicyTests: XCTestCase {
         XCTAssertEqual(ForestPolicy(fixedTreeCapacity: 5).treeCapacity(for: CGSize(width: 3440, height: 1440)), 5)
     }
 
+    private func calendar(_ zone: String) -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: zone)!
+        return calendar
+    }
+
     func testRankingGoesByDayThenName() {
         let entries: [(id: String, lastActive: Date)] = [
             ("b", now.addingTimeInterval(-10 * day)), ("d", now), ("a", now.addingTimeInterval(-10 * day)), ("c", now.addingTimeInterval(-60))
         ]
         // c and d are the same day (two commits in a day don't swap places): by name.
-        XCTAssertEqual(ForestPolicy.rank(entries).map { entries[$0].id }, ["c", "d", "a", "b"])
+        XCTAssertEqual(ForestPolicy.rank(entries, calendar: calendar("UTC")).map { entries[$0].id }, ["c", "d", "a", "b"])
+    }
+
+    func testTheDayIsTheUsersNotUTC() {
+        // 03:00 and 09:00 UTC on one day: the same day in London, but in Los Angeles (UTC-8 in January) the
+        // first is the evening before.
+        let early = Date(timeIntervalSince1970: 1_767_322_800), late = early.addingTimeInterval(6 * 3600)
+        let entries: [(id: String, lastActive: Date)] = [("a", early), ("b", late)]
+        XCTAssertEqual(ForestPolicy.rank(entries, calendar: calendar("Europe/London")).map { entries[$0].id }, ["a", "b"], "one day: by name")
+        XCTAssertEqual(ForestPolicy.rank(entries, calendar: calendar("America/Los_Angeles")).map { entries[$0].id }, ["b", "a"],
+                       "two days: the later first")
     }
 
     func testTheFitBlendsFromStandardToWideByCount() {

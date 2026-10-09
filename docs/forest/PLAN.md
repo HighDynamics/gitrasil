@@ -229,7 +229,7 @@ into a depth-rows forest behind it, idle CPU still 0, grow-in smooth at the new 
   The tree's names stay clear of the forest; only the forest's front line has plates, the lines behind are
   texture. A bough with no ribbon room gets its name on the trunk pennant ("repo · main") instead of losing it.
 - **Orchard.** Equal plots to 12; beyond that, the same rows as the forest across the whole width.
-- **Order.** `ForestPolicy.rank`: last commit by UTC day (so a commit today doesn't outrank one an hour older),
+- **Order.** `ForestPolicy.rank`: last commit by local day (so a commit today doesn't outrank one an hour older),
   then the repository's id. Within a line, trees stand by folder, then name; the folder is never drawn.
 - **When the order is taken.** At launch (every whole-scene grow-in: arrangement change, Forest toggle, Reshuffle,
   Watch Gitrasil Grow) and at the first hourly tick after local midnight. A commit in between grows its limb but
@@ -305,7 +305,7 @@ at 55 s). Nothing polls; the timeline is paused unless something grows.
    all with Forest on. 64 costs ~19 s of CPU once at launch and ~130 MB.
 2. **Midnight timing.** The re-sort happens on the first hourly tick after midnight, so up to an hour late, and
    only if the display is on. Recommend leaving it; an exact timer would add a wakeup to an app whose idle CPU is 0.
-3. **Day-level ranking.** Two repositories committed to on the same UTC day are ordered by name, not time. Recommend it
+3. **Day-level ranking.** Two repositories committed to on the same local day are ordered by name, not time. Daniel chose it
    (it keeps a commit from moving trees all day); the other choice is ranking by the minute and re-sorting
    less often.
 4. **Whole-scene regrow** on a changed order (above). Recommend it; the alternative (only the moved trees) leaves
@@ -339,7 +339,7 @@ The review of the first cut found these; fixed:
 Not done: (6) the scene is still planned once for the layers, once for the banners and once for the canvas on a
 change; each plan is 1-25 ms and happens only on a change. (8) At four repositories the single tree looks
 slightly different from `main`'s (the bough fan is chosen by count, `Fit.fitting`): intended, left as is.
-Ranking by UTC day is as built, pending Daniel's answer.
+Ranking is by local day (Daniel's answer, round 3; it began as UTC).
 
 Numbers after the fixes: 64 repositories launch in 18.9 s of CPU, 142 MB, 780 git processes (two runs); idle CPU
 is still zero (6.17 s at 25 s, 6.18 s at 55 s); the live grow-in peaks at 384 ms of busy time a second (was 530)
