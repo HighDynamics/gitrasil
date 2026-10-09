@@ -273,7 +273,7 @@ so a dozen repositories never see a forest.
 | main, 4 repos | 1.8 | 69 | 53 |
 | Forest off, 12 | 4.5 | 83 | 159 |
 | Forest on, 16 | 5.8 | 90 | 207 |
-| Forest on, 64 | 19.2 | 131 | 780 |
+| Forest on, 64 | 18.9 | 142 | 780 |
 
 Round 1 measured 22.8 s and 219 MB for 64: `GitGate` now allows five `git` processes at a time
 (`GITRASIL_GIT_READERS`), which spreads the same work out and holds memory down.
@@ -314,4 +314,34 @@ at 55 s). Nothing polls; the timeline is paused unless something grows.
    Recommend; "Pinned" lists say "Forest shows more" when it is off.
 6. **Not yet verified by eye on a real desktop**: the Forest toggle's regrow and the midnight regrow (I covered
    them with unit tests and the live launch, not by waiting for midnight). Worth watching once.
+
+## Review fixes
+
+The review of the first cut found these; fixed:
+
+1. **The git gate could hang everything.** `GitGate.enter()` now throws if its task is cancelled (the waiter
+   leaves the queue, holds no place), and `GitRunner` stops a process that outlives its timeout (60 s,
+   `GITRASIL_GIT_TIMEOUT`; SIGTERM, SIGKILL after 2 s) and when its task is cancelled, handing its place back at
+   once without waiting for the process's pipes to close. Dropping a pane cancels its start and its queued reads
+   (`RepoGraphStore.stop`, `WorktreeExecutor.cancelReads`), so turning Forest off leaves nothing waiting.
+   Tests: `GitGateTests` (order, cancelled waiter, cancelled before entering, timeout, cancelled read).
+2. **Plain orchard names overlapped at 12.** Plates are now fitted to the plot (`PlateFit`, as in the
+   forest): whole when they fit, smaller, written down the ground, or left out. Checked with a 12-repo render on a
+   1440×900 display.
+3. **Late trees restarted the whole grow-in.** The wait for trees to be read scales with the count (2.5 s plus
+   0.15 s for each past four, so 11.5 s at 64; it ends as soon as every pane has read, which at 64 is ~4 s), and a
+   tree that still arrives late waits unseen and grows with the others in one grow-in once arrivals pause for
+   0.6 s (or 3 s after the first), instead of one per arrival.
+4. **The wave.** It now starts after the trees on the tree (the largest `treeCapacity` over the connected
+   displays; the orchard's 12), and ranks as the view does (by each pane's seed, not its path).
+7. README documents the Forest and the cap of 12; the stale `maxPanes` reference is gone.
+
+Not done: (6) the scene is still planned once for the layers, once for the banners and once for the canvas on a
+change; each plan is 1-25 ms and happens only on a change. (8) At four repositories the single tree looks
+slightly different from `main`'s (the bough fan is chosen by count, `Fit.fitting`): intended, left as is.
+Ranking by UTC day is as built, pending Daniel's answer.
+
+Numbers after the fixes: 64 repositories launch in 18.9 s of CPU, 142 MB, 780 git processes (two runs); idle CPU
+is still zero (6.17 s at 25 s, 6.18 s at 55 s); the live grow-in peaks at 384 ms of busy time a second (was 530)
+and the forest wave costs 150-310 ms a second for about 4 s.
 
