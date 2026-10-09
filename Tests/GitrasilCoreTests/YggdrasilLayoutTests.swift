@@ -107,4 +107,76 @@ final class YggdrasilLayoutTests: XCTestCase {
         for bough in 0..<3 { XCTAssertEqual(points(grown, bough: bough), points(full, bough: bough)) }
         XCTAssertEqual(grown.bounds, full.bounds)
     }
+
+    // MARK: every base grows out of wood
+
+    /// Repositories like a real pin list: mostly bare trunks of a few to fifty-odd commits, a few with branches.
+    private func repos(_ count: Int) -> [YggdrasilLayout.Repo] {
+        let sizes = [1, 5, 12, 30, 56, 2, 20, 8]
+        return (0..<count).map { index in
+            let size = sizes[index % sizes.count]
+            let wood = index % 6 == 5 ? tree("r\(index)", trunk: max(size, 6)) : RepoTree(
+                trunkName: "main", trunk: commits("r\(index)t", size), limbs: [], isTrunkCheckedOut: false)
+            return .init(name: "repo\(index)", tree: wood)
+        }
+    }
+
+    /// How far `point` is from the polyline through `curve`.
+    private func distance(from point: CGPoint, to curve: [TreeLayout.Node]) -> Double {
+        guard curve.count > 1 else { return curve.first.map { hypot($0.point.x - point.x, $0.point.y - point.y) } ?? .infinity }
+        return zip(curve, curve.dropFirst()).map { a, b -> Double in
+            let (dx, dy) = (b.point.x - a.point.x, b.point.y - a.point.y)
+            let length = max(dx * dx + dy * dy, 1e-12)
+            let t = min(max(((point.x - a.point.x) * dx + (point.y - a.point.y) * dy) / length, 0), 1)
+            return hypot(a.point.x + dx * t - point.x, a.point.y + dy * t - point.y)
+        }.min()!
+    }
+
+    func testEveryBoughStartsInsideTheSharedTrunkAtEveryCount() {
+        for count in [1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16, 18, 20, 24] {
+            let layout = YggdrasilLayout(repos: repos(count), fit: .fitting(count: count))
+            let crotch = layout.trunk.nodes.last!.point.y
+            for bough in layout.boughs {
+                let foot = bough.layout.stems[0].nodes[0].point
+                let wood = YggdrasilLayout.wood(at: Double(foot.y), in: layout.trunk.nodes)
+                let message = "\(bough.name) of \(count)"
+                XCTAssertGreaterThan(foot.y, 0, message)
+                XCTAssertLessThanOrEqual(Double(foot.y), Double(crotch), "\(message) isn't above the trunk's top")
+                XCTAssertLessThan(abs(Double(foot.x) - wood.x), wood.width / 2, "\(message) stands inside the trunk's width")
+            }
+        }
+    }
+
+    func testEveryLimbStartsInsideItsParent() {
+        for count in [1, 6, 12, 18, 20, 24] {
+            let layout = YggdrasilLayout(repos: repos(count), fit: .fitting(count: count))
+            for bough in layout.boughs {
+                for stem in bough.layout.stems where stem.level > 0 {
+                    guard let base = stem.nodes.first, let fork = stem.fork, let parent = fork.parent else {
+                        XCTFail("\(bough.name) \(stem.name ?? "") has no parent"); continue
+                    }
+                    let wood = bough.layout.stems[parent]
+                    XCTAssertLessThan(distance(from: base.point, to: wood.nodes), max(wood.nodes[fork.node].width / 2, 1e-6),
+                                      "\(bough.name) \(stem.name ?? "") grows out of \(wood.name ?? "its parent")")
+                }
+            }
+        }
+    }
+
+    func testBoughsKeepToTheirSideOfTheTrunkAndTheirBasesStayPutWhileTheyGrowIn() {
+        for count in [6, 12, 18, 20] {
+            let layout = YggdrasilLayout(repos: repos(count), fit: .fitting(count: count))
+            let middle = layout.trunk.nodes.last!.point.x
+            for (index, bough) in layout.boughs.enumerated() {
+                let spread = Double(index) / Double(count - 1) * 2 - 1
+                guard abs(spread) > 0.3, let tip = bough.layout.stems[0].tip?.point else { continue }
+                XCTAssertGreaterThan((Double(tip.x) - Double(middle)) * (spread < 0 ? -1 : 1), 0, "\(bough.name) of \(count) crosses the trunk")
+            }
+            let growing = YggdrasilLayout(repos: repos(count).map { .init(name: $0.name, tree: $0.tree, growIn: 0.5) }, trunkGrowIn: 1,
+                                          fit: .fitting(count: count))
+            for (a, b) in zip(layout.boughs, growing.boughs) {
+                XCTAssertEqual(a.layout.stems[0].nodes[0].point, b.layout.stems[0].nodes[0].point, "\(a.name) of \(count)")
+            }
+        }
+    }
 }

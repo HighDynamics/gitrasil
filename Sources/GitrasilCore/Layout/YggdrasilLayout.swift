@@ -48,27 +48,25 @@ public struct YggdrasilLayout: Sendable {
     public static let crotchHeight = 0.34
 
     /// How boughs fan out of the crotch. `standard` is the single tree as it has always been; a crowded
-    /// tree opens its fan and stands the boughs' feet apart on tiers, so more of them read apart.
+    /// tree opens its fan and stands the boughs' feet apart down the trunk's head, always inside its wood.
     public struct Fit: Sendable, Equatable {
         /// The fan's half-angle for `count` boughs: `base + perBough * count`, at most `cap` degrees.
         public var base: Double, perBough: Double, cap: Double
-        /// How far the feet spread sideways (in units, at the fan's edge) and how far up and down the
-        /// trunk's head (a tier each) they stand.
-        public var footSpread: Double, tierRise: Double, tiers: Int
+        /// How far the feet leave the crotch for the trunk's head, 0…1: 0 stands them all at the crotch;
+        /// 1 spreads them over the wood below it (`planting`), the outer boughs lowest and furthest out.
+        public var footSpread: Double
         /// How far along a bough (0…1) a ribbon may hang from; a crowded tree reaches further out.
         public var ribbonStops: [Double]
         /// A ribbon's size by the number of boughs: full up to `ribbonCrowd`, then smaller (never under `ribbonFloor`).
         public var ribbonCrowd: Int, ribbonFloor: Double
 
-        public init(base: Double = 16, perBough: Double = 12, cap: Double = 52, footSpread: Double = 0, tierRise: Double = 0,
-                    tiers: Int = 1, ribbonStops: [Double] = [0.14, 0.2, 0.26, 0.32, 0.4, 0.48, 0.56], ribbonCrowd: Int = .max,
+        public init(base: Double = 16, perBough: Double = 12, cap: Double = 52, footSpread: Double = 0,
+                    ribbonStops: [Double] = [0.14, 0.2, 0.26, 0.32, 0.4, 0.48, 0.56], ribbonCrowd: Int = .max,
                     ribbonFloor: Double = 1) {
             self.base = base
             self.perBough = perBough
             self.cap = cap
             self.footSpread = footSpread
-            self.tierRise = tierRise
-            self.tiers = tiers
             self.ribbonStops = ribbonStops
             self.ribbonCrowd = ribbonCrowd
             self.ribbonFloor = ribbonFloor
@@ -81,7 +79,7 @@ public struct YggdrasilLayout: Sendable {
         }
 
         public static let standard = Fit()
-        public static let wide = Fit(base: 20, perBough: 8, cap: 74, footSpread: 0.16, tierRise: 0.05, tiers: 3,
+        public static let wide = Fit(base: 20, perBough: 8, cap: 74, footSpread: 1,
                                      ribbonStops: [0.14, 0.2, 0.26, 0.32, 0.4, 0.48, 0.56, 0.66, 0.76, 0.86],
                                      ribbonCrowd: 6, ribbonFloor: 0.62)
 
@@ -95,7 +93,7 @@ public struct YggdrasilLayout: Sendable {
             func blend(_ a: Double, _ b: Double) -> Double { a + (b - a) * t }
             let (a, b) = (standard, wide)
             return Fit(base: blend(a.base, b.base), perBough: blend(a.perBough, b.perBough), cap: blend(a.cap, b.cap),
-                       footSpread: blend(a.footSpread, b.footSpread), tierRise: blend(a.tierRise, b.tierRise), tiers: b.tiers,
+                       footSpread: blend(a.footSpread, b.footSpread),
                        ribbonStops: count >= 6 ? b.ribbonStops : a.ribbonStops, ribbonCrowd: count >= 6 ? b.ribbonCrowd : a.ribbonCrowd,
                        ribbonFloor: blend(a.ribbonFloor, b.ribbonFloor))
         }
@@ -128,11 +126,9 @@ public struct YggdrasilLayout: Sendable {
         trunk = TreeLayout.Stem(name: nil, level: 0, nodes: shown, curve: shown, commits: [], grown: 0,
                                 isBud: false, isCheckedOut: false, scale: 1, fork: nil)
 
-        let crotch = nodes[count].point
         boughs = repos.enumerated().map { index, repo in
-            var planting = Self.planting(index: index, of: repos.count, name: SeededRandom.key(repo.name, shuffle: shuffle),
-                                         crotch: crotch, fit: fit)
-            planting.fork = TreeLayout.Fork(parent: nil, node: count, width: nodes[count].width, heading: nodes[count].heading)
+            let planting = Self.planting(index: index, of: repos.count, name: SeededRandom.key(repo.name, shuffle: shuffle),
+                                         trunk: nodes, fit: fit)
             return Bough(name: repo.name,
                          layout: TreeLayout(tree: repo.tree, seed: repo.name, grown: repo.grown, planting: planting,
                                             growIn: repo.growIn, shuffle: shuffle),
@@ -147,20 +143,44 @@ public struct YggdrasilLayout: Sendable {
         self.bounds = bounds
     }
 
+    /// How much of the shared trunk's width, either side of its middle, a foot may stand in: a bough
+    /// that starts there still has wood all round its base.
+    static let footRoom = 0.35
+
+    /// How far down the trunk below the crotch the outermost foot stands, in a fully spread fit.
+    static let footDrop = 0.16
+
+    /// The shared trunk's middle, width and heading at height `y` (interpolated between its nodes).
+    static func wood(at y: Double, in trunk: [TreeLayout.Node]) -> (x: Double, width: Double, heading: Double) {
+        guard let last = trunk.last, let first = trunk.first else { return (0, 0, 0) }
+        let y = min(max(y, first.point.y), last.point.y)
+        let i = trunk.indices.dropFirst().first { trunk[$0].point.y >= y } ?? trunk.count - 1
+        let a = trunk[i - 1], b = trunk[i]
+        let f = (y - a.point.y) / max(b.point.y - a.point.y, 1e-9)
+        return (a.point.x + (b.point.x - a.point.x) * f, a.width + (b.width - a.width) * f, a.heading + (b.heading - a.heading) * f)
+    }
+
     /// Bough `index` of `count`: fanned evenly, the outer ones leaning furthest, nudged a little by
-    /// its name so the fan isn't ruled. Its foot is sunk a little into the top of the shared trunk,
-    /// a touch toward its side and a seeded hair higher or lower, so the boughs grow out of the wood
-    /// rather than sitting on it, and don't all spring from one point.
-    static func planting(index: Int, of count: Int, name: String, crotch: CGPoint, fit: Fit = .standard) -> TreeLayout.Planting {
+    /// its name so the fan isn't ruled. Its foot stands inside the shared `trunk`'s wood, sunk a little
+    /// into its top, a touch toward its side and a seeded hair higher or lower, so the boughs grow out
+    /// of the wood rather than sitting on it, and don't all spring from one point. A crowded tree
+    /// (`Fit.footSpread`) stands the feet down the head of the trunk instead, the outer boughs lowest
+    /// and furthest to their side, each still inside the trunk's width at its height.
+    static func planting(index: Int, of count: Int, name: String, trunk: [TreeLayout.Node],
+                         fit: Fit = .standard) -> TreeLayout.Planting {
         var rng = SeededRandom(name, -5)
+        let crotch = trunk[trunk.count - 1]
         let spread = count > 1 ? Double(index) / Double(count - 1) * 2 - 1 : 0
         let fan = min(fit.base + fit.perBough * Double(count), fit.cap) * .pi / 180
         let heading = spread * fan + rng.next(in: -3...3) * .pi / 180
-        // Feet: a touch toward the bough's side; a crowded tree also spreads them along and up the crotch.
-        let tier = fit.tiers > 1 ? Double(index % fit.tiers) - Double(fit.tiers - 1) / 2 : 0
-        let foot = CGPoint(x: crotch.x + sin(heading) * 0.012 + spread * fit.footSpread,
-                           y: crotch.y - 0.03 + tier * fit.tierRise + rng.next(in: -0.012...0.012))
+        let spreadOut = min(max(fit.footSpread, 0), 1)
+        let y = crotch.point.y - 0.03 - footDrop * spreadOut * abs(spread) + rng.next(in: -0.012...0.012)
+        let wood = wood(at: y, in: trunk)
+        let reach = (1 - spreadOut) * sin(heading) * 0.012 + spreadOut * spread * footRoom * wood.width
+        let limit = footRoom * wood.width
+        let foot = CGPoint(x: wood.x + min(max(reach, -limit), limit), y: y)
         let outward: Double = abs(spread) < 0.2 ? 0 : (spread < 0 ? -1 : 1)
-        return TreeLayout.Planting(foot: foot, heading: heading, outward: outward)
+        let fork = TreeLayout.Fork(parent: nil, node: trunk.lastIndex { $0.point.y <= y } ?? 0, width: wood.width, heading: wood.heading)
+        return TreeLayout.Planting(foot: foot, heading: heading, outward: outward, fork: fork)
     }
 }
