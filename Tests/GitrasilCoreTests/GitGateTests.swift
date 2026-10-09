@@ -73,8 +73,9 @@ final class GitGateTests: XCTestCase {
         do {
             _ = try await hung.run(["600"])
             XCTFail("it should have timed out")
-        } catch GitError.timedOut(_, let seconds) {
+        } catch GitError.timedOut(_, let seconds, let retryAt) {
             XCTAssertEqual(seconds, 0.3)
+            XCTAssertLessThanOrEqual(retryAt, Date(), "no back-off: it may be tried again at once")
         }
         XCTAssertEqual(gate.occupancy.free, 1, "the place is back")
 
@@ -145,6 +146,138 @@ final class GitGateTests: XCTestCase {
         for task in tasks { _ = try? await task.value }
         XCTAssertEqual(gate.occupancy.free, 3)
         XCTAssertEqual(gate.occupancy.waiting, 0)
+    }
+
+    // MARK: back-off with several callers
+
+    private enum Outcome { case answered, timedOut, backingOff, other }
+
+    private func outcome(of task: Task<GitOutput, Error>) async -> Outcome {
+        do {
+            _ = try await task.value
+            return .answered
+        } catch GitError.timedOut {
+            return .timedOut
+        } catch GitError.backingOff {
+            return .backingOff
+        } catch {
+            return .other
+        }
+    }
+
+    private func outcomes(_ tasks: [Task<GitOutput, Error>]) async -> [Outcome] {
+        var all: [Outcome] = []
+        for task in tasks { all.append(await outcome(of: task)) }
+        return all
+    }
+
+    func testCallsQueuedBehindOneThatTimesOutDontEachWaitOutTheirOwnTimeout() async {
+        let gate = GitGate(limit: 1, backoff: 3600)
+        let hung = GitRunner(workdir: folder, timeout: 0.5, gate: gate, command: sleep)
+        let tasks = (0..<4).map { _ in Task { try await hung.run(["600"]) } }
+        let results = await outcomes(tasks)
+        // Whichever got the place first timed out; the others, checked again once they held a place (or
+        // before they queued), were not run at all.
+        XCTAssertEqual(results.filter { $0 == .timedOut }.count, 1, "\(results)")
+        XCTAssertEqual(results.filter { $0 == .backingOff }.count, 3, "\(results)")
+        XCTAssertEqual(gate.failureCount(folder.path), 1)
+        XCTAssertEqual(gate.occupancy.free, 1)
+    }
+
+    func testCallsRunningTogetherWhenOneRepositoryHangsCountOneTimeout() async {
+        let gate = GitGate(limit: 4, backoff: 3600)
+        let hung = GitRunner(workdir: folder, timeout: 0.3, gate: gate, command: sleep)
+        let tasks = (0..<4).map { _ in Task { try await hung.run(["600"]) } }
+        let results = await outcomes(tasks)
+        XCTAssertGreaterThanOrEqual(results.filter { $0 == .timedOut }.count, 1, "\(results)")
+        XCTAssertTrue(results.allSatisfy { $0 == .timedOut || $0 == .backingOff }, "\(results)")
+        XCTAssertEqual(gate.failureCount(folder.path), 1, "one outage is one failure, not one per call")
+    }
+
+    func testWhenTheBackOffEndsOnlyOneProbeGoesThrough() async throws {
+        let gate = GitGate(limit: 4, backoff: 0.3)
+        let hung = GitRunner(workdir: folder, timeout: 0.5, gate: gate, command: sleep)
+        do { _ = try await GitRunner(workdir: folder, timeout: 0.1, gate: gate, command: sleep).run(["600"]) } catch GitError.timedOut {}
+        let key = folder.path
+        await eventually("the back-off ends") { (try? gate.checkBackoff(key)) != nil }
+
+        let tasks = (0..<4).map { _ in Task { try await hung.run(["600"]) } }
+        let results = await outcomes(tasks)
+        XCTAssertEqual(results.filter { $0 == .timedOut }.count, 1, "the probe: \(results)")
+        XCTAssertEqual(results.filter { $0 == .backingOff }.count, 3, "\(results)")
+        XCTAssertEqual(gate.failureCount(key), 2, "one more failure for the probe, none for the others")
+    }
+
+    func testAProbeThatAnswersEndsTheBackOffAndACancelledOneLetsTheNextTry() async throws {
+        let gate = GitGate(limit: 2, backoff: 0.2)
+        do { _ = try await GitRunner(workdir: folder, timeout: 0.1, gate: gate, command: sleep).run(["600"]) } catch GitError.timedOut {}
+        let key = folder.path
+        await eventually("the back-off ends") { (try? gate.checkBackoff(key)) != nil }
+
+        let probe = Task { try await GitRunner(workdir: folder, timeout: 600, gate: gate, command: sleep).run(["600"]) }
+        await eventually("the probe is out") { (try? gate.checkBackoff(key)) == nil }
+        probe.cancel()
+        _ = await outcome(of: probe)
+        XCTAssertEqual(gate.failureCount(key), 1, "a cancelled probe counts nothing")
+
+        let next = try await GitRunner(workdir: folder, timeout: 30, gate: gate, command: quick).run([])
+        XCTAssertEqual(next.status, 0)
+        XCTAssertEqual(gate.failureCount(key), 0, "an answer forgives the failures")
+    }
+
+    // MARK: pipes held by a child, descriptors, messages
+
+    func testAChildHoldingThePipesAfterGitExitsDoesntMakeTheCallTimeOut() async throws {
+        let gate = GitGate(limit: 1)
+        let pidFile = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {
+            // The background child is ours to clean up: no orphaned `sleep`.
+            if let text = try? String(contentsOf: pidFile, encoding: .utf8), let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                kill(pid, SIGKILL)
+            }
+            try? FileManager.default.removeItem(at: pidFile)
+        }
+        // Exits 0 at once, leaving a `sleep` that keeps the stdout and stderr pipes open for 12 s.
+        let script = "sleep 12 & echo $! > \"$1\"; echo done"
+        let runner = GitRunner(workdir: folder, timeout: 8, gate: gate, command: ["/bin/sh", "-c", script, "sh"], pipeGrace: 0.3)
+        let output = try await runner.run([pidFile.path])
+        XCTAssertEqual(output.status, 0)
+        XCTAssertEqual(output.trimmedStdout, "done")
+        XCTAssertEqual(gate.failureCount(folder.path), 0, "an answer, not a timeout")
+    }
+
+    private func openDescriptors() -> Int {
+        (try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count) ?? 0
+    }
+
+    func testCallsOfEveryKindLeaveNoDescriptorsOpen() async throws {
+        let gate = GitGate(limit: 5, backoff: 0)
+        _ = try await GitRunner(workdir: folder, timeout: 30, gate: gate, command: quick).run([])
+        let before = openDescriptors()
+        let folder = self.folder
+
+        await withTaskGroup(of: Void.self) { group in
+            for index in 0..<30 {
+                group.addTask {
+                    let timeout: TimeInterval = index % 5 == 0 ? 0.1 : 30
+                    let command = index % 5 == 0 ? ["/bin/sleep"] : ["/usr/bin/true"]
+                    let task = Task { try await GitRunner(workdir: folder, timeout: timeout, gate: gate, command: command).run(["600"]) }
+                    if index % 3 == 0 { task.cancel() }
+                    _ = try? await task.value
+                }
+            }
+        }
+        await eventually("every pipe is closed again") { openDescriptors() <= before + 1 }
+    }
+
+    func testTheErrorsReadAsSentences() {
+        let retryAt = Date().addingTimeInterval(30)
+        let timedOut = GitError.timedOut(args: ["log"], seconds: 60, retryAt: retryAt)
+        XCTAssertTrue(timedOut.localizedDescription.contains("didn’t answer in 60 seconds"), timedOut.localizedDescription)
+        let backingOff = GitError.backingOff(retryAt: retryAt)
+        XCTAssertTrue(backingOff.localizedDescription.contains("left alone until"), backingOff.localizedDescription)
+        let failed = GitError.commandFailed(args: ["log", "-1"], status: 128, stderr: "fatal: bad\n")
+        XCTAssertEqual(failed.localizedDescription, "git log -1 failed (128): fatal: bad")
     }
 
     func testOutputIsReadWhileTheProcessRuns() async throws {
