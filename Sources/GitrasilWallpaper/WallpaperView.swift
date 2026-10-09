@@ -263,6 +263,8 @@ struct Landscape {
         /// The forest layouts' extras: the style it's drawn in (faded into the paper at the back), the
         /// line it stands on (0 in front) and the width its name may take. Nil in the orchard.
         var forest: ForestPlanted?
+        /// The width of an orchard plot, which its name has to fit in. Nil in the forest.
+        var plot: CGFloat?
     }
 
     struct ForestPlanted {
@@ -315,7 +317,7 @@ struct Landscape {
             let x = plot * (CGFloat(index) + 0.5) + (panes.count > 1 ? plot * rng.next(in: -0.05...0.05) : 0)
             let frame = TreeFrame(size: size, bounds: full.bounds, nominalHeight: Composition.nominalHeight,
                                   scale: shared, maxWidth: min(plot * 1.45, size.width - 2 * TreeFrame.margin), x: x)
-            return Planted(index: index, full: full, frame: frame)
+            return Planted(index: index, full: full, frame: frame, plot: plot)
         }
     }
 
@@ -362,7 +364,7 @@ struct Landscape {
             if let forest = planted.forest {
                 drawing.forestPlate(pane.name, line: forest.line, slot: forest.slot, in: &context)
             } else {
-                drawing.plate(pane.name, in: &context)
+                drawing.plate(pane.name, slot: planted.plot, in: &context)
             }
         }
         drawing.draw(layout.stems, seeds: layout.stems.map { _ in pane.seed }, parents: layout.stems.map { $0.fork?.parent },
@@ -1162,8 +1164,10 @@ struct TreeDrawing {
             center: CGPoint(x: rect.midX, y: rect.midY), startRadius: 0, endRadius: half))
     }
 
-    /// The repository's name under its tree, like a plate's caption.
-    func plate(_ name: String, in context: inout GraphicsContext) {
+    /// The repository's name under its tree, like a plate's caption, fitted to the `slot` of ground its
+    /// neighbours leave when it has one (`fittedPlate`).
+    func plate(_ name: String, slot: CGFloat?, in context: inout GraphicsContext) {
+        if let slot { return fittedPlate(name, slot: slot, in: &context) }
         let text = Text(name).font(style.plateFont).foregroundColor(style.ink.opacity(style.plateOpacity))
         context.draw(text, at: CGPoint(x: frame.origin.x, y: frame.origin.y + 22), anchor: .top)
     }

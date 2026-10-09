@@ -99,6 +99,11 @@ extension TreeDrawing {
     /// that is too small to read. Only the front line is named.
     func forestPlate(_ name: String, line: Int, slot: CGFloat, in context: inout GraphicsContext) {
         guard line == 0 else { return }
+        fittedPlate(name, slot: slot, in: &context)
+    }
+
+    /// A repository's name under its tree, fitted to `slot` points of ground (`PlateFit`).
+    func fittedPlate(_ name: String, slot: CGFloat, in context: inout GraphicsContext) {
         let text = Text(name).font(style.plateFont).foregroundColor(style.ink.opacity(style.plateOpacity))
         let resolved = context.resolve(text)
         let natural = resolved.measure(in: CGSize(width: 4000, height: 400))
