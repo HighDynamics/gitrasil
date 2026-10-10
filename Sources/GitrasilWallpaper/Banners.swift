@@ -47,20 +47,34 @@ struct BannerPlan {
 
 extension Landscape {
 
+    /// A tree whose names are being placed: `allowance` is how many branch names may hang on it (nil for
+    /// all; the forest layouts cut it).
+    private struct Standing {
+        let pane: String
+        let stems: [TreeLayout.Stem]
+        let schedule: TreeLayout.GrowInSchedule
+        let frame: TreeFrame
+        let allowance: Int?
+        /// The repository's name when it has no ribbon of its own: its trunk's pennant carries it instead.
+        var repoLabel: String?
+    }
+
     /// Where the names hang over the trees as they stand (`panes` with their full trees): the branches'
     /// pennants and, in the single tree, the repositories' ribbons, each only if shown.
     func plan(_ panes: [Pane], arrangement: Arrangement, branchNames: Bool, repoNames: Bool) -> BannerPlan {
         var plan = BannerPlan()
         // Each tree by its pane's id.
-        var trees: [(pane: String, stems: [TreeLayout.Stem], schedule: TreeLayout.GrowInSchedule, frame: TreeFrame)] = []
+        var trees: [Standing] = []
         var obstacles: [CGRect] = []
         var taken: [CGRect] = []
         if isSingleTree(panes, arrangement: arrangement) {
-            let ready = panes.filter { $0.tree != nil }
-            let (full, frame) = singleTree(ready)
+            let scene = scene(panes, arrangement: arrangement)
+            let ready = scene.tree
+            let (full, frame) = singleTree(ready, narrowed: !scene.forest.isEmpty)
             obstacles += crown([full.trunk], frame: frame)
             for (pane, bough) in zip(ready, full.boughs) {
-                trees.append((pane.id, bough.layout.stems, bough.layout.schedule, frame))
+                trees.append(Standing(pane: pane.id, stems: bough.layout.stems, schedule: bough.layout.schedule, frame: frame,
+                                      allowance: nil))
                 obstacles += crown(bough.layout.stems, frame: frame)
             }
             // The repositories' ribbons first, so they hang in the same places whether or not the
@@ -68,10 +82,17 @@ extension Landscape {
             if repoNames {
                 plan.ribbons = ribbons(Array(zip(ready, full.boughs)), frame: frame, obstacles: obstacles)
                 taken = plan.ribbons.map(\.ribbon.footprint)
+                label(&trees, without: plan.ribbons, of: ready)
             }
+            // The forest behind the tree isn't named in the air: the pennants keep off its crowns.
+            obstacles += forestCrowns(scene.forest, beside: full, frame: frame)
         } else {
             for planted in orchard(panes) {
-                trees.append((panes[planted.index].id, planted.full.stems, planted.full.schedule, planted.frame))
+                trees.append(Standing(pane: panes[planted.index].id, stems: planted.full.stems, schedule: planted.full.schedule,
+                                      frame: planted.frame,
+                                      allowance: planted.forest.flatMap {
+                                          ForestLayout.pennantAllowance(scale: planted.frame.scale, fade: $0.fade)
+                                      }))
                 obstacles += crown(planted.full.stems, frame: planted.frame)
             }
         }
@@ -82,9 +103,20 @@ extension Landscape {
             let drawing = TreeDrawing(style: style, now: now, frame: tree.frame)
             let fontSize = max(10, (style.labelSize * tree.frame.detail).rounded())
             let font = style.labelMetricsFont(fontSize)
+            // The trunk and checked-out branches first, then the most recently active, up to the allowance.
+            var allowed: Set<String>?
+            if let allowance = tree.allowance {
+                let ranked = tree.stems.filter { $0.name != nil }.sorted { a, b in
+                    if a.isTrunk != b.isTrunk { return a.isTrunk }
+                    if a.isCheckedOut != b.isCheckedOut { return a.isCheckedOut }
+                    return (a.commits.last?.date ?? .distantPast) > (b.commits.last?.date ?? .distantPast)
+                }
+                allowed = Set(ranked.prefix(allowance).compactMap(\.name))
+            }
             for stem in tree.stems {
-                guard let name = stem.name, let tip = stem.tip else { continue }
-                let text = (name as NSString).size(withAttributes: [.font: font])
+                guard let name = stem.name, let tip = stem.tip, allowed?.contains(name) ?? true else { continue }
+                let shown = stem.isTrunk ? tree.repoLabel.map { "\($0) · \(name)" } ?? name : name
+                let text = (shown as NSString).size(withAttributes: [.font: font])
                 let size = CGSize(width: ceil(text.width) + Pennant.padding * 2 + Pennant.notch(height: text.height + 6),
                                   height: ceil(text.height) + 6)
                 let point = tree.frame.point(tip.point)
@@ -97,7 +129,7 @@ extension Landscape {
                 let stretch = tree.schedule.stretch(of: name) ?? tree.schedule.trunk
                 requests.append((BannerLayout.Request(id: id, tip: point, outward: outward, size: size),
                                  (stem.isTrunk, stem.isCheckedOut, stem.commits.last?.date ?? .distantPast),
-                                 { BannerPlan.Hanging(banner: $0, pane: tree.pane, stem: name, stretch: stretch, name: name,
+                                 { BannerPlan.Hanging(banner: $0, pane: tree.pane, stem: name, stretch: stretch, name: shown,
                                                       ink: ink, alpha: alpha, fontSize: fontSize) }))
             }
         }
@@ -111,6 +143,21 @@ extension Landscape {
         let byID = Dictionary(requests.map { ($0.request.id, $0.hanging) }, uniquingKeysWith: { a, _ in a })
         plan.banners = placed.compactMap { banner in byID[banner.id].map { $0(banner) } }
         return plan
+    }
+
+    /// A bough too short to hang a ribbon from keeps its name on its trunk's pennant.
+    private func label(_ trees: inout [Standing], without ribbons: [BannerPlan.Ribbon], of panes: [Pane]) {
+        let named = Set(ribbons.map(\.pane))
+        let names = Dictionary(panes.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        for index in trees.indices where !named.contains(trees[index].pane) { trees[index].repoLabel = names[trees[index].pane] }
+    }
+
+    /// The crowns of the forest standing behind the single tree `full`, on screen.
+    private func forestCrowns(_ forest: [Pane], beside full: YggdrasilLayout, frame: TreeFrame) -> [CGRect] {
+        guard !forest.isEmpty else { return [] }
+        return forestScene(forest, crown: CGFloat(full.bounds.width) * frame.scale).planted.flatMap {
+            crown($0.full.stems, frame: $0.frame)
+        }
     }
 
     /// The crown to keep pennants off, on screen: every stem's wood, and the leaves around each node
@@ -140,12 +187,13 @@ extension Landscape {
     /// still near the shared trunk.
     private func ribbons(_ boughs: [(pane: Pane, bough: YggdrasilLayout.Bough)], frame: TreeFrame,
                          obstacles: [CGRect]) -> [BannerPlan.Ribbon] {
-        let fontSize = max(18, (style.ribbonSize * frame.detail).rounded())
+        let treeFit = fit(for: boughs.count)
+        let fontSize = max(14, (style.ribbonSize * frame.detail * treeFit.ribbonScale(count: boughs.count)).rounded())
         var requests: [BannerLayout.RibbonRequest] = []
         var panes: [String: (pane: Pane, stretch: TreeLayout.Stretch)] = [:]
         for (pane, bough) in boughs {
             guard let stem = bough.layout.stems.first, stem.curve.count > 2 else { continue }
-            let anchors = [0.14, 0.2, 0.26, 0.32, 0.4, 0.48, 0.56].map { fraction -> CGPoint in
+            let anchors = treeFit.ribbonStops.map { fraction -> CGPoint in
                 let node = stem.curve[Int(Double(stem.curve.count - 1) * fraction)]
                 let point = frame.point(node.point)
                 return CGPoint(x: point.x, y: point.y + node.width * frame.scale / 2)

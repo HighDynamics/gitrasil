@@ -100,6 +100,12 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
             entry.state = settings.arrangement == choice ? .on : .off
             menu.addItem(entry)
         }
+        let forest = action("Forest", #selector(toggleForest), nil)
+        forest.state = settings.showsForest ? .on : .off
+        forest.toolTip = "Shows up to \(ForestPolicy.standard.paneLimit) repositories, not \(ForestPolicy.standard.plainLimit): "
+            + "the single tree keeps the most recently active, the rest stand in a forest behind it, "
+            + "and an orchard goes into rows. Their order is set at launch and each midnight"
+        menu.addItem(forest)
         menu.addItem(.separator())
         menu.addItem(.sectionHeader(title: "Medium"))
         for (choice, title, tip) in [
@@ -202,6 +208,10 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
     @objc private func draw(in sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let choice = Medium(rawValue: raw) else { return }
         settings.medium = choice
+    }
+
+    @objc private func toggleForest() {
+        settings.showsForest.toggle()
     }
 
     @objc private func toggleBranchNames() {
@@ -330,10 +340,11 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
                 note = count.of == 0 ? "no repositories" : count.shown == count.of ? "all \(count.of)" : "\(count.shown) of \(count.of) shown"
                 if count.shown < count.of {
                     tip += "\nThe background shows \(pins.limit) at most: of a folder with more, the most recently active."
+                    tip += settings.showsForest ? "" : " Forest shows more."
                 }
             } else if pinned, !shown.contains(row.pin.url.path) {
                 note = "not shown"
-                tip += "\nThe background shows the first \(pins.limit)."
+                tip += "\nThe background shows the first \(pins.limit).\(settings.showsForest ? "" : " Forest shows more.")"
             }
             row.show(on: pinned, note: note, tip: tip)
         }

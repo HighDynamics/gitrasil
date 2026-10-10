@@ -173,4 +173,27 @@ final class BackgroundSettingsTests: XCTestCase {
         storage.saved = ["layoutSeed": 4242]
         XCTAssertEqual(BackgroundSettings(storage: storage).layoutSeed, 4242)
     }
+
+    func testTheForestIsOffUntilChosenAndSavedBetweenLaunches() {
+        let storage = MemorySettings()
+        let settings = BackgroundSettings(storage: storage)
+        XCTAssertFalse(settings.showsForest)
+        XCTAssertEqual(settings.forest, .off, "off, the plain layout holds what it holds")
+
+        settings.showsForest = true
+        XCTAssertEqual(settings.forest, .auto, "on, the policy decides")
+        XCTAssertEqual(storage.saved["forest"] as? Bool, true)
+        XCTAssertTrue(BackgroundSettings(storage: storage).showsForest, "kept between launches")
+
+        storage.saved = ["forest": "yes"]
+        XCTAssertFalse(BackgroundSettings(storage: storage).showsForest, "unreadable: the default")
+    }
+
+    func testAnOverrideForcesTheForestForOneRunWithoutSavingIt() {
+        let storage = MemorySettings()
+        let settings = BackgroundSettings(storage: storage)
+        settings.forestOverride = .rows
+        XCTAssertEqual(settings.forest, .rows)
+        XCTAssertNil(storage.saved["forest"])
+    }
 }

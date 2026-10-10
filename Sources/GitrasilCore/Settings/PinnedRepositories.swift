@@ -87,11 +87,15 @@ public final class PinnedRepositories {
     public static let suiteName = "com.gitrasil.background"
     public static let suiteOverrideVariable = "GITRASIL_BACKGROUND_DEFAULTS_SUITE"
 
-    public let limit: Int
+    /// How many repositories are shown at most; changing it re-resolves what's shown.
+    public var limit: Int {
+        didSet { if limit != oldValue { refresh() } }
+    }
+
     private let storage: PinStorage
     @ObservationIgnored private var watchers: [URL: FolderWatcher] = [:]
 
-    public init(storage: PinStorage, limit: Int = 4) {
+    public init(storage: PinStorage, limit: Int = 12) {
         self.storage = storage
         self.limit = limit
         self.pins = storage.loadPins()

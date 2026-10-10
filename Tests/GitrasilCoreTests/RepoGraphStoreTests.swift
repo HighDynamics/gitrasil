@@ -154,6 +154,30 @@ final class RepoGraphStoreTests: XCTestCase {
         XCTAssertTrue(derived, "a commit after the tick is picked up")
     }
 
+    func testARepositoryBackingOffIsReadAgainOnceWhenItsBackOffEnds() async throws {
+        let repo = try await repo()
+        let real = GitRunner(workdir: repo.url, extraEnvironment: GitRunner.appEnvironment)
+        let runner = BackingOffRunner(real: real, until: Date().addingTimeInterval(0.6))
+        let store = RepoGraphStore(repositoryURL: repo.url, options: options, settle: .milliseconds(200),
+                                   now: { Date() }, runner: runner)
+        defer { store.stop() }
+
+        await store.refresh()
+        XCTAssertNil(store.graph)
+        XCTAssertTrue(store.lastError?.contains("left alone until") ?? false, "readable text: \(store.lastError ?? "nil")")
+
+        let back = await waitFor(10) { store.graph != nil }
+        XCTAssertTrue(back, "refreshed without any ref changing")
+        XCTAssertNil(store.lastError)
+
+        // Nothing is scheduled any more: no more reads while it sits idle.
+        let counts = runner.counts
+        try await Task.sleep(for: .seconds(1.5))
+        XCTAssertEqual(runner.counts.refused, counts.refused)
+        XCTAssertEqual(runner.counts.answered, counts.answered)
+        XCTAssertEqual(counts.refused, 1, "one read was refused, then one refresh when the back-off ended")
+    }
+
     func testAMissingRepositoryFoundWhilePausedIsWatchedOnResume() async throws {
         let parent = try FixtureRepo()
         let store = RepoGraphStore(repositoryURL: parent.url.appendingPathComponent("later"), options: options,
@@ -235,4 +259,29 @@ final class RepoGraphStoreTests: XCTestCase {
 private final class TestClock: @unchecked Sendable {
     var date: Date
     init(_ date: Date) { self.date = date }
+}
+
+/// Fails like a repository on a hung volume until `until` has passed, then reads the real one.
+private final class BackingOffRunner: GitRunning, @unchecked Sendable {
+    private let lock = NSLock()
+    private let real: GitRunning
+    private let until: Date
+    private var refused = 0
+    private var answered = 0
+
+    init(real: GitRunning, until: Date) {
+        self.real = real
+        self.until = until
+    }
+
+    var counts: (refused: Int, answered: Int) { lock.withLock { (refused, answered) } }
+
+    func run(_ args: [String]) async throws -> GitOutput {
+        let backingOff = lock.withLock { () -> Bool in
+            if Date() < until { refused += 1 } else { answered += 1 }
+            return Date() < until
+        }
+        if backingOff { throw GitError.backingOff(retryAt: until) }
+        return try await real.run(args)
+    }
 }

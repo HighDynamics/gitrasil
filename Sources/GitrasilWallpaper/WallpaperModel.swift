@@ -77,7 +77,16 @@ final class WallpaperModel {
     }
 
     func stop() {
+        starting?.cancel()
         store.stop()
+    }
+
+    /// The first read and the watcher's setup, so stopping the pane cancels them too.
+    private var starting: Task<Void, Never>?
+
+    /// Starts the pane in a task of its own that `stop()` cancels.
+    func startInBackground() {
+        starting = Task { await start() }
     }
 
     /// The hourly check: picks up a repository that was missing and branches ageing out.

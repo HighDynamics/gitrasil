@@ -97,14 +97,20 @@ quit:
 
 Pin repositories from the menu-bar item (the small tree), or a folder of them: a pinned folder
 stands for every repository in it (one or two folders down), as they come and go. Pins are a
-checklist in the menu; untick several in one visit. The background grows the first four (a folder
-with more shows its most recently active) in a desktop-level window behind the icons on every
-display, and redraws as they change.
+checklist in the menu; untick several in one visit. The background grows the first twelve (a folder
+with more shows its most recently active; the Forest setting below lifts this to sixty-four) in a
+desktop-level window behind the icons on every display, and redraws as they change.
 
 The same menu holds the settings:
 
 - **Arrange As** — *Orchard*, a tree per repository with its name beneath, or *Single Tree*, one
   tree with a bough per repository.
+- **Forest** — off by default. Off, the background shows at most twelve repositories. On, it shows
+  up to sixty-four: the single tree keeps the most recently active (twelve on a laptop's height,
+  twenty on a taller display) and the rest stand behind it in a forest of paler, smaller trees in
+  rows on either side; an orchard of more than twelve goes into the same rows. Only the tree and the
+  forest's front line carry names. Which repository stands where is decided at launch and again
+  after midnight, not as commits arrive, and the trees grow again when that order changes.
 - **Banners** — *Branch Names*, each branch's name on a pennant at its tip, and *Repository
   Names*, in the single tree each repository's name on a ribbon under its bough. Each can be
   turned off on its own.

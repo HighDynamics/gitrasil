@@ -128,7 +128,7 @@ public enum BannerLayout {
     public static let cordInset: CGFloat = 0.3
     /// How far below its anchor a ribbon may hang, and where along it the anchor may be (0.5 hangs
     /// it centred; off centre it hangs beside an upright bough).
-    static let drops: [CGFloat] = [14, 24, 36, 50, 66]
+    static let drops: [CGFloat] = [14, 24, 36, 50, 66, 86]
     static let hangs: [CGFloat] = [0.5, 0.3, 0.7, 0.15, 0.85]
 
     /// Hangs each ribbon (in the order given) from one of its anchors: never on another ribbon, its
