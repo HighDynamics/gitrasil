@@ -217,7 +217,9 @@ extension Landscape {
 /// turned on and cheap to show: never while the background is covered, every display is asleep, or
 /// the Mac is on battery or in Low Power Mode. Between gusts only a one-shot timer waits, and in those
 /// states not even that: it's re-armed when the background shows, a display wakes or the power
-/// changes.
+/// changes. The one exception is the gust that turning gusts on asks for (`blowNow`): the Mac's power
+/// doesn't hold it back, since it was asked for, but there's nothing to show while the background is
+/// covered or every display is asleep, so then it waits and blows the moment that ends.
 @MainActor
 @Observable
 final class Breeze {
@@ -249,9 +251,27 @@ final class Breeze {
     @ObservationIgnored private var power: PowerSourceWatcher?
     @ObservationIgnored private var wakeCheck: Task<Void, Never>?
 
-    init(environment: [String: String] = ProcessInfo.processInfo.environment) {
+    /// The gust turning gusts on asked for hasn't blown yet: it's waiting for the background to show
+    /// and a display to be awake. Only a flag, so nothing runs while it waits.
+    @ObservationIgnored private var isOwed = false
+    /// The gust blowing now is that one, so a power source that doesn't suit the timer's gusts doesn't still it.
+    @ObservationIgnored private var isAsked = false
+
+    /// What the Mac is doing: whether a display is awake, and whether the power suits the timer's gusts
+    /// (mains, out of Low Power Mode). The Mac's own state, unless a test supplies another.
+    private let isDisplayAwake: @MainActor () -> Bool
+    private let isPowerCheap: @MainActor () -> Bool
+
+    init(environment: [String: String] = ProcessInfo.processInfo.environment,
+         isDisplayAwake: @escaping @MainActor () -> Bool = Breeze.isAnyDisplayAwake,
+         isPowerCheap: @escaping @MainActor () -> Bool = Breeze.isOnMainsPower) {
         isTurnedOff = environment["GITRASIL_BACKGROUND_BREEZE"] == "off"
+        self.isDisplayAwake = isDisplayAwake
+        self.isPowerCheap = isPowerCheap
     }
+
+    /// Whether a gust's timer is waiting. Never while gusts can't blow.
+    var isArmed: Bool { timer != nil }
 
     /// Starts listening for what decides whether gusts may blow: displays sleeping and waking, the
     /// Mac waking, the power source and Low Power Mode.
@@ -287,28 +307,44 @@ final class Breeze {
         return pow(sin(.pi * t), 2)
     }
 
-    /// A gust at once (gusts were just turned on), if gusts may blow; the timer takes over after it.
+    /// A gust at once (gusts were just turned on): now if it can be seen, else the moment it can; the
+    /// timer takes over after it (while the power suits it).
     func blowNow() {
-        guard mayBlow else { return }
-        timer?.invalidate()
-        gust()
+        guard isEnabled, !isTurnedOff else { return }
+        isOwed = true
+        blowIfOwed()
     }
 
-    /// Whether gusts may blow now.
+    /// Whether a gust can be seen: gusts blow, the background is on screen and a display is awake.
+    private var canShow: Bool {
+        isEnabled && !isTurnedOff && isVisible && isDisplayAwake()
+    }
+
+    /// Whether the timer's gusts may blow now.
     private var mayBlow: Bool {
-        isEnabled && !isTurnedOff && isVisible && Self.isCheapToAnimate()
+        canShow && isPowerCheap()
     }
 
     /// Arms the timer for the next gust while gusts may blow; otherwise disarms it and stills a gust
-    /// in progress.
-    private func update() {
+    /// in progress (the one that was asked for lasts through a power source that doesn't suit the
+    /// timer's, but not through a covered background or sleeping displays). Blows the gust that was
+    /// asked for and is owed, if it can be seen now.
+    func update() {
         if mayBlow {
             if timer == nil { scheduleNext() }
         } else {
             timer?.invalidate()
             timer = nil
-            gustStart = nil
         }
+        if !isEnabled || isTurnedOff { isOwed = false }
+        if gustStart != nil, !(canShow && (isAsked || isPowerCheap())) { gustStart = nil }
+        blowIfOwed()
+    }
+
+    private func blowIfOwed() {
+        guard isOwed, canShow else { return }
+        timer?.invalidate()
+        gust(asked: true)
     }
 
     /// Right after a wake a display can still read as asleep, so look again once it's up.
@@ -331,28 +367,35 @@ final class Breeze {
         timer?.tolerance = wait * 0.1
     }
 
-    private func gust() {
+    /// A gust now: the timer's, or (`asked`) the one turning gusts on asked for.
+    private func gust(asked: Bool = false) {
         timer = nil
         // Missed notifications aside, the state is checked again here; the next gust is only
         // scheduled while gusts may blow.
-        guard mayBlow else { return update() }
+        guard asked ? canShow : mayBlow else { return update() }
         let start = Date()
         gustStart = start
-        logEvent("gust")
+        isOwed = false
+        isAsked = asked
+        logEvent(asked ? "gust (asked for)" : "gust")
         Task {
             try? await Task.sleep(for: .seconds(Self.gustLength))
             if gustStart == start { gustStart = nil }
         }
-        scheduleNext()
+        if mayBlow { scheduleNext() }
     }
 
-    /// Still unless a display is awake and the Mac is on mains power, out of Low Power Mode.
-    static func isCheapToAnimate() -> Bool {
-        if ProcessInfo.processInfo.isLowPowerModeEnabled { return false }
+    /// Whether any display is awake.
+    static func isAnyDisplayAwake() -> Bool {
         var ids = [CGDirectDisplayID](repeating: 0, count: 16)
         var found: UInt32 = 0
-        guard CGGetOnlineDisplayList(UInt32(ids.count), &ids, &found) == .success,
-              ids.prefix(Int(found)).contains(where: { CGDisplayIsAsleep($0) == 0 }) else { return false }
+        return CGGetOnlineDisplayList(UInt32(ids.count), &ids, &found) == .success
+            && ids.prefix(Int(found)).contains { CGDisplayIsAsleep($0) == 0 }
+    }
+
+    /// Whether the Mac is on mains power, out of Low Power Mode.
+    static func isOnMainsPower() -> Bool {
+        if ProcessInfo.processInfo.isLowPowerModeEnabled { return false }
         let info = IOPSCopyPowerSourcesInfo().takeRetainedValue()
         let source = IOPSGetProvidingPowerSourceType(info).takeUnretainedValue() as String
         return source == kIOPMACPowerKey

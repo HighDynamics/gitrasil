@@ -135,7 +135,8 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         gusts.state = settings.gusts && !gustsOverridden ? .on : .off
         gusts.toolTip = gustsOverridden
             ? "Kept still by GITRASIL_BACKGROUND_BREEZE=off"
-            : "Now and then a gust sways the banners for a few seconds (on mains power only), the first at once; off, they hang still"
+            : "Now and then a gust sways the banners for a few seconds (on mains power only); "
+            + "the first blows at once, whatever the power. Off, they hang still"
         menu.addItem(gusts)
         menu.addItem(.separator())
         let watch = action("Watch Gitrasil Grow", #selector(watchGrow), nil)
