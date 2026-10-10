@@ -367,8 +367,9 @@ final class Breeze {
         timer?.tolerance = wait * 0.1
     }
 
-    /// A gust now: the timer's, or (`asked`) the one turning gusts on asked for.
-    private func gust(asked: Bool = false) {
+    /// A gust now: the timer's, or (`asked`) the one turning gusts on asked for. Not private so a test can
+    /// fire the timer's, whose own check of the state matters when a notification was missed.
+    func gust(asked: Bool = false) {
         timer = nil
         // Missed notifications aside, the state is checked again here; the next gust is only
         // scheduled while gusts may blow.

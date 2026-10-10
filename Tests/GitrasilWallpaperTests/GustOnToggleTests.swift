@@ -23,14 +23,17 @@ final class GustOnToggleTests: XCTestCase {
 
     private let surroundings = Surroundings()
 
-    private func model(arrangement: Arrangement = .singleTree, forest: Bool = false) -> BackgroundModel {
+    private func model(arrangement: Arrangement = .singleTree, forest: Bool = false, gusts: Bool = false,
+                       environment: [String: String] = [:]) -> BackgroundModel {
         let settings = BackgroundSettings(storage: MemorySettings())
         settings.arrangement = arrangement
         settings.showsForest = forest
+        settings.gusts = gusts
         // This repository is the one pin: the settings are what's under test, not what the trees look like.
         let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent()
-        let breeze = Breeze(isDisplayAwake: { [surroundings] in surroundings.isDisplayAwake },
+        let breeze = Breeze(environment: environment,
+                            isDisplayAwake: { [surroundings] in surroundings.isDisplayAwake },
                             isPowerCheap: { [surroundings] in surroundings.isPowerCheap })
         let model = BackgroundModel(pins: PinnedRepositories(storage: MemoryPins([Pin(.repository, repository)])),
                                     settings: settings, breeze: breeze)
@@ -142,5 +145,58 @@ final class GustOnToggleTests: XCTestCase {
         XCTAssertNil(model.breeze.gustStart)
         model.isVisible = true
         XCTAssertNil(model.breeze.gustStart, "covering and showing again doesn't ask for another")
+    }
+
+    func testTurningTheBannersOffWhileAGustIsOwedDropsIt() async {
+        let model = model()
+        await settle()
+        model.isVisible = false
+        model.settings.gusts = true
+        await settle()
+        model.settings.showsBranchNames = false
+        model.settings.showsRepoNames = false
+        await settle()
+        model.isVisible = true
+        XCTAssertNil(model.breeze.gustStart, "with nothing hanging there is nothing to sway")
+        XCTAssertFalse(model.breeze.isArmed)
+    }
+
+    func testTheBreezeTurnedOffFromOutsideBlowsNoFirstGust() async {
+        let model = model(environment: ["GITRASIL_BACKGROUND_BREEZE": "off"])
+        await settle()
+        model.settings.gusts = true
+        await settle()
+        XCTAssertNil(model.breeze.gustStart)
+        XCTAssertFalse(model.breeze.isArmed)
+        model.isVisible = false
+        model.isVisible = true
+        XCTAssertNil(model.breeze.gustStart, "and none is owed")
+    }
+
+    func testADisplaySleepingMidGustStillsIt() async {
+        surroundings.isPowerCheap = false
+        let model = model()
+        await settle()
+        model.settings.gusts = true
+        await settle()
+        XCTAssertNotNil(model.breeze.gustStart)
+        surroundings.isDisplayAwake = false
+        model.breeze.update()
+        XCTAssertNil(model.breeze.gustStart, "the gust asked for goes too, though battery didn't stop it")
+        XCTAssertFalse(model.breeze.isArmed)
+    }
+
+    func testATimersGustStaysStillOnBattery() async {
+        surroundings.isPowerCheap = false
+        let model = model(gusts: true)
+        await settle()
+        XCTAssertFalse(model.breeze.isArmed, "no timer on battery")
+        // The timer firing on a missed notification looks at the state again.
+        model.breeze.gust()
+        XCTAssertNil(model.breeze.gustStart)
+        XCTAssertFalse(model.breeze.isArmed)
+        surroundings.isPowerCheap = true
+        model.breeze.gust()
+        XCTAssertNotNil(model.breeze.gustStart, "the same gust on mains power blows")
     }
 }
