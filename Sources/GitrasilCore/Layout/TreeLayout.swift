@@ -124,18 +124,28 @@ public struct TreeLayout: Sendable {
         public var straighten: Double
         /// How long the tree grows, trunk and limbs alike, as a multiple of its own size (widths unchanged).
         public var reach: Double
+        /// Whether its limbs leave the trunk the way limbs leave a limb, splayed a little to either side of
+        /// it, at their own size, and bend up only gently, rather than climbing toward upright: for a bough
+        /// reaching out nearly level.
+        public var splay: Bool
 
         public init(foot: CGPoint = .zero, heading: Double = 0, outward: Double = 0, fork: Fork? = nil,
-                    straighten: Double = TreeLayout.boughStraighten, reach: Double = 1) {
+                    straighten: Double = TreeLayout.boughStraighten, reach: Double = 1, splay: Bool = false) {
             self.foot = foot
             self.heading = heading
             self.outward = outward
             self.fork = fork
             self.straighten = straighten
             self.reach = reach
+            self.splay = splay
         }
 
         public static let upright = Planting()
+
+        /// How long its limbs grow: as far as the tree reaches, but a splayed bough's stay their own size.
+        var limbReach: Double { splay ? min(reach, 1) : reach }
+        /// How much its limbs bend toward upright at each step.
+        var limbTropism: Double { splay ? TreeLayout.splayTropism : TreeLayout.tropism }
 
         var isUpright: Bool { self == .upright }
     }
@@ -162,6 +172,8 @@ public struct TreeLayout: Sendable {
     static let stepDecay = 0.9
     /// How much a limb's heading turns toward straight up at each step.
     static let tropism = 0.18
+    /// ... and on a splayed bough (`Planting.splay`), so its limbs keep reaching along it.
+    static let splayTropism = 0.07
     /// Limbs off limbs are drawn this much smaller than their parent.
     static let childScale = 0.72
     /// A trunk commit's share of the trunk's weight, against a limb commit's 1.
@@ -265,8 +277,8 @@ public struct TreeLayout: Sendable {
                 // Low limbs reach out nearly level and long; high ones rise steeply and stay short
                 // (`limbPlans`).
                 scale = plans[index]?.scale ?? 1
-                lean = side * ((88 - 48 * u) + rng.next(in: -12...12)) * .pi / 180
-                    + (planting.isUpright ? 0 : base.heading * 0.7)
+                lean = planting.splay ? base.heading + side * rng.next(in: 26...46) * .pi / 180
+                    : side * ((88 - 48 * u) + rng.next(in: -12...12)) * .pi / 180 + (planting.isUpright ? 0 : base.heading * 0.7)
                 parentGrown = .infinity
                 fork = Fork(parent: 0, node: min(node, trunkNodes.count - 1),
                             width: base.width * stems[0].taperFactor(at: base.point), heading: base.heading)
@@ -292,7 +304,8 @@ public struct TreeLayout: Sendable {
             if let growIn {
                 shown = full * schedule.limbs[index].progress(at: growIn)
             }
-            let (nodes, curve) = Self.grow(limb, from: base, lean: lean, scale: scale * planting.reach, shown: shown, shuffle: shuffle,
+            let (nodes, curve) = Self.grow(limb, from: base, lean: lean, scale: scale * planting.limbReach, shown: shown,
+                                           shuffle: shuffle, tropism: planting.limbTropism,
                                            weight: { k in Self.remainingWeight(limb, index: index, tree: tree, weights: weights, beyond: k) })
             let stem = Stem(name: limb.name, level: level, nodes: nodes, curve: curve, commits: limb.commits, grown: shown,
                             isBud: limb.isBud, isCheckedOut: limb.isCheckedOut, scale: scale, fork: fork)
@@ -522,7 +535,7 @@ public struct TreeLayout: Sendable {
     /// long step curves too. `shown` commits are grown, the last one part-way. Returns the commit
     /// nodes and the finer curve through them.
     static func grow(_ limb: RepoTree.Limb, from base: Node, lean: Double, scale: Double, shown: Double,
-                     shuffle: Int = 0, weight: (Int) -> Double) -> (nodes: [Node], curve: [Node]) {
+                     shuffle: Int = 0, tropism: Double = tropism, weight: (Int) -> Double) -> (nodes: [Node], curve: [Node]) {
         let steps = Int(ceil(shown))
         guard steps > 0 else { return ([], []) }
         var nodes = [Node(point: base.point, width: min(base.width, width(weight: weight(0))), heading: lean)]

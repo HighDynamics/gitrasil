@@ -179,24 +179,10 @@ final class ForestPolicyTests: XCTestCase {
     func testTheFitBlendsFromStandardToWideByCount() {
         XCTAssertEqual(YggdrasilLayout.Fit.fitting(count: 2), .standard)
         XCTAssertEqual(YggdrasilLayout.Fit.fitting(count: 4), .standard)
-        // From 8 on it's the wide fan, spreading further into an oak as boughs are added.
-        for count in [8, 20, 40] {
-            var fit = YggdrasilLayout.Fit.fitting(count: count)
-            XCTAssertEqual(fit.oak, YggdrasilLayout.Fit.oak(count: count))
-            fit.oak = 0
-            XCTAssertEqual(fit, .wide, "\(count)")
-        }
+        XCTAssertEqual(YggdrasilLayout.Fit.fitting(count: 8), .wide)
+        XCTAssertEqual(YggdrasilLayout.Fit.fitting(count: 20), .wide)
         let six = YggdrasilLayout.Fit.fitting(count: 6)
         XCTAssertGreaterThan(six.footSpread, YggdrasilLayout.Fit.standard.footSpread)
         XCTAssertLessThan(six.footSpread, YggdrasilLayout.Fit.wide.footSpread)
-    }
-
-    func testTheTreeGrowsIntoAnOakAsBoughsAreAdded() {
-        XCTAssertEqual(YggdrasilLayout.Fit.oak(count: 2), 0)
-        XCTAssertEqual(YggdrasilLayout.Fit.oak(count: 5), 0, "a handful of boughs is the tree as it was")
-        let oaks = (5...40).map { YggdrasilLayout.Fit.oak(count: $0) }
-        XCTAssertEqual(oaks, oaks.sorted(), "never less of an oak for more boughs")
-        XCTAssertEqual(YggdrasilLayout.Fit.oak(count: 28), 1)
-        XCTAssertEqual(YggdrasilLayout.Fit.oak(count: 64), 1)
     }
 }
