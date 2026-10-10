@@ -117,10 +117,10 @@ The same menu holds the settings:
 - **Medium** — *Ink*, brush ink on cream paper; *Charcoal*, charcoal and coloured pastel on paper
   with a tooth; or *Chalk*, coloured chalk on a slate board (a green-grey board in light mode, a
   near-black one in dark), the default. Every medium draws by hand: lines wobble and vary in width.
-- **Sway in Gusts** — now and then a gust sways the banners for a few seconds, only on mains power
-  with the display awake and the background uncovered. Off by default: the banners hang still until
-  it's turned on, and turning it on blows the first gust at once, even on battery (or, with the
-  background covered or the displays asleep, the moment they're back).
+- **Sway in Gusts** — now and then a gust sways the banners for a few seconds, on battery too but
+  not in Low Power Mode, with a display awake and the background uncovered. Off by default: the banners
+  hang still until it's turned on, and turning it on blows the first gust at once, even in Low Power
+  Mode (or, with the background covered or the displays asleep, the moment they're back).
 - **Watch Gitrasil Grow** — grows every tree again from the ground, just to watch. The scene also
   grows again on its own when a repository is dropped.
 - **Reshuffle Branches** — grows every tree again with its branches leaning and curving a new way.

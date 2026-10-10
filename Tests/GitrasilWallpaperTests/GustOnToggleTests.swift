@@ -13,10 +13,10 @@ private final class MemoryPins: PinStorage {
 @MainActor
 private final class Surroundings {
     var isDisplayAwake = true
-    var isPowerCheap = true
+    var isLowPowerMode = false
 }
 
-/// Turning gusts on blows one at once, whatever the arrangement and the power: or the moment it can be
+/// Turning gusts on blows one at once, whatever the arrangement and Low Power Mode: or the moment it can be
 /// seen. Nothing runs while gusts are off or can't blow.
 @MainActor
 final class GustOnToggleTests: XCTestCase {
@@ -34,7 +34,7 @@ final class GustOnToggleTests: XCTestCase {
             .deletingLastPathComponent()
         let breeze = Breeze(environment: environment,
                             isDisplayAwake: { [surroundings] in surroundings.isDisplayAwake },
-                            isPowerCheap: { [surroundings] in surroundings.isPowerCheap })
+                            isLowPowerMode: { [surroundings] in surroundings.isLowPowerMode })
         let model = BackgroundModel(pins: PinnedRepositories(storage: MemoryPins([Pin(.repository, repository)])),
                                     settings: settings, breeze: breeze)
         model.start()
@@ -61,22 +61,22 @@ final class GustOnToggleTests: XCTestCase {
         }
     }
 
-    /// The case in the field: on battery the timer's gusts don't blow, and neither did the first.
-    func testTheFirstGustBlowsOnBatteryButTheTimerStaysDisarmed() async {
-        surroundings.isPowerCheap = false
+    /// The case in the field was the power gate: the first gust was held back as the timer's are.
+    func testTheFirstGustBlowsInLowPowerModeButTheTimerStaysDisarmed() async {
+        surroundings.isLowPowerMode = true
         let model = model()
         await settle()
         model.settings.gusts = true
         await settle()
         XCTAssertNotNil(model.breeze.gustStart)
-        XCTAssertFalse(model.breeze.isArmed, "no timer on battery")
-        // Plugging in carries on with the timer's gusts, and the gust blowing isn't cut short.
-        surroundings.isPowerCheap = true
+        XCTAssertFalse(model.breeze.isArmed, "no timer in Low Power Mode")
+        // Leaving Low Power Mode carries on with the timer's gusts, and the gust blowing isn't cut short.
+        surroundings.isLowPowerMode = false
         model.breeze.update()
         XCTAssertNotNil(model.breeze.gustStart)
         XCTAssertTrue(model.breeze.isArmed)
-        // Unplugged again, the gust asked for still blows out its seven seconds, and the timer is disarmed.
-        surroundings.isPowerCheap = false
+        // Back in it, the gust asked for still blows out its seven seconds, and the timer is disarmed.
+        surroundings.isLowPowerMode = true
         model.breeze.update()
         XCTAssertNotNil(model.breeze.gustStart)
         XCTAssertFalse(model.breeze.isArmed)
@@ -96,7 +96,7 @@ final class GustOnToggleTests: XCTestCase {
     }
 
     func testTheFirstGustWaitsForADisplayToWake() async {
-        surroundings.isPowerCheap = false
+        surroundings.isLowPowerMode = true
         let model = model()
         await settle()
         surroundings.isDisplayAwake = false
@@ -106,7 +106,7 @@ final class GustOnToggleTests: XCTestCase {
         XCTAssertFalse(model.breeze.isArmed)
         surroundings.isDisplayAwake = true
         model.breeze.update()
-        XCTAssertNotNil(model.breeze.gustStart, "the moment a display is awake, even on battery")
+        XCTAssertNotNil(model.breeze.gustStart, "the moment a display is awake, even in Low Power Mode")
     }
 
     func testABlowingGustIsStilledByACoveredBackground() async {
@@ -174,7 +174,7 @@ final class GustOnToggleTests: XCTestCase {
     }
 
     func testADisplaySleepingMidGustStillsIt() async {
-        surroundings.isPowerCheap = false
+        surroundings.isLowPowerMode = true
         let model = model()
         await settle()
         model.settings.gusts = true
@@ -182,21 +182,21 @@ final class GustOnToggleTests: XCTestCase {
         XCTAssertNotNil(model.breeze.gustStart)
         surroundings.isDisplayAwake = false
         model.breeze.update()
-        XCTAssertNil(model.breeze.gustStart, "the gust asked for goes too, though battery didn't stop it")
+        XCTAssertNil(model.breeze.gustStart, "the gust asked for goes too, though Low Power Mode didn't stop it")
         XCTAssertFalse(model.breeze.isArmed)
     }
 
-    func testATimersGustStaysStillOnBattery() async {
-        surroundings.isPowerCheap = false
+    func testATimersGustStaysStillInLowPowerMode() async {
+        surroundings.isLowPowerMode = true
         let model = model(gusts: true)
         await settle()
-        XCTAssertFalse(model.breeze.isArmed, "no timer on battery")
+        XCTAssertFalse(model.breeze.isArmed, "no timer in Low Power Mode")
         // The timer firing on a missed notification looks at the state again.
         model.breeze.gust()
         XCTAssertNil(model.breeze.gustStart)
         XCTAssertFalse(model.breeze.isArmed)
-        surroundings.isPowerCheap = true
+        surroundings.isLowPowerMode = false
         model.breeze.gust()
-        XCTAssertNotNil(model.breeze.gustStart, "the same gust on mains power blows")
+        XCTAssertNotNil(model.breeze.gustStart, "the same gust out of Low Power Mode blows")
     }
 }
