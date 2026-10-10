@@ -139,3 +139,18 @@ angles, since the crossings were what he liked.
   full-grown bough, so the angle doesn't change while the bough grows in.
 - Banners are unchanged. A front bough's ribbon can end up hanging low on the trunk, since the bough is so
   short. That's left for the banner round.
+
+## Round 5: front boughs grow out of the trunk
+
+Daniel liked round 4, but the front boughs looked pasted on. Each one's flared base sat on the trunk as a
+hard-edged stub that hid the trunk's bark and shading.
+
+- **Fading in.** A front bough's wood now fades in from its foot (`TreeDrawing.fadeIn`). It's gone at the
+  trunk's middle and fully there by 0.6 of the trunk's width along it (`emergence`). Its paper underlay, wood,
+  bark and outline all fade together, so the trunk's own shading and streaks run on into it, and its wider
+  collar reads as a soft swelling on the trunk's face rather than a disc.
+- **Lines.** A front bough's outline is no longer cut away over the trunk, so its edges come out of the
+  trunk's face as it fades in. The trunk's edges aren't cut away under its collar either, since the bough is
+  painted over them.
+- The layout is unchanged. How often tiers come forward, their reach, the droop and the leaves are as in
+  round 4.
