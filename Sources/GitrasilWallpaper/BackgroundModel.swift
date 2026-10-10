@@ -51,7 +51,7 @@ final class BackgroundModel {
     let pins: PinnedRepositories
     let settings: BackgroundSettings
     /// Now and then a gust through the banners, while the background is on screen.
-    @ObservationIgnored let breeze = Breeze()
+    @ObservationIgnored let breeze: Breeze
 
     var isVisible = true {
         didSet {
@@ -63,9 +63,10 @@ final class BackgroundModel {
 
     private var clock: Timer?
 
-    init(pins: PinnedRepositories, settings: BackgroundSettings) {
+    init(pins: PinnedRepositories, settings: BackgroundSettings, breeze: Breeze? = nil) {
         self.pins = pins
         self.settings = settings
+        self.breeze = breeze ?? Breeze()
     }
 
     func start() {

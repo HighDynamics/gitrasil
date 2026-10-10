@@ -204,8 +204,8 @@ Can those be banners that 'hang off', and/or 'blow in the wind'?"
   clear of every other banner is left out, as before. Banners never overlap each other.
 - Sway: each pennant swings a degree or two about its hook. It runs as small separate views (only
   their rotation changes, the tree canvas isn't redrawn), in gusts — a few seconds of breeze now
-  and then, at ≤12 fps — and not at all while the windows are covered, the display is asleep, the
-  Mac is on battery or in Low Power Mode. Measured idle CPU decides whether it stays on; if it can't
+  and then, at ≤12 fps — and not at all while the windows are covered, the display is asleep, or the
+  Mac is in Low Power Mode. Measured idle CPU decides whether it stays on; if it can't
   be near zero it ships still.
 
 **2. Growing in on a new view and a new pin.** "I'd love to see the tree grow anytime I change the
@@ -269,8 +269,8 @@ moves them onto ribbons).
   - Averaged over the 45 s cycle: about 2%.
   - A profile puts the cost in Core Animation's commit of the turned layers, not in our code or the
     canvas. Dropping `drawingGroup` changed nothing, so it was dropped.
-- No gust while the background is covered, the main display is asleep, on battery, or in Low
-  Power Mode.
+- No gust while the background is covered, the main display is asleep, or in Low Power Mode
+  (battery power alone no longer stops them).
 - `GITRASIL_BACKGROUND_BREEZE=off` keeps the banners still.
 
 ![banners, light](banners-light.jpg) ![banners, dark](banners-dark.jpg)
@@ -691,7 +691,7 @@ and curve differently; for a given seed the trees are the same on every launch. 
 jitter stays keyed as it is (and a gust never redraws the trees), so lines don't shimmer. The banner
 plan's cache key gains the seed.
 
-**A gust at once.** Turning Sway in Gusts on blows the first gust straight away, when gusts may blow at all (mains power, the display awake); the usual
+**A gust at once.** Turning Sway in Gusts on blows the first gust straight away, when gusts may blow at all (the display awake; the first gust blows even in Low Power Mode); the usual
 timer takes over from there.
 
 **Kept.** Draw only on change: the clocks run only while something grows (the banners' grow-in

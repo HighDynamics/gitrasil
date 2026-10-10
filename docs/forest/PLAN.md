@@ -166,7 +166,7 @@ canopy and rows are one line at 343 px/unit; groves is 3 lines of 482.
 | N=16 rows | 7.2 s | 0 | ~1.3 s per gust |
 | N=64 rows | 22.8 s | 0 | ~0.7 s per gust (the back lines carry no pennants) |
 
-A gust comes every ~45 s and only on mains power, so gusts average 1–3% of a core. They only turn the
+A gust comes every ~45 s (not in Low Power Mode), so gusts average 1–3% of a core. They only turn the
 banner layers: the trees are not redrawn. At N=64 the grow-in is 75 ms a frame in this measure, so it is
 not a 30 fps animation unless trees are cached (below).
 
@@ -296,8 +296,8 @@ at 55 s). Nothing polls; the timeline is paused unless something grows.
   So the grow-in at 64 is about 6 s of 20–50% of one core, then 0.
 - Redraw of the whole scene offscreen (`ImageRenderer`; slower than the live GPU canvas): 126 ms at 64 on the
   laptop, 29 ms at 12, 15 ms for today's 4-tree orchard. Plan (banners) 23 ms at 64, paid on a change only.
-- Gusts only turn the banner layers, as before (round 1: 0.7–1.3 s CPU per 7 s gust, a gust every ~45 s on mains
-  power). Not re-measured; the forest has no pennants behind the front line.
+- Gusts only turn the banner layers, as before (round 1: 0.7–1.3 s CPU per 7 s gust, a gust every ~45 s, on battery too
+  now). Not re-measured; the forest has no pennants behind the front line.
 
 ## Decisions for Daniel
 
