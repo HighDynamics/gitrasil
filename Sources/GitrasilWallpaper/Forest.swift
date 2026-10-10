@@ -8,7 +8,8 @@ import GitrasilCore
 
 extension Pane {
 
-    /// A pane made from its parts, not a repository's model: for tests of how panes are split.
+    /// A pane made from its parts rather than a repository's model. For tests (`WallpaperModel`'s tree can only be
+    /// read from a repository, and it can't be set).
     init(id: String, name: String, seed: String, tree: RepoTree?) {
         self.id = id
         self.name = name

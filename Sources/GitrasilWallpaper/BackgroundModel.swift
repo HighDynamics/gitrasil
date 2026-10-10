@@ -21,8 +21,12 @@ final class BackgroundModel {
     /// the policy allows, past a dozen standing in the forest. A single tree set to hold fewer than a dozen
     /// shows no more than that without the Forest (docs/tree-capacity/PLAN.md).
     static func paneLimit(for settings: BackgroundSettings) -> Int {
-        let policy = settings.policy
-        return settings.forest == .off ? policy.shownWithoutForest(singleTree: settings.arrangement == .singleTree) : policy.paneLimit
+        choices(of: settings).paneLimit
+    }
+
+    /// The settings that decide which repositories are shown and where.
+    private static func choices(of settings: BackgroundSettings) -> SettingsReaction.Choices {
+        .init(arrangement: settings.arrangement, forest: settings.forest, treeCapacity: settings.treeCapacity)
     }
 
     /// When each repository (by path) last had a commit, as it stood at launch and at the first hourly
@@ -106,8 +110,8 @@ final class BackgroundModel {
     /// seed grows in from the ground, and the breeze follows the banners and gusts (turning gusts on
     /// blows one at once, so it shows what it does).
     private func observeSettings() {
-        let arrangement = settings.arrangement, medium = settings.medium, layoutSeed = settings.layoutSeed
-        let forest = settings.forest, treeCapacity = settings.treeCapacity
+        let medium = settings.medium, layoutSeed = settings.layoutSeed
+        let before = Self.choices(of: settings)
         let names = (settings.showsBranchNames, settings.showsRepoNames, settings.gusts)
         withObservationTracking {
             _ = (settings.arrangement, settings.medium, settings.showsBranchNames, settings.showsRepoNames, settings.gusts,
@@ -115,25 +119,24 @@ final class BackgroundModel {
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                // The Forest, the arrangement and the tree's capacity decide how many repositories are shown: read
-                // the new ones (or let the others go) before the scene grows again.
-                let limit = Self.paneLimit(for: self.settings)
-                if limit != self.pins.limit {
+                // The Forest, the arrangement and the tree's capacity decide how many repositories are shown and
+                // which stand on the tree: read the new ones (or let the others go), then grow once, if anything moves.
+                let after = Self.choices(of: self.settings)
+                if after.arrangement != before.arrangement { logEvent("arrangement: \(after.arrangement.rawValue)") }
+                if after.forest != before.forest { logEvent("forest: \(after.forest.rawValue)") }
+                if after.treeCapacity != before.treeCapacity {
+                    logEvent("tree capacity: \(after.treeCapacity.map(String.init) ?? "automatic")")
+                }
+                let reaction = SettingsReaction.to(after, after: before, limit: self.pins.limit, shown: self.panes.count,
+                                                   ready: self.ready.count, screens: Self.screenSizes)
+                if let limit = reaction.limit {
                     self.pins.limit = limit
-                    self.reconcile()
+                    self.reconcile(regrowing: false)
                 }
-                if self.settings.arrangement != arrangement {
-                    logEvent("arrangement: \(self.settings.arrangement.rawValue)")
-                    self.growInFromTheGround()
-                }
-                if self.settings.forest != forest {
-                    logEvent("forest: \(self.settings.forest.rawValue)")
-                    self.regrow()
-                }
-                if self.settings.treeCapacity != treeCapacity {
-                    logEvent("tree capacity: \(self.settings.treeCapacity.map(String.init) ?? "automatic")")
-                    // Which repositories stand on the tree changes, and every bough with them.
-                    self.regrow()
+                switch reaction.growth {
+                case .fromTheGround: self.growInFromTheGround()
+                case .afterReading: self.regrow()
+                case nil: break
                 }
                 if self.settings.layoutSeed != layoutSeed {
                     logEvent("layout seed: \(self.settings.layoutSeed)")
@@ -160,7 +163,7 @@ final class BackgroundModel {
 
     /// Match the panes to the repositories shown: keep the stores of repos still pinned, start new ones, stop
     /// the rest. Dropping one grows the whole scene again.
-    private func reconcile() {
+    private func reconcile(regrowing: Bool = true) {
         let wanted = pins.shown
         var existing = Dictionary(panes.map { ($0.repoURL, $0) }, uniquingKeysWith: { a, _ in a })
         let next = wanted.map { url in
@@ -179,7 +182,7 @@ final class BackgroundModel {
             logEvent("panes: \(panes.map(\.repoName))")
         }
         // A repository dropped: everything left moves, so it all grows again from the ground.
-        if !existing.isEmpty, !panes.isEmpty { regrow() }
+        if regrowing, !existing.isEmpty, !panes.isEmpty { regrow() }
     }
 
     // MARK: Growing in
@@ -285,8 +288,13 @@ final class BackgroundModel {
         let policy = settings.policy
         guard settings.forest != .off else { return .max }
         guard settings.arrangement == .singleTree else { return policy.plainLimit }
+        return Self.screenSizes.map { policy.treeCapacity(for: $0) }.max() ?? policy.plainLimit
+    }
+
+    /// The sizes of the displays, or a laptop's when none is connected (an offscreen run).
+    static var screenSizes: [CGSize] {
         let sizes = NSScreen.screens.map(\.frame.size)
-        return (sizes.isEmpty ? [CGSize(width: 1440, height: 900)] : sizes).map { policy.treeCapacity(for: $0) }.max() ?? policy.plainLimit
+        return sizes.isEmpty ? [CGSize(width: 1440, height: 900)] : sizes
     }
 
     /// When each tree starts growing in, for a whole-scene grow-in whose first trees start at `base`.

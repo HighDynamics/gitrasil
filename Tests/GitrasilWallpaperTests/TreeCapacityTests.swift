@@ -63,17 +63,94 @@ final class TreeCapacityTests: XCTestCase {
         XCTAssertTrue(scene.forest.isEmpty)
     }
 
-    func testWithoutTheForestEveryoneShownStaysOnTheTree() {
-        // The pane limit has already cut what's shown (`paneLimit`): the tree isn't split.
-        let scene = landscape(forest: .off, capacity: 8).scene(panes(12), arrangement: .singleTree)
-        XCTAssertEqual(scene.tree.count, 12)
-        XCTAssertTrue(scene.forest.isEmpty)
+    func testWithoutTheForestTheTreeHoldsAllThatThePaneLimitShows() {
+        // The pane limit cuts what's shown before the tree sees it, so the tree isn't split: 8 chosen shows 8, no
+        // chosen number shows a dozen, and more than a dozen can't show without the Forest.
+        for (capacity, shown) in [(8, 8), (nil, 12), (24, 12)] as [(Int?, Int)] {
+            let settings = BackgroundSettings(storage: MemorySettings())
+            settings.arrangement = .singleTree
+            settings.treeCapacity = capacity
+            XCTAssertEqual(BackgroundModel.paneLimit(for: settings), shown)
+            let scene = landscape(forest: .off, capacity: capacity).scene(panes(40).prefix(shown).map { $0 }, arrangement: .singleTree)
+            XCTAssertEqual(scene.tree.count, shown, "capacity \(capacity.map(String.init) ?? "automatic")")
+            XCTAssertTrue(scene.forest.isEmpty)
+        }
     }
 
     func testTheOrchardIgnoresTheSetting() {
         let scene = landscape(capacity: 4).scene(panes(10), arrangement: .orchard)
         XCTAssertTrue(scene.tree.isEmpty)
         XCTAssertTrue(scene.forest.isEmpty, "ten fit the orchard's plots")
+    }
+
+    // MARK: What a change of settings does
+
+    private typealias Choices = SettingsReaction.Choices
+
+    private func react(from old: Choices, to new: Choices, limit: Int? = nil, shown: Int, ready: Int? = nil,
+                       screens: [CGSize]? = nil) -> SettingsReaction {
+        SettingsReaction.to(new, after: old, limit: limit ?? old.paneLimit, shown: shown, ready: ready ?? shown,
+                            screens: screens ?? [laptop])
+    }
+
+    func testNothingChangedGrowsNothing() {
+        let same = Choices(arrangement: .singleTree, forest: .auto, treeCapacity: 8)
+        XCTAssertEqual(react(from: same, to: same, shown: 40), SettingsReaction(limit: nil, growth: nil))
+    }
+
+    func testANewCapacityGrowsTheSceneOnceWhenTheSplitMoves() {
+        let old = Choices(arrangement: .singleTree, forest: .auto, treeCapacity: nil)
+        let reaction = react(from: old, to: Choices(arrangement: .singleTree, forest: .auto, treeCapacity: 8), shown: 40)
+        XCTAssertEqual(reaction, SettingsReaction(limit: nil, growth: .afterReading), "the limit is 64 either way; one regrow")
+    }
+
+    func testANewCapacityThatMovesNothingGrowsNothing() {
+        // Six repositories all stand on the tree whether it holds 12 or 8; and a laptop's tree holds 12 either way.
+        let old = Choices(arrangement: .singleTree, forest: .auto, treeCapacity: nil)
+        let eight = Choices(arrangement: .singleTree, forest: .auto, treeCapacity: 8)
+        XCTAssertNil(react(from: old, to: eight, shown: 6).growth)
+        XCTAssertNil(react(from: old, to: Choices(arrangement: .singleTree, forest: .auto, treeCapacity: 12), shown: 40).growth)
+        // The orchard has no tree to hold them.
+        let orchard = Choices(arrangement: .orchard, forest: .auto, treeCapacity: nil)
+        XCTAssertEqual(react(from: orchard, to: Choices(arrangement: .orchard, forest: .auto, treeCapacity: 4), shown: 40),
+                       SettingsReaction(limit: nil, growth: nil))
+    }
+
+    func testTheSplitCountsOnEveryDisplay() {
+        let old = Choices(arrangement: .singleTree, forest: .auto, treeCapacity: nil)
+        let sixteen = Choices(arrangement: .singleTree, forest: .auto, treeCapacity: 16)
+        let tall = CGSize(width: 3440, height: 1440)
+        // 14 repositories: a laptop's tree holds 12 and then 14, a tall display's 14 and then 14.
+        XCTAssertEqual(react(from: old, to: sixteen, shown: 14, screens: [laptop]).growth, .afterReading)
+        XCTAssertEqual(react(from: old, to: sixteen, shown: 14, screens: [laptop, tall]).growth, .afterReading)
+        XCTAssertNil(react(from: old, to: sixteen, shown: 14, screens: [tall]).growth)
+    }
+
+    func testFewerOnTheTreeWithoutTheForestDropsRepositoriesAndGrowsOnce() {
+        let old = Choices(arrangement: .singleTree, forest: .off, treeCapacity: nil)
+        let reaction = react(from: old, to: Choices(arrangement: .singleTree, forest: .off, treeCapacity: 8), shown: 12)
+        XCTAssertEqual(reaction, SettingsReaction(limit: 8, growth: .afterReading))
+    }
+
+    func testMoreOnTheTreeWithoutTheForestOnlyReadsTheNewOnes() {
+        let old = Choices(arrangement: .singleTree, forest: .off, treeCapacity: 8)
+        let reaction = react(from: old, to: Choices(arrangement: .singleTree, forest: .off, treeCapacity: nil), shown: 8)
+        XCTAssertEqual(reaction, SettingsReaction(limit: 12, growth: nil), "they grow in as they arrive")
+    }
+
+    func testFlippingTheArrangementUnderADozenWithoutTheForestGrowsOnce() {
+        let orchard = Choices(arrangement: .orchard, forest: .off, treeCapacity: 8)
+        let tree = Choices(arrangement: .singleTree, forest: .off, treeCapacity: 8)
+        XCTAssertEqual(react(from: orchard, to: tree, shown: 12), SettingsReaction(limit: 8, growth: .fromTheGround),
+                       "the tree holds 8: four go, and one grow-in from the ground, not two")
+        XCTAssertEqual(react(from: tree, to: orchard, shown: 8), SettingsReaction(limit: 12, growth: .fromTheGround))
+    }
+
+    func testTheForestComingAndGoingReadsMoreOrFewerAndGrowsOnce() {
+        let off = Choices(arrangement: .singleTree, forest: .off, treeCapacity: nil)
+        let on = Choices(arrangement: .singleTree, forest: .auto, treeCapacity: nil)
+        XCTAssertEqual(react(from: off, to: on, shown: 12), SettingsReaction(limit: 64, growth: .afterReading))
+        XCTAssertEqual(react(from: on, to: off, shown: 40), SettingsReaction(limit: 12, growth: .afterReading))
     }
 
     // MARK: How many are shown

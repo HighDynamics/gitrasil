@@ -37,9 +37,17 @@ Daniel was away, so the calls below were made without him; each is listed in the
    Forest, as today. The Automatic setting is untouched (12).
 6. **Which stay on the tree.** Forest on: the existing ranking (day of last commit, then name), frozen as
    today, taken again whenever the whole scene grows again, which a capacity change does. Forest off: pin order.
-7. **Live.** A change goes through `BackgroundModel.observeSettings` like the Forest toggle: the pane limit
-   follows (read more or fewer repositories) and the whole scene grows again.
-8. **Env var** `GITRASIL_TREE_CAPACITY` still wins over the setting, for test runs.
+7. **Live.** A change goes through `BackgroundModel.observeSettings`, which asks `SettingsReaction` what to do:
+   the pane limit follows (read more or fewer repositories), then the whole scene grows again **once**, and only
+   if something on screen moves: a new arrangement (from the ground), a Forest toggle, repositories dropped by a
+   lower limit, or a capacity that changes the tree/Forest split on some display (`min(shown, capacity)` differs).
+   A capacity that moves nothing (six repositories on a tree of 12 or of 8, the orchard, the Forest off with
+   room) grows nothing; repositories added by a higher limit grow in as they arrive. `reconcile` is told not to
+   regrow on this path, so a drop doesn't regrow twice.
+8. **Env var** `GITRASIL_TREE_CAPACITY` still overrides the setting, for test runs, and it is no longer inert
+   with the Forest off: set under 12, it also lowers the shown count there, as a chosen number does. While it is
+   set the menu's choices do nothing (the menu's tooltip says so) and a change of setting grows nothing, since
+   the tree holds the variable's number either way.
 
 ## Steps
 
