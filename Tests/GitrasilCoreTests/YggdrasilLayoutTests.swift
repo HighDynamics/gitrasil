@@ -120,11 +120,11 @@ final class YggdrasilLayoutTests: XCTestCase {
 
     /// Repositories like a real pin list: mostly bare trunks of a few to fifty-odd commits, a few with branches.
     /// `huge` lists the repositories that dwarf the rest (hundreds of commits), standing where the fan is widest, say.
-    private func repos(_ count: Int, huge: Set<Int> = []) -> [YggdrasilLayout.Repo] {
+    private func repos(_ count: Int, huge: Set<Int> = [], limbs: Bool = false) -> [YggdrasilLayout.Repo] {
         let sizes = [1, 5, 12, 30, 56, 2, 20, 8]
         return (0..<count).map { index in
             let size = huge.contains(index) ? 400 : sizes[index % sizes.count]
-            let wood = index % 6 == 5 ? tree("r\(index)", trunk: max(size, 6)) : RepoTree(
+            let wood = limbs || index % 6 == 5 ? tree("r\(index)", trunk: max(size, 6)) : RepoTree(
                 trunkName: "main", trunk: commits("r\(index)t", size), limbs: [], isTrunkCheckedOut: false)
             return .init(name: "repo\(index)", tree: wood)
         }
@@ -271,20 +271,56 @@ final class YggdrasilLayoutTests: XCTestCase {
         }
     }
 
-    func testTiersReachOutNearlyLevel() {
+    func testSideTiersReachOutFromALittleAboveLevelToALittleBelow() {
         for count in [8, 20, 32] {
             let layout = tall(count), shape = YggdrasilLayout.Shape(count: count)
+            var angles: [Double] = []
             for bough in layout.boughs.prefix(shape.tiers) {
-                let planting = bough.planting
-                XCTAssertGreaterThan(abs(planting.heading), 75 * .pi / 180, "\(bough.name) of \(count) leaves nearly level")
-                XCTAssertLessThan(abs(planting.heading), 95 * .pi / 180, "\(bough.name) of \(count) droops only a little")
+                let planting = bough.planting, angle = abs(planting.heading) * 180 / .pi
+                angles.append(angle)
+                XCTAssertGreaterThan(angle, 70, "\(bough.name) of \(count) leaves nearly level")
+                XCTAssertLessThan(angle, 112, "\(bough.name) of \(count) droops only a little")
                 XCTAssertLessThan(planting.straighten, TreeLayout.boughStraighten / 2, "\(bough.name) of \(count) keeps its lean")
                 XCTAssertGreaterThan(planting.reach, 1, "\(bough.name) of \(count) reaches further than its tree would")
                 let foot = bough.layout.stems[0].nodes[0].point, tip = bough.layout.stems[0].tip!.point
-                XCTAssertGreaterThan(abs(Double(tip.x - foot.x)), 2 * abs(Double(tip.y - foot.y)),
-                                     "\(bough.name) of \(count) runs out much further than it rises")
+                XCTAssertGreaterThan(abs(Double(tip.x - foot.x)), 1.5 * abs(Double(tip.y - foot.y)),
+                                     "\(bough.name) of \(count) runs out much further than it rises or falls")
+            }
+            if count >= 20 {
+                XCTAssertTrue(angles.contains { $0 < 85 }, "\(count): some tiers rise a little: \(angles)")
+                XCTAssertTrue(angles.contains { $0 > 95 }, "\(count): some tiers droop a little: \(angles)")
             }
         }
+    }
+
+    func testADroopingTierStaysWellAboveTheGround() {
+        // Limbs on every bough, so the low tiers' limbs hang down toward the ground.
+        for count in [6, 8, 12, 20, 32, 64] {
+            let layout = YggdrasilLayout(repos: repos(count, limbs: true), fit: .fitting(count: count))
+            for bough in layout.boughs.prefix(YggdrasilLayout.Shape(count: count).tiers) {
+                let floor = YggdrasilLayout.groundClearance * Double(bough.planting.foot.y)
+                XCTAssertGreaterThanOrEqual(Double(bough.layout.bounds.minY), floor - 1e-9, "\(bough.name) of \(count)")
+            }
+        }
+    }
+
+    func testClearingEasesADroopUntilTheBoughClearsTheFloorOrSitsAsHighAsItCan() {
+        let repo = repos(6, limbs: true)[3]
+        let drooping = TreeLayout.Planting(foot: CGPoint(x: 0, y: 0.3), heading: 125 * .pi / 180, outward: -1, straighten: 0.1,
+                                           reach: 2, splay: true, girth: YggdrasilLayout.boughGirth)
+        func low(_ planting: TreeLayout.Planting) -> Double {
+            Double(TreeLayout(tree: repo.tree, seed: repo.name, planting: planting).bounds.minY)
+        }
+        let floor = 0.15
+        XCTAssertLessThan(low(drooping), floor, "it would trail low")
+        let eased = YggdrasilLayout.clearing(drooping, repo: repo, above: floor, shuffle: 0)
+        XCTAssertLessThan(eased.heading, drooping.heading, "eased toward level")
+        XCTAssertGreaterThanOrEqual(low(eased), floor)
+        XCTAssertEqual(YggdrasilLayout.clearing(drooping, repo: repo, above: floor, shuffle: 0), eased, "the same answer, kept")
+        // Out of reach: rather than the last try unchecked, whichever sits highest, level or above.
+        let stuck = YggdrasilLayout.clearing(drooping, repo: repo, above: 10, shuffle: 0)
+        XCTAssertLessThanOrEqual(stuck.heading, .pi / 2)
+        XCTAssertGreaterThanOrEqual(low(stuck), low(eased))
     }
 
     func testABigTreeIsWiderThanTall() {

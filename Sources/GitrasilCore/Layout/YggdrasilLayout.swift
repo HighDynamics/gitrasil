@@ -182,6 +182,7 @@ public struct YggdrasilLayout: Sendable {
             var planting = Self.planting(index: index, shape: shape, name: names[index], width: feet[index],
                                          at: heights[index], trunk: nodes, fit: fit)
             planting.girth = girth
+            planting = Self.clearing(planting, repo: repo, above: Self.groundClearance * heights[index], shuffle: shuffle)
             return Bough(name: repo.name,
                          layout: TreeLayout(tree: repo.tree, seed: repo.name, grown: repo.grown, planting: planting,
                                             growIn: repo.growIn, shuffle: shuffle),
@@ -195,6 +196,40 @@ public struct YggdrasilLayout: Sendable {
         for bough in boughs { bounds = bounds.union(bough.layout.bounds) }
         self.bounds = bounds
     }
+
+    /// `planting` with its droop eased, if it droops, until its bough (full grown, so it doesn't swing as
+    /// it grows in) stays above `floor`: a low tier mustn't trail on the ground. It's eased toward level,
+    /// then past it; if none of those clears the floor, it takes whichever sits highest. Each try lays out
+    /// the whole bough, and the tree is laid out again on every redraw, so the answer is kept (`Clearings`).
+    static func clearing(_ planting: TreeLayout.Planting, repo: Repo, above floor: Double, shuffle: Int) -> TreeLayout.Planting {
+        let lean = abs(planting.heading), side: Double = planting.heading < 0 ? -1 : 1
+        guard lean > .pi / 2 else { return planting }
+        let key = Clearings.Key(name: repo.name, shuffle: shuffle, planting: planting, floor: floor, tree: repo.tree)
+        var cleared = planting
+        if let heading = Clearings.heading(for: key) {
+            cleared.heading = heading
+            return cleared
+        }
+        var highest = -Double.infinity
+        for ease in [1, 0.5, 0, -0.5] {
+            var eased = planting
+            eased.heading = side * (.pi / 2 + (lean - .pi / 2) * ease)
+            let low = Double(TreeLayout(tree: repo.tree, seed: repo.name, planting: eased, shuffle: shuffle).bounds.minY)
+            if low >= floor {
+                cleared = eased
+                break
+            }
+            if low > highest {
+                highest = low
+                cleared = eased
+            }
+        }
+        Clearings.keep(cleared.heading, for: key)
+        return cleared
+    }
+
+    /// How far above the ground a tier stays, as a fraction of its foot's height.
+    static let groundClearance = 0.5
 
     /// A trunk node at least every this far up it.
     static let trunkStep = 0.025
@@ -213,6 +248,9 @@ public struct YggdrasilLayout: Sendable {
     /// How far a tier reaches, as a multiple of its tree's own size: further than a crown bough, so the
     /// tiers lay the boughs out across the screen.
     static let tierReach = 1.55
+
+    /// How much further below level the lowest tier may droop than the highest, in degrees.
+    static let tierDroop = 10.0
 
     /// How thick a tall tree's boughs are drawn, as a multiple of what their repositories' own trees
     /// would be: slim, so the trunk they leave stays slim too.
@@ -258,10 +296,10 @@ public struct YggdrasilLayout: Sendable {
     /// its own base width (`TreeLayout.footWidth`): it must fit, not only its middle.
     ///
     /// A crown bough fans out of the top as the single tree always has: evenly, the outer ones leaning
-    /// furthest, nudged a little by its name so the fan isn't ruled. A tier leans out nearly level to its
-    /// side, a seeded touch up or down, keeps most of that lean (`Planting.straighten`) and reaches further
-    /// than its tree would on its own (`Planting.reach`), the lower tiers furthest; its limbs splay off it
-    /// (`Planting.splay`), favouring its upper side.
+    /// furthest, nudged a little by its name so the fan isn't ruled. A tier leans out to its side, from a
+    /// little above level to a little below it, the lower tiers drooping most, keeps most of that lean
+    /// (`Planting.straighten`) and reaches further than its tree would on its own (`Planting.reach`), the
+    /// lower tiers furthest; its limbs splay off it (`Planting.splay`), favouring its upper side.
     static func planting(index: Int, shape: Shape, name: String, width: Double, at y: Double,
                          trunk: [TreeLayout.Node], fit: Fit = .standard) -> TreeLayout.Planting {
         var rng = SeededRandom(name, -6)
@@ -271,7 +309,8 @@ public struct YggdrasilLayout: Sendable {
         let fork = TreeLayout.Fork(parent: nil, node: trunk.lastIndex { $0.point.y <= y } ?? 0, width: wood.width, heading: wood.heading)
         guard index >= shape.tiers else {
             let side = shape.tierSide(index), u = shape.tierPosition(index)
-            let heading = side * rng.next(in: 78...94) * .pi / 180
+            let droop = tierDroop * (Shape.highestTier - u) / (Shape.highestTier - Shape.lowestTier)
+            let heading = side * (rng.next(in: 72...100) + droop) * .pi / 180
             let reach = tierReach * (1.15 - 0.3 * u) * rng.next(in: 0.85...1.15)
             return TreeLayout.Planting(foot: CGPoint(x: wood.x + side * limit, y: y), heading: heading, outward: -side,
                                        fork: fork, straighten: rng.next(in: -0.04...0.2), reach: reach, splay: true)
@@ -287,5 +326,40 @@ public struct YggdrasilLayout: Sendable {
         // Over tiers, the crown is a small one.
         return TreeLayout.Planting(foot: foot, heading: heading, outward: outward, fork: fork,
                                    reach: shape.tiers > 0 ? crownReach : 1)
+    }
+}
+
+/// The headings `YggdrasilLayout.clearing` settled on, by everything it reads, so a redraw of the same
+/// trees doesn't lay every drooping tier out again.
+enum Clearings {
+    struct Key: Equatable {
+        let name: String
+        let shuffle: Int
+        let planting: TreeLayout.Planting
+        let floor: Double
+        let tree: RepoTree
+    }
+
+    /// How many answers a repository keeps (a few tree sizes' worth, and its tree before and after a
+    /// commit), and how many repositories are kept before starting afresh.
+    static let perRepo = 6, repos = 256
+
+    private static let lock = NSLock()
+    private nonisolated(unsafe) static var kept: [String: [(key: Key, heading: Double)]] = [:]
+
+    static func heading(for key: Key) -> Double? {
+        lock.lock()
+        defer { lock.unlock() }
+        return kept[key.name]?.first { $0.key == key }?.heading
+    }
+
+    static func keep(_ heading: Double, for key: Key) {
+        lock.lock()
+        defer { lock.unlock() }
+        if kept[key.name] == nil, kept.count >= repos { kept.removeAll() }
+        var answers = kept[key.name] ?? []
+        answers.removeAll { $0.key == key }
+        answers.append((key, heading))
+        kept[key.name] = Array(answers.suffix(perRepo))
     }
 }
