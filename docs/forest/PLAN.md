@@ -305,7 +305,7 @@ at 55 s). Nothing polls; the timeline is paused unless something grows.
    all with Forest on. 64 costs ~19 s of CPU once at launch and ~130 MB.
 2. **Midnight timing.** The re-sort happens on the first hourly tick after midnight, so up to an hour late, and
    only if the display is on. Recommend leaving it; an exact timer would add a wakeup to an app whose idle CPU is 0.
-3. **Day-level ranking.** Two repositories committed to on the same local day are ordered by name, not time. the maintainer chose it
+3. **Day-level ranking.** Two repositories committed to on the same local day are ordered by name, not time. The maintainer chose it
    (it keeps a commit from moving trees all day); the other choice is ranking by the minute and re-sorting
    less often.
 4. **Whole-scene regrow** on a changed order (above). Recommend it; the alternative (only the moved trees) leaves
