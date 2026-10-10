@@ -9,7 +9,8 @@ Branch `spike/yggdrasil`, cut from `spike/live-background` (ce20fcb); renamed `f
 for review after round 4.
 
 **Status.** A historical record: the design as it was planned and built, through round 8 (at the end);
-the README describes the current behaviour. The rounds are kept as they were planned and
+the README describes the current behaviour. (Later, the Forest raised the four-pin cap to twelve and
+added up to sixty-four trees behind the single tree: `docs/forest/PLAN.md`.) The rounds are kept as they were planned and
 built; where a later round changed something, a note says so. Since round 3 the old branch-graph
 drawing is gone: `GraphLayout` (lanes and rows) and the derivations only it used were removed, and
 the store's `HistoryGraph` became `RepoGraph` (trunk, branches, buds), which is all the tree needs.

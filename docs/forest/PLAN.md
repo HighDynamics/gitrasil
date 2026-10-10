@@ -1,10 +1,10 @@
 # Forest — how many trees can we fit on screen?
 
-Task (from Arbor, for Daniel): "what it takes to put **far more trees** on the screen, and push the
+Task: "what it takes to put **far more trees** on the screen, and push the
 limit of spacing to see what we can do". An exploration: measure the limits, prototype layouts, bring
 back renders, numbers and a recommendation. **Nothing ships from this round**: every prototype is
-opt-in, the defaults Daniel sees are untouched. Branch `spike/forest`, cut from `origin/main`
-(5f8b515). Round 1 is below; **round 2** (what shipped, on Daniel's answers) is at the end.
+opt-in, the defaults are untouched. Branch `spike/forest`, cut from `origin/main`
+(5f8b515). Round 1 is below; **round 2** (what shipped, on the maintainer's answers) is at the end.
 
 ## Questions
 
@@ -18,7 +18,7 @@ opt-in, the defaults Daniel sees are untouched. Branch `spike/forest`, cut from 
 - **Fixtures.** `scripts/forest-fixtures.py` writes N synthetic repositories (varied histories: trunk
   4–600 commits, last commit an hour to a year old, 0–16 branches, sub-branches, buds, a few
   worktrees) into eight uneven group folders (`apps` 14 … `archive` 3), via `git fast-import`. A folder
-  pin on the root finds them two levels down. A second fixture set is Daniel's real repos under
+  pin on the root finds them two levels down. A second fixture set is a set of real repos under
   `~/repos`, read-only (19 repos).
 - **Pinned in a throwaway defaults suite** (`GITRASIL_BACKGROUND_DEFAULTS_SUITE=gitrasil-forest`), deleted
   afterwards. The app is only ever launched with `--quit-after` or as an offscreen aid; nothing is run
@@ -154,7 +154,7 @@ plain) because the front-line pennants at larger scale cost more: they are drawn
 Layout is trivial, 1–5 ms, and the banner plan is the expensive part of planning (35 ms at N=64 rows, 12
 at N=32; paid on a change, not per frame).
 
-Real repos (18 of Daniel's under `~/repos`; many are one-commit starters, several carry a dozen linked
+Real repos (18 under `~/repos`; many are one-commit starters, several carry a dozen linked
 worktrees as branches): `renders/real/sheet-n18-*.jpg`. Plain at 18 is 62 px/unit with all plates colliding;
 canopy and rows are one line at 343 px/unit; groves is 3 lines of 482.
 
@@ -198,7 +198,7 @@ second of the machine's boot). Memory grows ~2.4 MB per repo (77 → 219 MB at 6
 - **Scale of the front line depends on the widest crowns**, so one wide tree can shrink the whole forest;
   spans are quantized to 0.05 units to limit it.
 
-### Decisions for Daniel
+### Decisions
 
 1. **Ship `rows`?** Recommend yes, off by default, opt-in as "Forest", cap lifted to 32 (1440), 48 (ultrawide), 64 (5K).
 2. **Rank rule.** Recommend: front = most recently active at launch and midnight, not live (no flicker).
@@ -210,7 +210,7 @@ second of the machine's boot). Memory grows ~2.4 MB per repo (77 → 219 MB at 6
 
 # Round 2 — shipping the Forest
 
-Daniel's answers to the round-1 decisions: ship rows, opt-in as **Forest**; trees are sorted at launch and
+The maintainer's answers to the round-1 decisions: ship rows, opt-in as **Forest**; trees are sorted at launch and
 at midnight, not live, and regrow when their place changes; names on the front line only (the main tree and the
 forest's front line), no hover names; folders only order trees within a line, no captions; the plain layout's
 cap goes from 4 to 12. The brief for this round added: the most repos on the single "Yggdrasil" tree, overflow
@@ -299,13 +299,13 @@ at 55 s). Nothing polls; the timeline is paused unless something grows.
 - Gusts only turn the banner layers, as before (round 1: 0.7–1.3 s CPU per 7 s gust, a gust every ~45 s on mains
   power). Not re-measured; the forest has no pennants behind the front line.
 
-## Decisions for Daniel
+## Decisions
 
 1. **Limits and the cap of 64.** Recommend keeping 12 on the tree for 900 pt displays, 20 from 1440 pt, and 64 in
    all with Forest on. 64 costs ~19 s of CPU once at launch and ~130 MB.
 2. **Midnight timing.** The re-sort happens on the first hourly tick after midnight, so up to an hour late, and
    only if the display is on. Recommend leaving it; an exact timer would add a wakeup to an app whose idle CPU is 0.
-3. **Day-level ranking.** Two repositories committed to on the same local day are ordered by name, not time. Daniel chose it
+3. **Day-level ranking.** Two repositories committed to on the same local day are ordered by name, not time. the maintainer chose it
    (it keeps a commit from moving trees all day); the other choice is ranking by the minute and re-sorting
    less often.
 4. **Whole-scene regrow** on a changed order (above). Recommend it; the alternative (only the moved trees) leaves
@@ -339,7 +339,7 @@ The review of the first cut found these; fixed:
 Not done: (6) the scene is still planned once for the layers, once for the banners and once for the canvas on a
 change; each plan is 1-25 ms and happens only on a change. (8) At four repositories the single tree looks
 slightly different from `main`'s (the bough fan is chosen by count, `Fit.fitting`): intended, left as is.
-Ranking is by local day (Daniel's answer, round 3; it began as UTC).
+Ranking is by local day (the maintainer's answer, round 3; it began as UTC).
 
 Numbers after the fixes: 64 repositories launch in 18.9 s of CPU, 142 MB, 780 git processes (two runs); idle CPU
 is still zero (6.17 s at 25 s, 6.18 s at 55 s); the live grow-in peaks at 384 ms of busy time a second (was 530)
