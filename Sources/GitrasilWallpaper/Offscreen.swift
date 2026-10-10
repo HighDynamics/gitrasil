@@ -114,7 +114,7 @@ enum Offscreen {
         let screen = screens[0], dark = NSApp.appearance?.name == .darkAqua
         let style = WallpaperStyle.make(background.settings.medium, dark: dark)
         let plan = Landscape(style: style, now: background.now, size: screen.size, shuffle: background.settings.layoutSeed,
-                             trunkGrowIn: nil, forest: background.settings.forest)
+                             trunkGrowIn: nil, forest: background.settings.forest, policy: background.policy)
             .plan(panes(background), arrangement: background.settings.arrangement,
                   branchNames: background.settings.showsBranchNames, repoNames: background.settings.showsRepoNames)
         let count = Int(ceil(span.upperBound.timeIntervalSince(span.lowerBound) * fps)) + Int(fps / 2)
@@ -145,7 +145,8 @@ enum Offscreen {
         }
         let arrangement = background.settings.arrangement, now = background.now, shuffle = background.settings.layoutSeed
         return Canvas { context, size in
-            Landscape(style: style, now: now, size: size, shuffle: shuffle, trunkGrowIn: growIn.map { _ in 1 }, forest: background.settings.forest)
+            Landscape(style: style, now: now, size: size, shuffle: shuffle, trunkGrowIn: growIn.map { _ in 1 },
+                      forest: background.settings.forest, policy: background.policy)
                 .draw(panes, arrangement: arrangement, in: &context)
         }
     }
@@ -160,7 +161,7 @@ enum Offscreen {
         let trunkGrowIn = clock.trunkGrowIn(at: date)
         return Canvas { context, size in
             Landscape(style: style, now: now, size: size, shuffle: shuffle, trunkGrowIn: trunkGrowIn,
-                      forest: background.settings.forest)
+                      forest: background.settings.forest, policy: background.policy)
                 .draw(panes, arrangement: arrangement, in: &context)
         }
     }
@@ -173,7 +174,7 @@ enum Offscreen {
 
     static func bannerLayer(_ background: BackgroundModel, style: WallpaperStyle, size: CGSize) -> some View {
         let plan = Landscape(style: style, now: background.now, size: size, shuffle: background.settings.layoutSeed,
-                             trunkGrowIn: nil, forest: background.settings.forest)
+                             trunkGrowIn: nil, forest: background.settings.forest, policy: background.policy)
             .plan(panes(background), arrangement: background.settings.arrangement,
                   branchNames: background.settings.showsBranchNames, repoNames: background.settings.showsRepoNames)
         return BannerLayer(plan: plan, shown: [:], style: style, breeze: background.breeze)

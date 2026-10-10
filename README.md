@@ -125,6 +125,10 @@ The same menu holds the settings:
   rows on either side; an orchard of more than twelve goes into the same rows. Only the tree and the
   forest's front line carry names. Which repository stands where is decided at launch and again
   after midnight, not as commits arrive, and the trees grow again when that order changes.
+- **Repos on the Tree** — how many repositories the single tree holds: *Automatic* (the default, as
+  above), or 4, 8, 12, 16, 20 or 24. With the Forest on the rest stand behind it; with it off the
+  background shows no more than the tree holds (and never more than twelve), the first ones pinned.
+  Changing it grows the trees again.
 - **Banners** — *Branch Names*, each branch's name on a pennant at its tip, and *Repository
   Names*, in the single tree each repository's name on a ribbon under its bough. Each can be
   turned off on its own.

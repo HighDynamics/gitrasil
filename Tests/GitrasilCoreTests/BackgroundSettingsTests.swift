@@ -68,6 +68,34 @@ final class BackgroundSettingsTests: XCTestCase {
         XCTAssertTrue(relaunched.gusts)
     }
 
+    func testTheTreeHoldsTheDisplaysNumberUntilChosenOtherwise() {
+        let settings = BackgroundSettings(storage: MemorySettings())
+        XCTAssertNil(settings.treeCapacity, "Automatic")
+        XCTAssertEqual(settings.policy, ForestPolicy.standard, "the policy is as it was")
+    }
+
+    func testTheTreeCapacityIsSavedUnderAStableNameAndClearedByAutomatic() {
+        let suite = "gitrasil-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = BackgroundSettings(storage: defaults)
+        XCTAssertNil(defaults.object(forKey: "treeCapacity"), "an untouched setting isn't written")
+        settings.treeCapacity = 8
+        XCTAssertEqual(defaults.integer(forKey: "treeCapacity"), 8)
+        XCTAssertEqual(BackgroundSettings(storage: defaults).treeCapacity, 8)
+        settings.treeCapacity = nil
+        XCTAssertNil(defaults.object(forKey: "treeCapacity"))
+        XCTAssertNil(BackgroundSettings(storage: defaults).treeCapacity)
+    }
+
+    func testAnUnreadableTreeCapacityIsAutomatic() {
+        for saved: Any in ["twelve", 0, 3, 25, 64, -4, 1.5, true] {
+            let storage = MemorySettings()
+            storage.saved = ["treeCapacity": saved]
+            XCTAssertNil(BackgroundSettings(storage: storage).treeCapacity, "\(saved)")
+        }
+    }
+
     func testTheMediumIsSavedBetweenLaunches() {
         let storage = MemorySettings()
         let settings = BackgroundSettings(storage: storage)

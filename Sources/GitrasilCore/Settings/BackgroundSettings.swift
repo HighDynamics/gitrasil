@@ -54,6 +54,7 @@ public final class BackgroundSettings {
     static let mediumKey = "medium"
     static let layoutSeedKey = "layoutSeed"
     static let forestKey = "forest"
+    static let treeCapacityKey = "treeCapacity"
 
     public var arrangement: Arrangement {
         didSet { if arrangement != oldValue { storage.set(arrangement.rawValue, forKey: Self.arrangementKey) } }
@@ -94,6 +95,17 @@ public final class BackgroundSettings {
         didSet { if showsForest != oldValue { storage.set(showsForest, forKey: Self.forestKey) } }
     }
 
+    /// The most repositories the single tree holds (docs/tree-capacity/PLAN.md): the most recently active take the
+    /// boughs and, with the Forest on, the rest stand behind it. Nil, Automatic (the default), is the display's
+    /// number (`ForestPolicy.treeCapacity(for:)`). Not in the orchard. A saved number
+    /// outside `ForestPolicy.treeCapacityRange` reads as Automatic.
+    public var treeCapacity: Int? {
+        didSet { if treeCapacity != oldValue { storage.set(treeCapacity, forKey: Self.treeCapacityKey) } }
+    }
+
+    /// The policy as the settings and the environment make it: the chosen tree capacity applied.
+    public var policy: ForestPolicy { ForestPolicy.standard.choosing(treeCapacity: treeCapacity) }
+
     /// `GITRASIL_BACKGROUND_FOREST` forces a mode for one run, whatever `showsForest` says. Not saved.
     public var forestOverride: ForestMode?
 
@@ -127,5 +139,6 @@ public final class BackgroundSettings {
         gusts = storage.object(forKey: Self.gustsKey) as? Bool ?? false
         layoutSeed = storage.object(forKey: Self.layoutSeedKey) as? Int ?? 0
         showsForest = storage.object(forKey: Self.forestKey) as? Bool ?? false
+        treeCapacity = (storage.object(forKey: Self.treeCapacityKey) as? Int).flatMap { ForestPolicy.treeCapacityRange.contains($0) ? $0 : nil }
     }
 }

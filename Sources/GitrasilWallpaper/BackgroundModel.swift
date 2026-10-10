@@ -18,10 +18,11 @@ final class BackgroundModel {
     private(set) var now = Date()
 
     /// The most repositories shown: a dozen (`ForestPolicy.plainLimit`), or with the Forest on as many as
-    /// the policy allows, past a dozen standing in the forest.
+    /// the policy allows, past a dozen standing in the forest. A single tree set to hold fewer than a dozen
+    /// shows no more than that without the Forest (docs/tree-capacity/PLAN.md).
     static func paneLimit(for settings: BackgroundSettings) -> Int {
-        let policy = ForestPolicy.standard
-        return settings.forest == .off ? policy.plainLimit : policy.paneLimit
+        let policy = settings.policy
+        return settings.forest == .off ? policy.shownWithoutForest(singleTree: settings.arrangement == .singleTree) : policy.paneLimit
     }
 
     /// When each repository (by path) last had a commit, as it stood at launch and at the first hourly
@@ -106,23 +107,32 @@ final class BackgroundModel {
     /// blows one at once, so it shows what it does).
     private func observeSettings() {
         let arrangement = settings.arrangement, medium = settings.medium, layoutSeed = settings.layoutSeed
-        let forest = settings.forest
+        let forest = settings.forest, treeCapacity = settings.treeCapacity
         let names = (settings.showsBranchNames, settings.showsRepoNames, settings.gusts)
         withObservationTracking {
             _ = (settings.arrangement, settings.medium, settings.showsBranchNames, settings.showsRepoNames, settings.gusts,
-                 settings.layoutSeed, settings.forest)
+                 settings.layoutSeed, settings.forest, settings.treeCapacity)
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
+                // The Forest, the arrangement and the tree's capacity decide how many repositories are shown: read
+                // the new ones (or let the others go) before the scene grows again.
+                let limit = Self.paneLimit(for: self.settings)
+                if limit != self.pins.limit {
+                    self.pins.limit = limit
+                    self.reconcile()
+                }
                 if self.settings.arrangement != arrangement {
                     logEvent("arrangement: \(self.settings.arrangement.rawValue)")
                     self.growInFromTheGround()
                 }
                 if self.settings.forest != forest {
                     logEvent("forest: \(self.settings.forest.rawValue)")
-                    // More (or fewer) repositories are shown: read the new ones, then everything grows again.
-                    self.pins.limit = Self.paneLimit(for: self.settings)
-                    self.reconcile()
+                    self.regrow()
+                }
+                if self.settings.treeCapacity != treeCapacity {
+                    logEvent("tree capacity: \(self.settings.treeCapacity.map(String.init) ?? "automatic")")
+                    // Which repositories stand on the tree changes, and every bough with them.
                     self.regrow()
                 }
                 if self.settings.layoutSeed != layoutSeed {
@@ -200,6 +210,9 @@ final class BackgroundModel {
         }
     }
 
+    /// The numbers that decide how many repositories stand where, with the chosen tree capacity.
+    var policy: ForestPolicy { settings.policy }
+
     var growInClock: GrowInClock { GrowInClock(growIns: growIns, trunk: trunkGrowIn) }
 
     /// How far along `url`'s tree (or bough) is in growing in at `date`, eased; nil when it isn't.
@@ -269,7 +282,7 @@ final class BackgroundModel {
     /// holds most (so no tree on any display waits for the wave), or the orchard's plain plots. None
     /// wave when the Forest is off.
     private var waveFrom: Int {
-        let policy = ForestPolicy.standard
+        let policy = settings.policy
         guard settings.forest != .off else { return .max }
         guard settings.arrangement == .singleTree else { return policy.plainLimit }
         let sizes = NSScreen.screens.map(\.frame.size)

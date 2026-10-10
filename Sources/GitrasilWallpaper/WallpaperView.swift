@@ -21,6 +21,7 @@ struct WallpaperView: View {
         let now = background.now
         let shuffle = background.settings.layoutSeed
         let forest = background.settings.forest
+        let policy = background.policy
         let ranking = background.ranking
         let seeds = PinnedRepositories.seeds(panes.map(\.repoURL))
         // Read each pane here so Observation redraws when one publishes a new tree or growth, and
@@ -44,13 +45,14 @@ struct WallpaperView: View {
                 } else {
                     // What the plans below are made from: the trees, the screen and what's shown.
                     let key = PlanCache.Key(dark: colorScheme == .dark, medium: medium, size: proxy.size, now: now,
-                                            shuffle: shuffle, arrangement: arrangement, forest: forest, ranking: ranking,
+                                            shuffle: shuffle, arrangement: arrangement, forest: forest, treeCapacity: policy.fixedTreeCapacity,
+                                            ranking: ranking,
                                             branchNames: showsBranchNames, repoNames: showsRepoNames,
                                             trees: panes.map { .init(id: $0.repoURL.path, tree: $0.tree) })
                     let resting = zip(panes, seeds).map { Pane($0, seed: $1) }
                     // The forest's trees are planned once, each a layer of its own (`ForestTreeLayer`).
                     let stands = forestCache.stands(for: key) {
-                        Landscape(style: style, now: now, size: proxy.size, shuffle: shuffle, trunkGrowIn: nil, forest: forest,
+                        Landscape(style: style, now: now, size: proxy.size, shuffle: shuffle, trunkGrowIn: nil, forest: forest, policy: policy,
                                   ranking: ranking).forestStands(resting, arrangement: arrangement)
                     }
                     TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !growing)) { timeline in
@@ -65,7 +67,7 @@ struct WallpaperView: View {
                         }
                         let trunkGrowIn = background.trunkGrowIn(at: date)
                         let landscape = Landscape(style: style, now: now, size: proxy.size, shuffle: shuffle, trunkGrowIn: trunkGrowIn,
-                                                  forest: forest, ranking: ranking, layered: true)
+                                                  forest: forest, policy: policy, ranking: ranking, layered: true)
                         ZStack {
                             if let stands {
                                 ForestGroundsLayer(landscape: landscape, plan: stands.grounds, generation: stands.generation).equatable()
@@ -86,7 +88,7 @@ struct WallpaperView: View {
                         // The names hang where the full-grown trees put them, planned only when a tree or
                         // what's shown changes, not on every redraw.
                         let plan = plans.plan(for: key) {
-                            Landscape(style: style, now: now, size: proxy.size, shuffle: shuffle, trunkGrowIn: nil, forest: forest,
+                            Landscape(style: style, now: now, size: proxy.size, shuffle: shuffle, trunkGrowIn: nil, forest: forest, policy: policy,
                                       ranking: ranking).plan(
                                 zip(panes, seeds).map { Pane($0, seed: $1) },
                                 arrangement: arrangement, branchNames: showsBranchNames, repoNames: showsRepoNames)

@@ -147,7 +147,7 @@ struct MainTreeLayer: View, Equatable {
             MainActor.assumeIsolated {
                 FrameStats.shared.measure("trees") {
                     Landscape(style: landscape.style, now: landscape.now, size: size, shuffle: landscape.shuffle,
-                              trunkGrowIn: landscape.trunkGrowIn, forest: landscape.forest, ranking: landscape.ranking,
+                              trunkGrowIn: landscape.trunkGrowIn, forest: landscape.forest, policy: landscape.policy, ranking: landscape.ranking,
                               layered: true)
                         .draw(panes, arrangement: arrangement, in: &context)
                 }

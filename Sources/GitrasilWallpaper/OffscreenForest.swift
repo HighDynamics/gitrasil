@@ -34,7 +34,7 @@ extension Offscreen {
             for count in counts where count <= everyone.count {
                 let chosen = sample(everyone, count)
                 let landscape = Landscape(style: style, now: background.now, size: screen.size, shuffle: background.settings.layoutSeed,
-                                          trunkGrowIn: nil, forest: background.settings.forest)
+                                          trunkGrowIn: nil, forest: background.settings.forest, policy: background.policy)
                 let scene = landscape.scene(chosen, arrangement: arrangement)
                 var treeScale: CGFloat = 0, crown: CGFloat = 0, wanted = 0
                 if landscape.isSingleTree(chosen, arrangement: arrangement) {

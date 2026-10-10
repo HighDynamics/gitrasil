@@ -106,6 +106,7 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
             + "the single tree keeps the most recently active, the rest stand in a forest behind it, "
             + "and an orchard goes into rows. Their order is set at launch and each midnight"
         menu.addItem(forest)
+        menu.addItem(treeCapacityItem())
         menu.addItem(.separator())
         menu.addItem(.sectionHeader(title: "Medium"))
         for (choice, title, tip) in [
@@ -194,6 +195,31 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         menu.addItem(.separator())
     }
 
+    /// "Repos on the Tree": how many repositories the single tree holds, Automatic (the display's number) or a step.
+    /// The rest stand behind it in the Forest when that's on; without it, the background shows no more than this.
+    private func treeCapacityItem() -> NSMenuItem {
+        let parent = NSMenuItem(title: "Repos on the Tree", action: nil, keyEquivalent: "")
+        parent.toolTip = "How many repositories the single tree holds. With Forest on, the rest stand behind it; "
+            + "with it off, the background shows no more than a dozen."
+        let submenu = NSMenu(title: parent.title)
+        submenu.autoenablesItems = true
+        for choice in [nil] + ForestPolicy.treeCapacitySteps.map(Optional.some) {
+            let entry = NSMenuItem(title: choice.map(String.init) ?? "Automatic", action: #selector(chooseTreeCapacity(_:)), keyEquivalent: "")
+            entry.target = self
+            entry.representedObject = choice
+            entry.state = settings.treeCapacity == choice ? .on : .off
+            if let choice {
+                let needsForest = choice > ForestPolicy.standard.plainLimit
+                entry.toolTip = "At most \(choice) on the tree" + (needsForest ? ", more than a dozen only with Forest on" : "")
+            } else {
+                entry.toolTip = "As many as the display reads well: a dozen on a laptop, twenty from 1440 points tall"
+            }
+            submenu.addItem(entry)
+        }
+        parent.submenu = submenu
+        return parent
+    }
+
     private func action(_ title: String, _ selector: Selector, _ url: URL?, key: String = "") -> NSMenuItem {
         let item = NSMenuItem(title: title, action: selector, keyEquivalent: key)
         item.target = self
@@ -209,6 +235,10 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
     @objc private func draw(in sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let choice = Medium(rawValue: raw) else { return }
         settings.medium = choice
+    }
+
+    @objc private func chooseTreeCapacity(_ sender: NSMenuItem) {
+        settings.treeCapacity = sender.representedObject as? Int
     }
 
     @objc private func toggleForest() {
@@ -301,6 +331,8 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         switch menuItem.action {
         case #selector(toggleGusts): settings.hasBanners && !gustsOverridden
         case #selector(watchGrow), #selector(reshuffleBranches): !pins.shown.isEmpty
+        // The orchard has no tree to hold them: the choice is kept, and waits.
+        case #selector(chooseTreeCapacity(_:)): settings.arrangement == .singleTree
         // Unregistering is always allowed, so a login item made before a move can be removed.
         case #selector(toggleOpenAtLogin): app.map { !$0.runsFromATemporaryPlace || $0.loginItem != .off } ?? false
         case #selector(checkForUpdatesNow): app.map { !$0.updates.isChecking } ?? false

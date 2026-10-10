@@ -21,6 +21,8 @@ final class PlanCache {
         let shuffle: Int
         let arrangement: Arrangement
         let forest: ForestMode
+        /// How many repositories the tree holds, when it is set (`ForestPolicy.fixedTreeCapacity`).
+        let treeCapacity: Int?
         /// Which repositories stand on the tree and which in the forest.
         let ranking: [String: Date]
         let branchNames: Bool
