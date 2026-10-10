@@ -3,7 +3,7 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-// The Gitrasil icon recreated from Daniel's 50×54 px screenshot: a lobed crown with a few small
+// The Gitrasil icon recreated from a 50×54 px screenshot: a lobed crown with a few small
 // holes, a straight trunk, and a ground line that runs out both ways and curls up at the right.
 // Coordinates are the screenshot's pixels (y down); `draw` maps them onto any box.
 //

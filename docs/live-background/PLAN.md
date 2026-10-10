@@ -3,9 +3,8 @@
 > Kept as the record of the research and the first spike. The background has since moved on
 > (it draws trees, not a branch graph); `docs/yggdrasil/PLAN.md` describes what is built.
 
-Task (from Arbor): research how to turn Gitrasil's branch-graph work into a live macOS desktop
-background, write a design note, and prove the core with a spike. Report back to Arbor via
-SendMessage (`to: "Arbor"`).
+Task: research how to turn Gitrasil's branch-graph work into a live macOS desktop background,
+write a design note, and prove the core with a spike.
 
 Branch `spike/live-background`, cut from `origin/main` (a35509c). Local `main` is stale (6737293);
 `origin/main` is the merged PR #5. Not based on `feature/external-diff-handoff`.
@@ -16,7 +15,7 @@ Branch `spike/live-background`, cut from `origin/main` (a35509c). Local `main` i
 - Don't touch other worktrees/branches or the main checkout.
 - Nothing system-wide: no login item, no launch agent, no wallpaper or settings change. Running the
   spike briefly (a window at desktop level, then killed) is fine; test against a throwaway repo in
-  the job tmp dir, not `~/gitrasil-sandbox`.
+  a temporary directory, not `~/gitrasil-sandbox`.
 
 ## Findings so far
 
@@ -31,7 +30,7 @@ Branch `spike/live-background`, cut from `origin/main` (a35509c). Local `main` i
 
 ## Steps
 
-1. [x] Read README, HistoryGraphView, Core (Derive/, Reactive/), roadmap memory.
+1. [x] Read README, HistoryGraphView, Core (Derive/, Reactive/).
 2. [x] Write this plan.
 3. [x] Extract the row/lane layout into `GitrasilCore/Layout/GraphLayout.swift` as public
        `GraphRow` / `GraphLayout.rows(for:expanded:)`; `HistoryGraphView` uses it unchanged in
@@ -51,7 +50,7 @@ Branch `spike/live-background`, cut from `origin/main` (a35509c). Local `main` i
        CGWindowList check of level/onscreen; screenshot if permitted). Measure idle CPU. Kill it.
 6. [x] Write `docs/live-background/DESIGN.md` (display options, visuals, live updates, energy, reuse).
 7. [x] `swift build` + `swift test` on final commit. Commit spike + docs.
-8. [x] SendMessage to Arbor with summary (sent 2026-10-05).
+8. [x] Summarise the findings for the maintainer (2026-10-05).
 
 ## Status log
 
@@ -62,19 +61,19 @@ Branch `spike/live-background`, cut from `origin/main` (a35509c). Local `main` i
   `swift build` fails on the missing Metal Toolchain (SwiftTerm); with `--build-system native`,
   build and tests pass.
 
-## Phase 2: from spike to a usable background (Arbor, 2026-10-05)
+## Phase 2: from spike to a usable background (2026-10-05)
 
-Daniel's decisions:
+Decisions:
 
 - Remove the worktree GUI; it stays in git history. Drop SwiftTerm.
 - Repos are a list the user pins from a menu-bar UI, saved between launches.
 - The look is still undecided. Night transit stays as a placeholder, and the drawing must be easy
-  to restyle. *Later the same day:* Daniel picked **ink on cream**, keeping a distinct colour per
+  to restyle. *Later the same day:* the maintainer picked **ink on cream**, keeping a distinct colour per
   branch/worktree, so that replaced night transit within this phase.
 - Don't build launch at login or setting a still image as the wallpaper.
 
-Reply to Arbor at `uds:/tmp/cc-socks/18016.sock` with SendMessage. Same constraints as phase 1: no
-push or PR, no login item, no changes to the wallpaper or system settings.
+Same constraints as phase 1: no push or PR, no login item, no changes to the wallpaper or system
+settings.
 
 ### Steps
 
@@ -115,7 +114,7 @@ push or PR, no login item, no changes to the wallpaper or system settings.
        code that is no longer used: `WorktreeStore`, the snapshot, `historyGraph` and lineage.
        (Built: `WorktreeStore`, the snapshot, `StatusBadge` and `isBehind` were dropped.
        `historyGraph` and lineage stay, because `GraphLayout`'s worktree-relative cases and its
-       tests still use them. That's an open question for Daniel in DESIGN.md.)
+       tests still use them. That's an open question in DESIGN.md.)
 5. [x] **Pinned repos**:
        - `PinnedRepositories` lives in Core. It validates with `git rev-parse --show-toplevel`,
          removes duplicates, and persists to `UserDefaults`. Tests use a throwaway suite.
@@ -135,4 +134,4 @@ push or PR, no login item, no changes to the wallpaper or system settings.
          window level, the status item, that a burst gives one redraw, and the idle cost. Delete
          the throwaway suite afterwards.
        - Update DESIGN.md and the README. Commit.
-7. [ ] SendMessage results to Arbor.
+7. [ ] Summarise the results for the maintainer.

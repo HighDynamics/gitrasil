@@ -8,7 +8,7 @@ What Gitrasil's checks are, why those, and what was left out. Run them with `scr
 - Swift, one SwiftPM package (`swift-tools-version:5.9`, macOS 14 floor, Swift 5 language mode),
   about 7,900 lines in 45 files: `GitrasilCore` (platform-agnostic logic), `GitrasilWallpaper`
   (AppKit/SwiftUI desktop window and drawing), `GitrasilTestSupport` (real fixture git repos) and
-  `GitrasilCoreTests` (110 XCTest tests).
+  `GitrasilCoreTests` (the XCTest suite).
 - **No third-party dependencies.** `Package.swift` has no `dependencies`, so there is nothing to
   audit and no `Package.resolved`.
 - It is a macOS-only app (AppKit, FSEvents, Observation), so CI needs a macOS runner. The tests need
@@ -77,8 +77,8 @@ What Gitrasil's checks are, why those, and what was left out. Run them with `scr
 
 ### Tests: `swift test`
 
-The existing 110 tests, unchanged. No display or secrets are needed. Not added: coverage gates
-(a threshold on a personal project would invite tests written for the number).
+The existing test suite, unchanged. No display or secrets are needed. Not added: coverage gates
+(a threshold on a project this size would invite tests written for the number).
 
 ### Dependency and security audit
 
@@ -98,6 +98,7 @@ that are separate checks so each can be required: **Format**, **Lint**, **Build*
 - Caching: the downloaded tools (keyed on `scripts/tool-versions.sh`) and `.build` for the build
   and test jobs (keyed on the sources, falling back to the newest earlier cache).
 - A pushed commit cancels the previous run on the same PR, never on `main`.
+- A ruleset on `main` requires all four checks, and pull requests merge with merge commits only.
 
 ## Updating the tools
 

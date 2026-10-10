@@ -3,7 +3,7 @@
 > Kept as the record of the research and the first spike. The background has since moved on
 > (it draws trees, not a branch graph); `docs/yggdrasil/PLAN.md` describes what is built.
 
-Status: phase 2 on `spike/live-background`. The background is the `GitrasilWallpaper` target, run
+Status when written: phase 2 on `spike/live-background`. The background is the `GitrasilWallpaper` target, run
 with `scripts/run-wallpaper.sh`; repos are pinned from its menu-bar item. Sections 1–5 are the
 phase 1 research; "Phase 2" near the end records what was decided and built since.
 
@@ -61,9 +61,9 @@ The rest of the window behaviour, still to verify in the real app:
   window gets `didChangeOcclusionStateNotification` and pauses (wired up in the spike, not yet
   exercised).
 - **Mission Control:** our window stays in place behind the zoomed-out windows, but the Spaces bar
-  thumbnails show the system wallpaper. If that mismatch bothers Daniel, the hybrid fix is to also
+  thumbnails show the system wallpaper. If that mismatch is a nuisance, the hybrid fix is to also
   set a still snapshot through `setDesktopImageURL` on a slow cadence (say, after a change settles).
-  That one is opt-in because it changes his wallpaper setting.
+  That one is opt-in because it changes the user's wallpaper setting.
 - **Sonoma's "click wallpaper to reveal desktop":** clicks fall through to Finder, which triggers
   the reveal. Normal windows slide away and ours is `.stationary`, so it should stay. Needs a
   manual check.
@@ -197,7 +197,7 @@ The goal is to cost about as much as a static wallpaper when nothing changes.
 
 - Activity Monitor's Energy Impact and 12-hour average.
 - `top -stats pid,cpu,idlew,power` sampled over an idle hour.
-- `sudo powermetrics --samplers tasks,gpu_power`, which needs Daniel's OK because it runs as root.
+- `sudo powermetrics --samplers tasks,gpu_power`, which needs the maintainer's OK because it runs as root.
 - Instruments' Time Profiler and Power Profiler.
 - Count `git` spawns per hour, logged from the watcher.
 
@@ -264,7 +264,7 @@ ran for 150 s with `--quit-after`. Screenshots were taken of the spike's own win
 Known gaps in the spike:
 
 - It covers the main display only.
-- The occlusion pause is wired up but untested, since opening full-screen apps on Daniel's machine
+- The occlusion pause is wired up but untested, since opening full-screen apps on the development machine
   was out of bounds.
 - Hash-picked lane colours can collide: `feature/lanes` and `exp/ripple` both came out violet.
 - The checked-out branch's name isn't labelled.
@@ -273,7 +273,7 @@ Known gaps in the spike:
 
 ## Phase 2
 
-### Decisions (Daniel, via Arbor)
+### Decisions
 
 - The worktree GUI is removed from the repo, along with SwiftTerm; it stays in git history.
 - Repos are a list the user pins from a menu-bar item, saved between launches. There's no automatic
@@ -365,15 +365,14 @@ Not covered:
 
 ### The pinning bug: an inherited `GIT_DIR`
 
-Daniel pinned a repo in `~/repos` and saw `gitrasil-sandbox`. A second pin was then refused as
-"already pinned, as /Users/danieldenton/gitrasil-sandbox".
+Pinning a repo in `~/repos` showed `gitrasil-sandbox` instead. A second pin was then refused as
+"already pinned, as ~/gitrasil-sandbox".
 
-- **Cause.** Daniel's running background had inherited `GIT_DIR=~/gitrasil-sandbox/.git` and
+- **Cause.** The running background had inherited `GIT_DIR=~/gitrasil-sandbox/.git` and
   `GIT_WORK_TREE=~/gitrasil-sandbox`, along with `GIT_EXTERNAL_DIFF=git-difftool--helper`,
   `GIT_PREFIX` and `GIT_DIFF_PATH_COUNTER`. That's the environment `git difftool` gives the tool it
   launches.
-- **Where they came from.** The variables sit in the VS Code app process itself (running since
-  2026-09-13), so VS Code was first launched *by* `git difftool` in the sandbox, with `code` as the
+- **Where they came from.** The variables sit in the VS Code app process itself (running for weeks), so VS Code was first launched *by* `git difftool` in the sandbox, with `code` as the
   diff tool. Every integrated terminal it has opened since inherits them. git obeys
   `GIT_DIR`/`GIT_WORK_TREE` over the working directory, so every git call resolved to the sandbox.
   It wasn't the shell profile, git config, launchd or `run-wallpaper.sh`.
@@ -395,10 +394,10 @@ Daniel pinned a repo in `~/repos` and saw `gitrasil-sandbox`. A second pin was t
   same ink in every repo, and the trunk stays plain ink. The trade-off: with 8 inks, two branches in
   one repo can share one (in the test repos, `exp/ripple` and `spike/pulse` did).
 
-## Open questions for Daniel
+## Open questions
 
 - Is it OK to also set a still image as the real wallpaper, for Mission Control and the lock
-  screen? That one changes his wallpaper setting. (Later.)
+  screen? That one changes the wallpaper setting. (Later.)
 - Should it launch at login (`SMAppService`) once it's real? That also needs a bundled `.app`.
   (Later.)
 - Should the worktree-relative `historyGraph` and the layout cases only it uses go too? (Later.)

@@ -1,16 +1,17 @@
 # Distribution — plan
 
-Task (from Arbor): make Gitrasil something a person can download and run as a normal application,
-found in Spotlight, and give Daniel a way to ship updates to the people who've downloaded it. Today it
-runs from a terminal with `scripts/run-wallpaper.sh`: a bare SwiftPM executable, with no bundle,
-version, icon or signature.
+Goal: make Gitrasil something a person can download and run as a normal application, found in
+Spotlight, and give the maintainer a way to ship updates to the people who've downloaded it. It
+began as a terminal-only tool run with `scripts/run-wallpaper.sh`: a bare SwiftPM executable, with
+no bundle, version, icon or signature.
 
-Branch `app-bundle`, from `main` (c1f2dc1). Researched in October 2026 (macOS 26.6, Xcode 27,
-Swift 6.4). Apple's and Homebrew's rules change; the dates below say when each fact was true.
+Researched in October 2026 (macOS 26.6, Xcode 27, Swift 6.4). Apple's and Homebrew's rules change;
+the dates below say when each fact was true.
 
-**Status.** Planned and built as far as it goes without Daniel: `scripts/build-app.sh`,
+**Status (current).** Built as far as it goes without a paid Apple Developer account: `scripts/build-app.sh`,
 `scripts/package-app.sh`, `scripts/notarize.sh`, `.github/workflows/release.yml`, launch at login and
-an opt-in update check in the menu. What's left is the bundle identifier, and what's under *Decisions* (the end of this file).
+an opt-in update check in the menu. The bundle identifier is settled; what's left is under
+*Decisions* (the end of this file).
 
 ## Recommendation
 
@@ -20,10 +21,10 @@ click *Open Anyway* in System Settings. Updates are an **opt-in daily check of t
 that adds a *Gitrasil 0.2.0 Is Available* item to the menu, which opens the release page. No keys,
 no hosting beyond GitHub, nothing to lose, nothing that phones home unless asked.
 
-This needs one thing first: **the downloads have to be public.** `HighDynamics/gitrasil` is private,
-so its releases (and the Releases API) are visible only to collaborators. Either make the repository
-public (it then wants a licence), or publish releases to a separate public repository (the workflow
-has a switch for it, below).
+This needs one thing first: **the downloads have to be public.** On a private repository, releases
+(and the Releases API) are visible only to collaborators. `HighDynamics/gitrasil` is therefore public,
+under the MIT licence; the workflow keeps a switch for publishing releases to a separate
+public repository instead (below).
 
 If Gitrasil spreads past a few friends, or the *Open Anyway* step on every update gets old, join the
 Apple Developer Program ($99 a year), turn on the workflow's Developer ID and notarization steps, and
@@ -70,7 +71,7 @@ Written from `packaging/Info.plist` with the version filled in:
 
 | Key | Value | Why |
 | --- | --- | --- |
-| `CFBundleIdentifier` | `com.gitrasil.Gitrasil` | Fixed for good after the first release: login items, privacy grants and updates are tied to it. Deliberately not `com.gitrasil.background`, the defaults suite: a suite can't share the app's own identifier. |
+| `CFBundleIdentifier` | `io.github.highdynamics.Gitrasil` | Fixed for good after the first release: login items, privacy grants and updates are tied to it. Deliberately not `com.gitrasil.background`, the defaults suite: a suite can't share the app's own identifier. |
 | `CFBundleName`, `CFBundleDisplayName` | `Gitrasil` | What Spotlight and Finder show. |
 | `CFBundleExecutable` | `Gitrasil` | |
 | `CFBundleShortVersionString`, `CFBundleVersion` | from `VERSION` | One source of truth (below). |
@@ -150,12 +151,12 @@ certificate and key to run.
   cheap to make, so it's attached too. Unsigned, it opens without complaint; the app inside is
   checked at launch.
 - **GitHub Releases** host both, plus a `SHA256SUMS`. Free, versioned, and what the update check
-  reads. The workflow makes the release as a **draft**, so Daniel reads the notes and publishes;
+  reads. The workflow makes the release as a **draft**, so the notes can be read before it is published;
   drafts are invisible to the Releases API, so the update check only sees published releases.
   macOS runners cost 10× minutes on a private repository (a release is a few minutes; GitHub Free has
   2,000 a month); on a public one they're free.
 - **Homebrew cask.** Since 2026-09-01 the official `homebrew/cask` disables casks that fail
-  Gatekeeper, and Homebrew 5 removed `--no-quarantine`, so an ad-hoc app can only go in Daniel's own
+  Gatekeeper, and Homebrew 5 removed `--no-quarantine`, so an ad-hoc app can only go in the maintainer's own
   tap (`HighDynamics/homebrew-tap`, then `brew install highdynamics/tap/gitrasil`). It still installs
   quarantined, so the *Open Anyway* step remains (or the cask strips the attribute in a `postflight`,
   which Homebrew discourages). With Developer ID and notarization a cask is pleasant, and
@@ -178,7 +179,7 @@ Ad-hoc signing: reports differ (some say registration works, some report an inva
 or a silent no-op), and Apple doesn't document it. Login items are identified by code signature,
 and an ad-hoc signature changes with every build, so even where it works **a new version may drop
 off the list or need turning on again**. It couldn't be tried here without adding a real login
-item, which this task rules out; how to try it is in *Trying it*. Any error is shown in an alert.
+item, which wasn't done here; how to try it is in *Trying it*. Any error is shown in an alert.
 With Developer ID the item is identified by team and survives updates.
 
 ## Updates
@@ -187,11 +188,11 @@ With Developer ID the item is identified by team and survives updates.
 | --- | --- | --- | --- |
 | What the user gets | "A new version is available" with notes; *Install* replaces the app in place and relaunches. | A menu item naming the new version; it opens the release page to download. | `brew upgrade` |
 | Gatekeeper on update | None: Sparkle installs the update without quarantine. | The *Open Anyway* step again, each version (until Developer ID). | As the download (quarantined). |
-| Needs from Daniel | An **EdDSA key pair** (`generate_keys`; the private key in his Keychain and, for CI, a secret; lose it and existing installs can't verify updates again), the public key in Info.plist, an **appcast** feed (`generate_appcast`) hosted somewhere public: GitHub Pages (free on a public repo) or a release asset. A new dependency (Sparkle.framework, embedded and signed in the bundle). | A public place for releases. Nothing else. | A tap repository and a cask file per release (automatable). |
+| Needs from the maintainer | An **EdDSA key pair** (`generate_keys`; the private key in their Keychain and, for CI, a secret; lose it and existing installs can't verify updates again), the public key in Info.plist, an **appcast** feed (`generate_appcast`) hosted somewhere public: GitHub Pages (free on a public repo) or a release asset. A new dependency (Sparkle.framework, embedded and signed in the bundle). | A public place for releases. Nothing else. | A tap repository and a cask file per release (automatable). |
 | Privacy | Fetches the appcast on a schedule (opt-in prompt on second launch, by default). | One unauthenticated GET to `api.github.com`, at most daily, only when ticked; the request carries only `User-Agent: Gitrasil/<version>` (and a fixed `Accept-Language: en`, so the locale isn't sent). | None from the app. |
 | Works ad-hoc | Yes (EdDSA alone verifies), though each update's new ad-hoc signature resets login items and privacy grants. | Yes. | Yes, with the quarantine caveat. |
 
-**Built: the Releases API check**, because it needs nothing Daniel doesn't already have and a few
+**Built: the Releases API check**, because it needs nothing beyond the repository itself and a few
 friends can live with a download link. In the menu, under the version: **Check for Updates Daily**
 (off by default; turning it on checks at once if a day has passed) and **Check for Updates Now**
 (an alert says what it found). A daily check runs at launch when due and then every few hours asks
@@ -243,7 +244,7 @@ With no secrets it does the ad-hoc path. Two switches, both off:
   fine-grained token with *Contents: write* on that repository only). Then the release is made there
   and the app's update check looks there.
 
-**Before turning signing on** (nothing here is set up on GitHub yet). The workflow's checks run in
+**Before turning signing on** (none of this is set up on GitHub yet; releases are ad-hoc signed for now). The workflow's checks run in
 the workflow file, which anyone who can push a branch could change; these settings hold whatever the
 file says:
 
@@ -251,13 +252,13 @@ file says:
    tags* set to *Selected* and one rule, tags matching `v*`. Put the five signing secrets in it, not
    in the repository's secrets. Only a run on a `v*` tag can then reach them.
 2. Add a **tag ruleset** (Settings → Rules → Rulesets → New tag ruleset) for `v*`, restricting
-   creation, update and deletion to Daniel (bypass list: repository admin), so nobody else can make
+   creation, update and deletion to the repository owner (bypass list: repository admin), so nobody else can make
    the tag the environment trusts.
 3. Then set `MACOS_SIGNING` to `true`.
 
-On GitHub Free, environments (and their secrets and rules) exist only in **public** repositories, so
-signing from a private one needs GitHub Pro. Releasing from a public repository, or to a separate
-public one, settles that. `RELEASES_TOKEN` is a repository secret the publish job reads; with a
+On GitHub Free, environments (and their secrets and rules) exist only in **public** repositories,
+which would have needed GitHub Pro for a private one; with this repository public that no longer
+applies. `RELEASES_TOKEN` is a repository secret the publish job reads; with a
 separate releases repository, the ruleset in step 2 matters for it too.
 
 ## Trying it
@@ -277,7 +278,7 @@ defaults delete gitrasil-try            # afterwards, the throwaway suite
 - **Spotlight** indexes an app wherever it is in an indexed folder, but not under a hidden one: built
   in a worktree in `.claude/`, `mdls` reads the app's metadata (kind Application, name Gitrasil) but
   `mdfind` doesn't find it. After `--install` (or built in the main checkout's `dist/`), type
-  *Gitrasil* in Spotlight; `mdfind "kMDItemCFBundleIdentifier == 'com.gitrasil.Gitrasil'"` shows
+  *Gitrasil* in Spotlight; `mdfind "kMDItemCFBundleIdentifier == 'io.github.highdynamics.Gitrasil'"` shows
   where it's indexed.
 - **Gatekeeper, as a downloader sees it**: download the zip from a draft release in a browser (or
   `xattr -w com.apple.quarantine "0081;$(printf %x $(date +%s));Safari;" Gitrasil.app` on a copy),
@@ -287,7 +288,7 @@ defaults delete gitrasil-try            # afterwards, the throwaway suite
   answer: it waits for Developer ID. (Before registering, `SMAppService.mainApp.status` reads
   *not found* for the ad-hoc app in `dist/`, which the menu shows as unticked; the launch log says
   `open at login not found`.)
-- **Update check**: with the repository private (or before the first release), *Check for Updates
+- **Update check**: before the first release, *Check for Updates
   Now* says no release was found. `--env GITRASIL_RELEASES_REPOSITORY=<owner/name>` points the check
   at another repository to see the found-a-newer-one path: checked here against
   `sparkle-project/Sparkle`, whose 2.10.0 the app took for a newer Gitrasil and kept in the suite
@@ -297,15 +298,18 @@ defaults delete gitrasil-try            # afterwards, the throwaway suite
 
 Made (October 2026):
 
-1. **Where downloads live** — make `HighDynamics/gitrasil` public. Pending a licence and a check of
-   the repository before it goes public. Nothing can be shared until then.
-2. **Apple Developer Program** — not yet: ad-hoc signed, with the *Open Anyway* step. Join if more
-   than a handful of people use it.
-3. **Updates** — the built daily Releases check. Sparkle with Developer ID, later.
-4. **Homebrew** — not yet; a personal tap once releases are notarized.
-
-Open:
-
-5. **Bundle identifier** — `com.gitrasil.Gitrasil` is permanent after the first release, so it's
-   settled before the first tag. Changing it is `CFBundleIdentifier` in `packaging/Info.plist` and
-   the update check's scheduler identifier in `AppServices.swift`.
+1. **Where downloads live** — `HighDynamics/gitrasil` is public, under the MIT licence (`LICENSE`).
+   Releases are attached to it, and the update check reads them.
+2. **Signing** — ad-hoc, with the *Open Anyway* step on first launch. No Apple Developer Program
+   yet; join if more than a handful of people use it, then switch on Developer ID and notarization.
+3. **Updates** — the built opt-in daily check of the Releases API (*Updates*, above). Sparkle with
+   Developer ID, later.
+4. **Homebrew** — no cask yet; a personal tap once releases are notarized.
+5. **Bundle identifier** — `io.github.highdynamics.Gitrasil` (reverse-DNS of the maintainer's GitHub
+   Pages domain, the convention for an app with no domain of its own). It is permanent after the
+   first release, so it was settled before the first tag. It lives in `CFBundleIdentifier` in
+   `packaging/Info.plist` and in the update check's scheduler identifier in `AppServices.swift`. The
+   defaults suite stays `com.gitrasil.background`, so pins and settings saved before the change
+   carry over.
+6. **Merging** — a ruleset on `main` requires the CI checks (Format, Lint, Build and Test), and pull
+   requests merge with merge commits only. Releases are tagged from `main`.
