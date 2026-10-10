@@ -20,10 +20,36 @@ enum Offscreen {
         let scale: CGFloat
     }
 
-    static let screens = [
+    /// Every display the aids know. A 5K panel is 2560×1440 points at 2x.
+    static let allScreens = [
         Screen(name: "1440×900@2x", size: CGSize(width: 1440, height: 900), scale: 2),
-        Screen(name: "3440×1440@1x", size: CGSize(width: 3440, height: 1440), scale: 1)
+        Screen(name: "3440×1440@1x", size: CGSize(width: 3440, height: 1440), scale: 1),
+        Screen(name: "5120×2880@2x", size: CGSize(width: 2560, height: 1440), scale: 2)
     ]
+
+    /// The displays `--benchmark`, `--snapshot` and `--frames` use: the first two, or the ones
+    /// GITRASIL_OFFSCREEN_SCREENS lists by index (`0,2`).
+    static let screens: [Screen] = {
+        let chosen = ProcessInfo.processInfo.environment["GITRASIL_OFFSCREEN_SCREENS"]?
+            .split(separator: ",").compactMap { Int($0) }.filter { allScreens.indices.contains($0) }
+        return chosen.map { $0.map { allScreens[$0] } } ?? Array(allScreens.prefix(2))
+    }()
+
+    /// GITRASIL_OFFSCREEN_MEDIA (`chalk,ink`) and GITRASIL_OFFSCREEN_ARRANGEMENTS (`orchard`) narrow
+    /// what `--benchmark` and `--snapshot` run; GITRASIL_OFFSCREEN_MODES (`light`) picks the mode.
+    static func chosen<T: RawRepresentable & CaseIterable>(_ variable: String, _ all: T.Type) -> [T] where T.RawValue == String {
+        guard let list = ProcessInfo.processInfo.environment[variable] else { return Array(T.allCases) }
+        let names = Set(list.split(separator: ",").map(String.init))
+        return T.allCases.filter { names.contains($0.rawValue) }
+    }
+
+    static var modes: [Bool] {
+        switch ProcessInfo.processInfo.environment["GITRASIL_OFFSCREEN_MODES"] {
+        case "light": return [false]
+        case "dark": return [true]
+        default: return [false, true]
+        }
+    }
 
     /// Times each part of a redraw, rendered to a bitmap (`ImageRenderer`, so on the CPU), `runs`
     /// times after a warm-up, and prints the median: the tree canvas (what redraws when a tree
@@ -32,12 +58,12 @@ enum Offscreen {
     static func benchmark(_ background: BackgroundModel, runs: Int) async {
         await settle(background)
         print("redraw, median of \(runs) (ms):")
-        for arrangement in Arrangement.allCases {
+        for arrangement in chosen("GITRASIL_OFFSCREEN_ARRANGEMENTS", Arrangement.self) {
             background.settings.arrangement = arrangement
             await settle(background)
-            for medium in Medium.allCases {
+            for medium in chosen("GITRASIL_OFFSCREEN_MEDIA", Medium.self) {
                 for screen in screens {
-                    for dark in [false, true] {
+                    for dark in modes {
                         let style = WallpaperStyle.make(medium, dark: dark)
                         let trees = median(runs) { render(treeCanvas(background, style: style), screen: screen, dark: dark) }
                         let frame = median(runs) { render(treeCanvas(background, style: style, growIn: 0.5), screen: screen, dark: dark) }
@@ -59,12 +85,12 @@ enum Offscreen {
         await settle(background)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let screen = screens[0]
-        for arrangement in Arrangement.allCases {
+        for arrangement in chosen("GITRASIL_OFFSCREEN_ARRANGEMENTS", Arrangement.self) {
             background.settings.arrangement = arrangement
             await settle(background)
-            for medium in Medium.allCases {
+            for medium in chosen("GITRASIL_OFFSCREEN_MEDIA", Medium.self) {
                 background.settings.medium = medium
-                for dark in [false, true] {
+                for dark in modes {
                     let name = "\(medium.rawValue)-\(arrangement == .singleTree ? "single-tree" : "orchard")-\(dark ? "dark" : "light")"
                     let url = folder.appendingPathComponent("\(name).jpg")
                     guard let image = render(WallpaperView(background: background), screen: screen, dark: dark) else { continue }
@@ -88,7 +114,7 @@ enum Offscreen {
         let screen = screens[0], dark = NSApp.appearance?.name == .darkAqua
         let style = WallpaperStyle.make(background.settings.medium, dark: dark)
         let plan = Landscape(style: style, now: background.now, size: screen.size, shuffle: background.settings.layoutSeed,
-                             trunkGrowIn: nil)
+                             trunkGrowIn: nil, forest: background.settings.forest)
             .plan(panes(background), arrangement: background.settings.arrangement,
                   branchNames: background.settings.showsBranchNames, repoNames: background.settings.showsRepoNames)
         let count = Int(ceil(span.upperBound.timeIntervalSince(span.lowerBound) * fps)) + Int(fps / 2)
@@ -108,45 +134,46 @@ enum Offscreen {
 
     // MARK: Parts
 
-    private static func panes(_ background: BackgroundModel) -> [Pane] {
+    static func panes(_ background: BackgroundModel) -> [Pane] {
         zip(background.panes, PinnedRepositories.seeds(background.panes.map(\.repoURL))).map { Pane($0, seed: $1) }
     }
 
     /// The trees, as they stand or `growIn` of the way through growing in.
-    private static func treeCanvas(_ background: BackgroundModel, style: WallpaperStyle, growIn: Double? = nil) -> some View {
+    static func treeCanvas(_ background: BackgroundModel, style: WallpaperStyle, growIn: Double? = nil) -> some View {
         let panes = zip(background.panes, PinnedRepositories.seeds(background.panes.map(\.repoURL))).map {
             Pane($0, seed: $1, growIn: growIn)
         }
         let arrangement = background.settings.arrangement, now = background.now, shuffle = background.settings.layoutSeed
         return Canvas { context, size in
-            Landscape(style: style, now: now, size: size, shuffle: shuffle, trunkGrowIn: growIn.map { _ in 1 })
+            Landscape(style: style, now: now, size: size, shuffle: shuffle, trunkGrowIn: growIn.map { _ in 1 }, forest: background.settings.forest)
                 .draw(panes, arrangement: arrangement, in: &context)
         }
     }
 
     /// The trees at `date` of a grow-in.
-    private static func treeCanvas(_ background: BackgroundModel, style: WallpaperStyle, clock: BackgroundModel.GrowInClock,
-                                   at date: Date) -> some View {
+    static func treeCanvas(_ background: BackgroundModel, style: WallpaperStyle, clock: BackgroundModel.GrowInClock,
+                           at date: Date) -> some View {
         let panes = zip(background.panes, PinnedRepositories.seeds(background.panes.map(\.repoURL))).map {
             Pane($0, seed: $1, growIn: clock.growIn($0.repoURL, at: date))
         }
         let arrangement = background.settings.arrangement, now = background.now, shuffle = background.settings.layoutSeed
         let trunkGrowIn = clock.trunkGrowIn(at: date)
         return Canvas { context, size in
-            Landscape(style: style, now: now, size: size, shuffle: shuffle, trunkGrowIn: trunkGrowIn)
+            Landscape(style: style, now: now, size: size, shuffle: shuffle, trunkGrowIn: trunkGrowIn,
+                      forest: background.settings.forest)
                 .draw(panes, arrangement: arrangement, in: &context)
         }
     }
 
-    private static func paperCanvas(_ background: BackgroundModel, style: WallpaperStyle) -> some View {
+    static func paperCanvas(_ background: BackgroundModel, style: WallpaperStyle) -> some View {
         Canvas { context, size in
             WallpaperView.drawPaper(size: size, style: style, ground: true, in: &context)
         }
     }
 
-    private static func bannerLayer(_ background: BackgroundModel, style: WallpaperStyle, size: CGSize) -> some View {
+    static func bannerLayer(_ background: BackgroundModel, style: WallpaperStyle, size: CGSize) -> some View {
         let plan = Landscape(style: style, now: background.now, size: size, shuffle: background.settings.layoutSeed,
-                             trunkGrowIn: nil)
+                             trunkGrowIn: nil, forest: background.settings.forest)
             .plan(panes(background), arrangement: background.settings.arrangement,
                   branchNames: background.settings.showsBranchNames, repoNames: background.settings.showsRepoNames)
         return BannerLayer(plan: plan, shown: [:], style: style, breeze: background.breeze)
@@ -154,7 +181,7 @@ enum Offscreen {
 
     // MARK: Rendering
 
-    private static func render(_ view: some View, screen: Screen, dark: Bool) -> CGImage? {
+    static func render(_ view: some View, screen: Screen, dark: Bool) -> CGImage? {
         let renderer = ImageRenderer(content: view
             .frame(width: screen.size.width, height: screen.size.height)
             .environment(\.colorScheme, dark ? .dark : .light))
@@ -163,7 +190,7 @@ enum Offscreen {
     }
 
     /// The median time of `make`, in milliseconds, after one warm-up.
-    private static func median(_ runs: Int, _ make: () -> CGImage?) -> Double {
+    static func median(_ runs: Int, _ make: () -> CGImage?) -> Double {
         _ = make()
         var times: [Double] = []
         for _ in 0..<runs {
@@ -175,14 +202,14 @@ enum Offscreen {
         return times.sorted()[times.count / 2]
     }
 
-    private static func write(_ image: CGImage, to url: URL) {
+    static func write(_ image: CGImage, to url: URL) {
         guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else { return }
         CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 0.88] as CFDictionary)
         CGImageDestinationFinalize(destination)
     }
 
     /// Until every pane has its tree (or a problem) and nothing is growing in.
-    private static func settle(_ background: BackgroundModel) async {
+    static func settle(_ background: BackgroundModel) async {
         // A change of arrangement starts its grow-in on the next turn.
         try? await Task.sleep(for: .milliseconds(300))
         for _ in 0..<600 {

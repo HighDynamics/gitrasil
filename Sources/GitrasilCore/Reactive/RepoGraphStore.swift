@@ -50,6 +50,7 @@ public final class RepoGraphStore {
     private let now: @Sendable () -> Date
     private var watcher: DirectoryWatching?
     private var settleTask: Task<Void, Never>?
+    private var retryTask: Task<Void, Never>?
     private var fingerprint: String?
     private var missedChange = false
     private var isStopped = false
@@ -60,15 +61,22 @@ public final class RepoGraphStore {
     /// - Parameters:
     ///   - settle: the quiet period a burst of ref changes must end with before one derive runs.
     ///   - now: the clock the age cutoff is measured from.
-    public init(repositoryURL: URL, options: RepoGraphOptions = RepoGraphOptions(),
-                settle: Duration = .seconds(1), now: @escaping @Sendable () -> Date = { Date() }) {
+    public convenience init(repositoryURL: URL, options: RepoGraphOptions = RepoGraphOptions(),
+                            settle: Duration = .seconds(1), now: @escaping @Sendable () -> Date = { Date() }) {
+        // GIT_OPTIONAL_LOCKS=0 keeps every read lock-free, so our own git calls never write into the
+        // directory we watch.
+        let runner = GitRunner(workdir: repositoryURL, extraEnvironment: GitRunner.appEnvironment)
+        self.init(repositoryURL: repositoryURL, options: options, settle: settle, now: now, runner: runner)
+    }
+
+    /// With the runner given: tests swap in one that fails the way a hung volume does.
+    init(repositoryURL: URL, options: RepoGraphOptions, settle: Duration, now: @escaping @Sendable () -> Date,
+         runner: GitRunning) {
         self.repositoryURL = repositoryURL
         self.options = options
         self.settle = settle
         self.now = now
-        // GIT_OPTIONAL_LOCKS=0 keeps every read lock-free, so our own git calls never write into the
-        // directory we watch.
-        self.runner = GitRunner(workdir: repositoryURL, extraEnvironment: GitRunner.appEnvironment)
+        self.runner = runner
         self.executor = WorktreeExecutor(runner: runner)
     }
 
@@ -98,10 +106,16 @@ public final class RepoGraphStore {
         watcher = nil
         settleTask?.cancel()
         settleTask = nil
+        retryTask?.cancel()
+        retryTask = nil
+        // Reads still queued, or waiting for a place at the gate, are dropped, not run.
+        let executor = executor
+        Task { await executor.cancelReads() }
     }
 
     /// Re-derive now (no settle). Skipped when the ref fingerprint is unchanged.
     public func refresh() async {
+        guard !isStopped else { return }
         let options = self.options
         let known = graph == nil ? nil : fingerprint
         let date = now()
@@ -122,7 +136,33 @@ public final class RepoGraphStore {
         } catch is CancellationError {
             // Superseded by a newer derive; the winner publishes.
         } catch {
-            lastError = String(describing: error)
+            lastError = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+            if let retryAt = Self.retryTime(after: error) { retry(at: retryAt) }
+        }
+    }
+
+    /// When a repository that timed out may be asked again, if `error` says so.
+    private static func retryTime(after error: Error) -> Date? {
+        switch error as? GitError {
+        case .timedOut(_, _, let retryAt), .backingOff(let retryAt): retryAt
+        default: nil
+        }
+    }
+
+    /// One refresh when the back-off ends, so a repository that came back shows again without a ref
+    /// having to change. A single sleeping task, only while something is backing off.
+    private func retry(at date: Date) {
+        guard !isStopped, retryTask == nil else { return }
+        let wait = max(date.timeIntervalSinceNow, 0) + 0.1
+        retryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(wait))
+            guard !Task.isCancelled, let self else { return }
+            self.retryTask = nil
+            if self.isPaused {
+                self.missedChange = true
+                return
+            }
+            await self.refresh()
         }
     }
 
