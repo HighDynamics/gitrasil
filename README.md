@@ -6,8 +6,21 @@ leaves, and branch names hang on small banners from the tips. It sits behind the
 grows as your repositories change. See `docs/yggdrasil/PLAN.md` for the design and how it got here
 (`docs/live-background/` holds the earlier research and spike notes).
 
-Gitrasil started as a worktree GUI (one window per repository, one tab per worktree). That app was
-removed; it remains in git history up to the `Drop the worktree GUI` commit.
+## Foreword
+
+This started as a tool for keeping tabs on git worktrees, since AI agents are now doing a lot of
+work in them at once. Turns out plenty of people had the same idea, and those tools are coming along
+nicely. So I pivoted.
+
+Gitrasil still grows from your data, but it isn't trying to inform you. It's trying to be nice to
+look at. Your repos become a tree on your desktop, and it grows while you work. That's it. That's
+the app.
+
+And to be crystal clear: it only reads your local git. No fetch, no pull, no talking to remotes. The
+only network request it can ever make is a check for a new version, and that's off unless you turn
+it on.
+
+The original worktree GUI is in git history, up to the `Drop the worktree GUI` commit.
 
 ## Architecture
 
