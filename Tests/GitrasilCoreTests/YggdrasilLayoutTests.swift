@@ -261,8 +261,12 @@ final class YggdrasilLayoutTests: XCTestCase {
             XCTAssertEqual(feet, feet.sorted(), "\(count): pin order from the bottom up")
             XCTAssertLessThan(feet.first!, 0.4, "\(count): the lowest a third of the way up")
             XCTAssertGreaterThan(feet.last!, 0.8, "\(count): the highest near the top")
-            for (index, tier) in tiers.enumerated() {
-                XCTAssertEqual(tier.heading < 0, index % 2 == 0, "\(count): tier \(index) alternates sides")
+            // The tiers reaching out to the sides alternate among themselves, and so do those coming forward.
+            for front in [false, true] {
+                let these = tiers.indices.filter { shape.isFront($0) == front }
+                for (rank, index) in these.enumerated() {
+                    XCTAssertEqual(tiers[index].heading < 0, rank % 2 == 0, "\(count): tier \(index) alternates sides")
+                }
             }
             for bough in layout.boughs.suffix(shape.crown) {
                 // Its head, at least: a spread crown's outer feet stand down it (`YggdrasilLayout.footDrop`).
@@ -275,7 +279,7 @@ final class YggdrasilLayoutTests: XCTestCase {
         for count in [8, 20, 32] {
             let layout = tall(count), shape = YggdrasilLayout.Shape(count: count)
             var angles: [Double] = []
-            for bough in layout.boughs.prefix(shape.tiers) {
+            for (index, bough) in layout.boughs.prefix(shape.tiers).enumerated() where !shape.isFront(index) {
                 let planting = bough.planting, angle = abs(planting.heading) * 180 / .pi
                 angles.append(angle)
                 XCTAssertGreaterThan(angle, 70, "\(bough.name) of \(count) leaves nearly level")
@@ -321,6 +325,29 @@ final class YggdrasilLayoutTests: XCTestCase {
         let stuck = YggdrasilLayout.clearing(drooping, repo: repo, above: 10, shuffle: 0)
         XCTAssertLessThanOrEqual(stuck.heading, .pi / 2)
         XCTAssertGreaterThanOrEqual(low(stuck), low(eased))
+    }
+
+    func testSomeTiersComeTowardTheViewerFromTheTrunksMiddle() {
+        XCTAssertFalse((0..<5).contains { YggdrasilLayout.Shape(count: 8).isFront($0) }, "a small tree has none")
+        for count in [12, 20, 32, 64] {
+            let layout = tall(count), shape = YggdrasilLayout.Shape(count: count)
+            let front = (0..<shape.tiers).filter(shape.isFront)
+            XCTAssertGreaterThanOrEqual(front.count, 2, "\(count)")
+            XCTAssertLessThan(front.count, shape.tiers / 2, "\(count): most tiers still reach out to the sides")
+            XCTAssertFalse(front.contains(shape.tiers - 1), "\(count): not the top tier")
+            func length(_ index: Int) -> Double {
+                let stem = layout.boughs[index].layout.stems[0]
+                return hypot(Double(stem.tip!.point.x - stem.nodes[0].point.x), Double(stem.tip!.point.y - stem.nodes[0].point.y))
+            }
+            let side = (0..<shape.tiers).filter { !shape.isFront($0) }.map(length).sorted()
+            for index in front {
+                let planting = layout.boughs[index].planting
+                let middle = trunkWood(at: Double(planting.foot.y), in: layout.trunk.nodes).x
+                XCTAssertEqual(Double(planting.foot.x), middle, accuracy: 1e-9, "\(count): tier \(index) leaves the trunk's middle")
+                XCTAssertLessThan(length(index), side[side.count / 2] * 0.4, "\(count): tier \(index) is foreshortened")
+                XCTAssertEqual(layout.boughs[index].planting.girth, YggdrasilLayout.boughGirth, "\(count): but no thinner")
+            }
+        }
     }
 
     func testABigTreeIsWiderThanTall() {

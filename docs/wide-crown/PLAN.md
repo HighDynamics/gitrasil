@@ -118,3 +118,24 @@ wood was too thick, and the overlapping boughs showed through each other.
 - **Small trees.** The leaves suit them too, so every single tree gets them, from 2 boughs up. The wood of trees
   with up to 4 boughs is unchanged: full thickness, one piece, and the pipe-model trunk. Turning the leaves off
   for them takes one line (make `foliage` nil when `shape.tiers == 0`).
+
+## Round 4: boughs toward the viewer, and droop
+
+Daniel found round 3 much closer. The centre still looked bare, and he wanted even more variety in the bough
+angles, since the crossings were what he liked.
+
+- **Toward the viewer.** In a tree with at least 6 tiers, every third tier, but never the top one, comes
+  toward the viewer instead of reaching out to a side (`Shape.isFront`). It leaves from the trunk's middle and
+  can point anywhere from steeply up (35°) to drooping (125°). It's foreshortened to 0.2 of a side tier's reach
+  (`frontReach`) but stays just as thick, so it reads as a bough pointing at you, and its twigs and leaves
+  gather into a clump. Front boughs are painted after all the others, from the top down, so they hide the trunk
+  and the side boughs' bases behind them. 32 repositories get 8 of them, and 12 get 2.
+- **Droop.** Side tiers now lean between 72° and 100° from upright, plus up to 10° more for the lowest
+  (`tierDroop`), so some rise a little and some droop as much as 20° below level. They still straighten a little
+  toward the tip. Side and front tiers each alternate left and right among themselves.
+- **Clear of the ground.** A drooping tier whose full-grown bough would come within half its foot's height of
+  the ground is eased toward level, then past it if it needs to (`clearing`, `groundClearance`). This matters
+  for the low tiers of a short tree, such as the 12 boughs in front of the Forest. The check uses the
+  full-grown bough, so the angle doesn't change while the bough grows in.
+- Banners are unchanged. A front bough's ribbon can end up hanging low on the trunk, since the bough is so
+  short. That's left for the banner round.

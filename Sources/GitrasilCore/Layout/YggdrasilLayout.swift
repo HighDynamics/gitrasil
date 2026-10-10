@@ -137,8 +137,21 @@ public struct YggdrasilLayout: Sendable {
             return Self.lowestTier + (Self.highestTier - Self.lowestTier) * Double(index) / Double(tiers - 1)
         }
 
-        /// The side tier `index` reaches out to: -1 left, 1 right, alternating from the bottom.
-        func tierSide(_ index: Int) -> Double { index % 2 == 0 ? -1 : 1 }
+        /// Whether tier `index` comes toward the viewer, in front of the trunk, rather than reaching out to
+        /// a side: every `frontEvery`th tier of a tree with at least `frontFrom`, but never the top one,
+        /// so the middle of a big tree isn't bare.
+        public func isFront(_ index: Int) -> Bool {
+            tiers >= Self.frontFrom && index < tiers - 1 && index % Self.frontEvery == Self.frontEvery / 2
+        }
+
+        /// The side tier `index` leans to: -1 left, 1 right, alternating from the bottom among the tiers
+        /// reaching out to the sides, and separately among those coming toward the viewer.
+        func tierSide(_ index: Int) -> Double {
+            let rank = (0..<index).filter { isFront($0) == isFront(index) }.count
+            return rank % 2 == 0 ? -1 : 1
+        }
+
+        static let frontFrom = 6, frontEvery = 3
     }
 
     /// - Parameters:
@@ -252,6 +265,9 @@ public struct YggdrasilLayout: Sendable {
     /// How much further below level the lowest tier may droop than the highest, in degrees.
     static let tierDroop = 10.0
 
+    /// How far a tier coming toward the viewer reaches, foreshortened, as a fraction of a side tier's.
+    static let frontReach = 0.2
+
     /// How thick a tall tree's boughs are drawn, as a multiple of what their repositories' own trees
     /// would be: slim, so the trunk they leave stays slim too.
     static let boughGirth = 0.4
@@ -299,7 +315,9 @@ public struct YggdrasilLayout: Sendable {
     /// furthest, nudged a little by its name so the fan isn't ruled. A tier leans out to its side, from a
     /// little above level to a little below it, the lower tiers drooping most, keeps most of that lean
     /// (`Planting.straighten`) and reaches further than its tree would on its own (`Planting.reach`), the
-    /// lower tiers furthest; its limbs splay off it (`Planting.splay`), favouring its upper side.
+    /// lower tiers furthest; its limbs splay off it (`Planting.splay`), favouring its upper side. A tier
+    /// coming toward the viewer (`Shape.isFront`) leaves the trunk's middle, at any angle from steeply up
+    /// to drooping, foreshortened to well under a side tier's reach but no thinner.
     static func planting(index: Int, shape: Shape, name: String, width: Double, at y: Double,
                          trunk: [TreeLayout.Node], fit: Fit = .standard) -> TreeLayout.Planting {
         var rng = SeededRandom(name, -6)
@@ -309,6 +327,12 @@ public struct YggdrasilLayout: Sendable {
         let fork = TreeLayout.Fork(parent: nil, node: trunk.lastIndex { $0.point.y <= y } ?? 0, width: wood.width, heading: wood.heading)
         guard index >= shape.tiers else {
             let side = shape.tierSide(index), u = shape.tierPosition(index)
+            if shape.isFront(index) {
+                let heading = side * rng.next(in: 35...125) * .pi / 180
+                return TreeLayout.Planting(foot: CGPoint(x: wood.x, y: y), heading: heading, outward: -side, fork: fork,
+                                           straighten: rng.next(in: 0...0.25), reach: tierReach * frontReach * rng.next(in: 0.8...1.2),
+                                           splay: true)
+            }
             let droop = tierDroop * (Shape.highestTier - u) / (Shape.highestTier - Shape.lowestTier)
             let heading = side * (rng.next(in: 72...100) + droop) * .pi / 180
             let reach = tierReach * (1.15 - 0.3 * u) * rng.next(in: 0.85...1.15)

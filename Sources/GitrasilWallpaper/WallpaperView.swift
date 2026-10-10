@@ -416,8 +416,8 @@ struct Landscape {
         }
         drawing.shadow(width: full.bounds.width, in: &context)
         // A tall tree's boughs are painted one by one over the trunk, each hiding what it passes in front
-        // of: the crown at the back, then the tiers from the top down. Any single tree is leafy, its
-        // twigs shared out among its boughs.
+        // of: the crown at the back, then the tiers reaching out to the sides from the top down, then those
+        // coming toward the viewer. Any single tree is leafy, its twigs shared out among its boughs.
         let shape = YggdrasilLayout.Shape(count: layout.boughs.count)
         var groups: [[Int]]?
         let foliage = TreeDrawing.Foliage(twigs: min(max(Self.twigBudget / max(shape.count, 1), 10), 36))
@@ -427,7 +427,8 @@ struct Landscape {
                 ranges.append(start..<(start + bough.layout.stems.count))
                 start += bough.layout.stems.count
             }
-            let order = Array(shape.tiers..<shape.count) + (0..<shape.tiers).reversed()
+            let tiers = (0..<shape.tiers).reversed()
+            let order = Array(shape.tiers..<shape.count) + tiers.filter { !shape.isFront($0) } + tiers.filter(shape.isFront)
             groups = [[0]] + order.map { Array(ranges[$0]) }
         }
         drawing.draw(stems, seeds: seeds, parents: parents, rootedAt: 0, rootSeed: "yggdrasil", groups: groups,
