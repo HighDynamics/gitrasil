@@ -66,10 +66,12 @@ extension Landscape {
         var trees: [Standing] = []
         var obstacles: [CGRect] = []
         var taken: [CGRect] = []
+        var bounds = self.bounds
         if isSingleTree(panes, arrangement: arrangement) {
             let scene = scene(panes, arrangement: arrangement)
             let ready = scene.tree
             let (full, frame) = singleTree(ready, narrowed: !scene.forest.isEmpty)
+            bounds = self.bounds(floor: frame.origin.y - Self.floor(treeHeight: CGFloat(full.bounds.maxY) * frame.scale))
             obstacles += crown([full.trunk], frame: frame)
             for (pane, bough) in zip(ready, full.boughs) {
                 trees.append(Standing(pane: pane.id, stems: bough.layout.stems, schedule: bough.layout.schedule, frame: frame,
@@ -79,7 +81,7 @@ extension Landscape {
             // The repositories' ribbons first, so they hang in the same places whether or not the
             // branches' pennants are shown; the pennants keep off them.
             if repoNames {
-                plan.ribbons = ribbons(Array(zip(ready, full.boughs)), frame: frame, obstacles: obstacles)
+                plan.ribbons = ribbons(Array(zip(ready, full.boughs)), frame: frame, obstacles: obstacles, bounds: bounds)
                 taken = plan.ribbons.map(\.ribbon.footprint)
                 label(&trees, without: plan.ribbons, of: ready)
             }
@@ -177,22 +179,33 @@ extension Landscape {
     }
 
     /// Where banners may hang: under the menu bar, above the ground.
-    private var bounds: CGRect {
-        let ground = Composition.groundY(size.height)
-        return CGRect(x: 6, y: Composition.top - 16, width: size.width - 12, height: ground - 8 - (Composition.top - 16))
+    private var bounds: CGRect { bounds(floor: Composition.groundY(size.height) - 8) }
+
+    /// Where banners may hang over a single tree: under the menu bar, none lower than `floor`.
+    private func bounds(floor: CGFloat) -> CGRect {
+        CGRect(x: 6, y: Composition.top - 16, width: size.width - 12, height: floor - (Composition.top - 16))
     }
+
+    /// How far above the ground the lowest banner on a single tree `treeHeight` tall may reach: a short
+    /// front bough low on the trunk would otherwise hang its banner just above the ground.
+    static func floor(treeHeight: CGFloat) -> CGFloat { max(48, treeHeight * 0.08) }
+
+    /// Where along its bough a ribbon may hang besides the fit's stops (`Fit.ribbonStops`), as last
+    /// resorts: further out, for a short bough low down whose stops are all too near the ground.
+    static let fartherStops: [Double] = [0.66, 0.76, 0.86, 0.95]
 
     /// Each repository's ribbon, hung from the underside of its bough's first stretch, where it's
     /// still near the shared trunk.
     private func ribbons(_ boughs: [(pane: Pane, bough: YggdrasilLayout.Bough)], frame: TreeFrame,
-                         obstacles: [CGRect]) -> [BannerPlan.Ribbon] {
+                         obstacles: [CGRect], bounds: CGRect) -> [BannerPlan.Ribbon] {
         let treeFit = fit(for: boughs.count)
         let fontSize = max(14, (style.ribbonSize * frame.detail * treeFit.ribbonScale(count: boughs.count)).rounded())
         var requests: [BannerLayout.RibbonRequest] = []
         var panes: [String: (pane: Pane, stretch: TreeLayout.Stretch)] = [:]
         for (pane, bough) in boughs {
             guard let stem = bough.layout.stems.first, stem.curve.count > 2 else { continue }
-            let anchors = treeFit.ribbonStops.map { fraction -> CGPoint in
+            let stops = treeFit.ribbonStops + Self.fartherStops.filter { $0 > (treeFit.ribbonStops.last ?? 0) }
+            let anchors = stops.map { fraction -> CGPoint in
                 let node = stem.curve[Int(Double(stem.curve.count - 1) * fraction)]
                 let point = frame.point(node.point)
                 return CGPoint(x: point.x, y: point.y + node.width * frame.scale / 2)
