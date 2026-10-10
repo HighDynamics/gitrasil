@@ -18,6 +18,8 @@ struct WallpaperView: View {
         let arrangement = background.settings.arrangement
         let showsBranchNames = background.settings.showsBranchNames
         let showsRepoNames = background.settings.showsRepoNames
+        let hangsBanners = background.settings.hangsBanners
+        let occludesBanners = !background.settings.drawsAllBannersInView
         let now = background.now
         let shuffle = background.settings.layoutSeed
         let forest = background.settings.forest
@@ -48,6 +50,7 @@ struct WallpaperView: View {
                                             shuffle: shuffle, arrangement: arrangement, forest: forest, treeCapacity: policy.fixedTreeCapacity,
                                             ranking: ranking,
                                             branchNames: showsBranchNames, repoNames: showsRepoNames,
+                                            hanging: hangsBanners, occluded: occludesBanners,
                                             trees: panes.map { .init(id: $0.repoURL.path, tree: $0.tree) })
                     let resting = zip(panes, seeds).map { Pane($0, seed: $1) }
                     // The forest's trees are planned once, each a layer of its own (`ForestTreeLayer`).
@@ -91,7 +94,8 @@ struct WallpaperView: View {
                             Landscape(style: style, now: now, size: proxy.size, shuffle: shuffle, trunkGrowIn: nil, forest: forest, policy: policy,
                                       ranking: ranking).plan(
                                 zip(panes, seeds).map { Pane($0, seed: $1) },
-                                arrangement: arrangement, branchNames: showsBranchNames, repoNames: showsRepoNames)
+                                arrangement: arrangement, branchNames: showsBranchNames, repoNames: showsRepoNames,
+                                hanging: hangsBanners, occluded: occludesBanners)
                         }
                         // Each name fades in as its wood finishes growing, on the trees' clock.
                         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !growing)) { timeline in
@@ -108,7 +112,9 @@ struct WallpaperView: View {
 
     /// How far each banner on growing wood has faded in at `date`: a pennant as its stem reaches its
     /// tip (`TreeLayout.Stretch.nameShown`), a ribbon as its bough does; on a limb growing new
-    /// commits, over the end of the growth. Banners on still wood aren't listed (they're shown).
+    /// commits, over the end of the growth. Banners on still wood aren't listed (they're shown). A banner
+    /// hidden behind what's painted in front of it is masked by the full-grown trees, so on a tree growing
+    /// in it waits for every tree growing in to finish, rather than show holes where leaves are still to come.
     /// `growIn` is how far a pane's tree is in growing in at a date (`BackgroundModel.growIn`). Each
     /// banner carries its stretch from the plan, so a frame only looks up a progress or two per pane.
     static func shownBanners(_ plan: BannerPlan, panes: [WallpaperModel], at date: Date,
@@ -123,15 +129,19 @@ struct WallpaperView: View {
         }
         guard !growingIn.isEmpty || !growing.isEmpty else { return [:] }
         var shown: [String: Double] = [:]
+        let last = TreeLayout.Stretch.nameFade, everyone = growingIn.values.min() ?? 1
+        let whole = min(max((everyone - (1 - last)) / last, 0), 1)
         for hanging in plan.banners {
             if let progress = growingIn[hanging.pane] {
-                shown[hanging.id] = hanging.stretch.nameShown(at: progress)
+                shown[hanging.id] = min(hanging.stretch.nameShown(at: progress), hanging.hiddenFrom == nil ? 1 : whole)
             } else if let (pane, progress) = growing[hanging.pane], pane.growth[hanging.stem] != nil {
                 shown[hanging.id] = min(max((progress - 0.85) / 0.15, 0), 1)
             }
         }
         for ribbon in plan.ribbons {
-            if let progress = growingIn[ribbon.pane] { shown[ribbon.id] = ribbon.stretch.nameShown(at: progress) }
+            if let progress = growingIn[ribbon.pane] {
+                shown[ribbon.id] = min(ribbon.stretch.nameShown(at: progress), ribbon.hiddenFrom == nil ? 1 : whole)
+            }
         }
         return shown
     }
@@ -417,25 +427,9 @@ struct Landscape {
             parents += bough.layout.stems.map { stem in stem.fork.map { $0.parent.map { $0 + offset } ?? 0 } }
         }
         drawing.shadow(width: full.bounds.width, in: &context)
-        // A tall tree's boughs are painted one by one over the trunk, each hiding what it passes in front
-        // of: the crown at the back, then the tiers reaching out to the sides from the top down, then those
-        // coming toward the viewer. Any single tree is leafy, its twigs shared out among its boughs.
-        let shape = YggdrasilLayout.Shape(count: layout.boughs.count)
-        var groups: [[Int]]?, emerging: Set<Int> = []
-        let foliage = TreeDrawing.Foliage(twigs: min(max(Self.twigBudget / max(shape.count, 1), 10), 36))
-        if shape.tiers > 0 {
-            var ranges: [Range<Int>] = [], start = 1
-            for bough in layout.boughs {
-                ranges.append(start..<(start + bough.layout.stems.count))
-                start += bough.layout.stems.count
-            }
-            let tiers = (0..<shape.tiers).reversed()
-            let order = Array(shape.tiers..<shape.count) + tiers.filter { !shape.isFront($0) } + tiers.filter(shape.isFront)
-            groups = [[0]] + order.map { Array(ranges[$0]) }
-            emerging = Set((0..<shape.tiers).filter(shape.isFront).map { ranges[$0].lowerBound })
-        }
-        drawing.draw(stems, seeds: seeds, parents: parents, rootedAt: 0, rootSeed: "yggdrasil", groups: groups,
-                     emerging: emerging, foliage: foliage, in: &context)
+        let order = Self.paintOrder(layout)
+        drawing.draw(stems, seeds: seeds, parents: parents, rootedAt: 0, rootSeed: "yggdrasil", groups: order.groups,
+                     emerging: order.emerging, foliage: Self.foliage(layout), in: &context)
         let problems = panes.compactMap { pane in pane.problem.map { "\(pane.name): \($0)" } }
         if !problems.isEmpty {
             problemText(problems.joined(separator: "   "),
@@ -503,6 +497,9 @@ struct TreeDrawing {
     let style: WallpaperStyle
     let now: Date
     let frame: TreeFrame
+    /// Where, on the screen, anything drawn matters: leaves and twigs wholly outside it are skipped
+    /// (`Occlusion` draws only a banner's box). Nil draws everything.
+    var only: CGRect?
 
     /// The wood and foliage of `stems` (names hang on banners over the canvas: `BannerLayer`),
     /// with roots spreading from the foot of the stem at `ground`. `seeds` are each stem's repository's
@@ -665,14 +662,14 @@ struct TreeDrawing {
     /// What a stem's hand-drawn wobble is seeded from: its repository's seed, its name and how deep it
     /// is, never its place among the others, so a new branch doesn't reshape the rest, and two trees'
     /// `main`s don't wobble alike.
-    private func woodSeed(_ stem: TreeLayout.Stem, repo: String) -> UInt64 {
+    func woodSeed(_ stem: TreeLayout.Stem, repo: String) -> UInt64 {
         HandDrawn.seed("\(repo)\u{1F}\(stem.name ?? "trunk")", stem.level)
     }
 
     /// A tapered shape around sampled centreline points. Drawn by hand, each edge strays a little from
     /// the smooth taper and the width swells and thins, by the wobble at each point's distance from
     /// the base: so a limb keeps its edges as it grows, and only its new stretch is new.
-    private func taper(_ samples: [(point: CGPoint, width: CGFloat)], seed: UInt64) -> Taper {
+    func taper(_ samples: [(point: CGPoint, width: CGFloat)], seed: UInt64) -> Taper {
         var left: [CGPoint] = [], right: [CGPoint] = []
         let hand = Double(style.hand)
         var distance = 0.0
@@ -701,7 +698,7 @@ struct TreeDrawing {
     }
 
     /// A shared trunk's rounded top, so the boughs grow out of it; nil for any other stem.
-    private func top(_ stem: TreeLayout.Stem) -> Path? {
+    func top(_ stem: TreeLayout.Stem) -> Path? {
         guard stem.isTrunk, stem.commits.isEmpty, stem.fork == nil, stem.curve.count >= 2, let top = stem.curve.last else { return nil }
         let center = frame.point(top.point), r = top.width * frame.scale / 2
         return Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: 2 * r, height: 2 * r))
@@ -1095,7 +1092,7 @@ struct TreeDrawing {
     /// and drop some of theirs, so a dormant limb thins out. The trunk leafs out only along its recent
     /// commits. Each leaf's lopsidedness is seeded from `repo` (`Pane.seed`) as well, so two trees'
     /// `main`s don't lean alike.
-    private func leaves(_ stem: TreeLayout.Stem, repo: String, in context: inout GraphicsContext) {
+    func leaves(_ stem: TreeLayout.Stem, repo: String, in context: inout GraphicsContext) {
         guard isLeafy(stem) else { return }
         let key = stem.name ?? "trunk", handKey = "\(repo)\u{1F}\(key)"
         let color = leafInk(stem)
@@ -1161,7 +1158,7 @@ struct TreeDrawing {
 
     /// A small five-petalled blossom at the tip of a branch checked out in a worktree, its petals
     /// seeded from `repo` (`Pane.seed`) and the branch.
-    private func blossom(_ stem: TreeLayout.Stem, repo: String, in context: inout GraphicsContext) {
+    func blossom(_ stem: TreeLayout.Stem, repo: String, in context: inout GraphicsContext) {
         guard let tip = stem.tip, stem.grown >= Double(max(stem.commits.count, 1)) else { return }
         let center = frame.point(tip.point)
         let color = stem.isTrunk ? style.ink : ink(stem)

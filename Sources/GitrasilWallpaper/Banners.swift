@@ -7,6 +7,8 @@ import GitrasilCore
 // runs outward, clear of the crown, and in the single tree each repository's on a larger ribbon hung
 // by two cords from its bough (`BannerLayout` places both). They're drawn as their own small views
 // over the tree canvas, so a banner swaying in a gust moves its own layer and never redraws the tree.
+// Unless every banner is drawn in view, what's painted in front of a banner's bough is cut out of it
+// (`Occlusion`), so it hangs at its bough's depth.
 
 /// Where every name hangs. Planned from the full-grown trees whenever they change, never per frame.
 struct BannerPlan {
@@ -22,8 +24,23 @@ struct BannerPlan {
         let ink: Color
         let alpha: Double
         let fontSize: CGFloat
+        /// Its depth in the trees' paint order when something painted in front of it reaches its box
+        /// (`Occlusion`); nil when nothing hides it.
+        var hiddenFrom: Int?
 
         var id: String { banner.id }
+
+        /// What its view covers: its tip, its thread and its pennant in every pose a gust swings it
+        /// through (from dangling to nearly level, for one hanging from its bough), with room to sway.
+        var box: CGRect {
+            var box = banner.rect.union(CGRect(origin: banner.tip, size: .zero))
+            if banner.droop > 0 {
+                for step in 1...8 {
+                    box = box.union(BannerLayout.turned(banner.rect, about: banner.hook, degrees: banner.side * banner.droop * Double(step) / 8))
+                }
+            }
+            return box.insetBy(dx: -14, dy: -14)
+        }
     }
 
     /// A repository's ribbon, in the single tree.
@@ -36,12 +53,34 @@ struct BannerPlan {
         /// Its bough's stretch of a grow-in: it fades in as the bough finishes.
         let stretch: TreeLayout.Stretch
         let fontSize: CGFloat
+        /// As a pennant's (`Hanging.hiddenFrom`).
+        var hiddenFrom: Int?
 
         var id: String { ribbon.id }
+
+        /// What its view covers: its cords and the ribbon, with room for its swing.
+        var box: CGRect { ribbon.footprint.insetBy(dx: -10, dy: -10) }
+    }
+
+    /// The foliage painted in front of each tree, or each bough of the single tree: what a name could be
+    /// lost behind (`Landscape.hidden`).
+    struct Fronts {
+        /// Each tree's or bough's foliage, in the order they're painted.
+        var layers: [[CGRect]] = []
+        /// Each repository's place in `layers`, by its pane's id.
+        var places: [String: Int] = [:]
+
+        /// What's painted in front of `pane`'s tree or bough, near `rect`.
+        func rects(before pane: String, near rect: CGRect) -> [CGRect] {
+            guard let place = places[pane], place + 1 < layers.count else { return [] }
+            return layers[(place + 1)...].flatMap { $0.filter { $0.intersects(rect) } }
+        }
     }
 
     var banners: [Hanging] = []
     var ribbons: [Ribbon] = []
+    /// What hides the banners, when each hangs at its bough's depth; nil when all are drawn in view.
+    var occlusion: Occlusion?
 }
 
 extension Landscape {
@@ -59,36 +98,64 @@ extension Landscape {
     }
 
     /// Where the names hang over the trees as they stand (`panes` with their full trees): the branches'
-    /// pennants and, in the single tree, the repositories' ribbons, each only if shown.
-    func plan(_ panes: [Pane], arrangement: Arrangement, branchNames: Bool, repoNames: Bool) -> BannerPlan {
+    /// pennants and, in the single tree, the repositories' ribbons, each only if shown. `hanging` hangs
+    /// the pennants from their boughs (`BannerLayout.place`); `occluded` hides each banner behind what's
+    /// painted in front of its bough (`Occlusion`). Placement doesn't depend on `occluded`.
+    func plan(_ panes: [Pane], arrangement: Arrangement, branchNames: Bool, repoNames: Bool, hanging: Bool = false,
+              occluded: Bool = false) -> BannerPlan {
         var plan = BannerPlan()
         // Each tree by its pane's id.
         var trees: [Standing] = []
         var obstacles: [CGRect] = []
         var taken: [CGRect] = []
         var bounds = self.bounds
+        // Each repository's depth in the trees' paint order, when banners hang at their boughs' depths.
+        var depths: [String: Int] = [:]
+        // The foliage painted in front of each repository's tree or bough, which can hide its banners.
+        var fronts = BannerPlan.Fronts()
+        let occlusion = occluded ? Occlusion() : nil
         if isSingleTree(panes, arrangement: arrangement) {
             let scene = scene(panes, arrangement: arrangement)
             let ready = scene.tree
             let (full, frame) = singleTree(ready, narrowed: !scene.forest.isEmpty)
             bounds = self.bounds(floor: frame.origin.y - Self.floor(treeHeight: CGFloat(full.bounds.maxY) * frame.scale))
+            depths = occlusion.map { self.depths(full, of: ready, frame: frame, in: $0) } ?? [:]
             obstacles += crown([full.trunk], frame: frame)
+            let crowns = full.boughs.map { crown($0.layout.stems, frame: frame) }
             for (pane, bough) in zip(ready, full.boughs) {
                 trees.append(Standing(pane: pane.id, stems: bough.layout.stems, schedule: bough.layout.schedule, frame: frame,
                                       allowance: nil))
-                obstacles += crown(bough.layout.stems, frame: frame)
             }
+            obstacles += crowns.joined()
+            let ranks = Self.paintRanks(full), foliage = full.boughs.map { foliage($0.layout.stems, frame: frame) }
+            let inFront = ranks.map { rank in zip(ranks, foliage).filter { $0.0 > rank }.flatMap(\.1) }
+            let painted = ranks.indices.sorted { ranks[$0] < ranks[$1] }
+            fronts.layers = painted.map { foliage[$0] }
+            for (place, bough) in painted.enumerated() { fronts.places[ready[bough].id] = place }
             // The repositories' ribbons first, so they hang in the same places whether or not the
-            // branches' pennants are shown; the pennants keep off them.
+            // branches' pennants are shown; the pennants keep off them. Whether or not banners hang at
+            // their boughs' depths, a ribbon keeps out from behind the boughs painted after its own.
             if repoNames {
-                plan.ribbons = ribbons(Array(zip(ready, full.boughs)), frame: frame, obstacles: obstacles, bounds: bounds)
+                plan.ribbons = ribbons(Array(zip(ready, full.boughs)), fronts: inFront, frame: frame, obstacles: obstacles,
+                                       bounds: bounds)
                 taken = plan.ribbons.map(\.ribbon.footprint)
                 label(&trees, without: plan.ribbons, of: ready)
             }
             // The forest behind the tree isn't named in the air: the pennants keep off its crowns.
             obstacles += forestCrowns(scene.forest, beside: full, frame: frame)
         } else {
-            for planted in orchard(panes) {
+            // Back to front, as they're painted (`drawPlanted`).
+            for planted in orchard(panes).sorted(by: { ($0.forest?.line ?? 0) > ($1.forest?.line ?? 0) }) {
+                if let occlusion {
+                    let pane = panes[planted.index]
+                    depths[pane.id] = occlusion.add(planted.full.stems, seeds: planted.full.stems.map { _ in pane.seed },
+                                                    drawing: TreeDrawing(style: planted.forest?.style ?? style, now: now,
+                                                                         frame: planted.frame),
+                                                    groups: nil, foliage: nil).max() ?? occlusion.marks.count
+                    // A tree in a row in front can hide a name too, where one couldn't keep off its crown.
+                    fronts.places[pane.id] = fronts.layers.count
+                    fronts.layers.append(foliage(planted.full.stems, frame: planted.frame))
+                }
                 trees.append(Standing(pane: panes[planted.index].id, stems: planted.full.stems, schedule: planted.full.schedule,
                                       frame: planted.frame,
                                       allowance: planted.forest.flatMap {
@@ -97,7 +164,8 @@ extension Landscape {
                 obstacles += crown(planted.full.stems, frame: planted.frame)
             }
         }
-        guard branchNames else { return plan }
+        plan.occlusion = occlusion
+        guard branchNames else { return Self.hidden(plan, depths: depths, fronts: fronts) }
 
         var requests: [(request: BannerLayout.Request, rank: (Bool, Bool, Date), hanging: (BannerLayout.Banner) -> BannerPlan.Hanging)] = []
         for tree in trees {
@@ -140,11 +208,37 @@ extension Landscape {
             if a.rank.1 != b.rank.1 { return a.rank.1 }
             return a.rank.2 > b.rank.2
         }
-        let placed = BannerLayout.place(requests.map(\.request), obstacles: obstacles, taken: taken, bounds: bounds)
+        let placed = BannerLayout.place(requests.map(\.request), obstacles: obstacles, taken: taken, bounds: bounds,
+                                        hanging: hanging)
         let byID = Dictionary(requests.map { ($0.request.id, $0.hanging) }, uniquingKeysWith: { a, _ in a })
         plan.banners = placed.compactMap { banner in byID[banner.id].map { $0(banner) } }
+        return Self.hidden(plan, depths: depths, fronts: fronts)
+    }
+
+    /// `plan` with each banner that something painted in front of its tree or bough reaches marked with
+    /// its depth. A name that would be mostly lost behind the foliage in front of it (`fronts`;
+    /// `mostlyHidden`) comes forward instead, drawn in front of everything, in a single tree or an orchard.
+    static func hidden(_ plan: BannerPlan, depths: [String: Int], fronts: BannerPlan.Fronts) -> BannerPlan {
+        var plan = plan
+        guard let occlusion = plan.occlusion else { return plan }
+        func behind(_ pane: String, _ box: CGRect, name: CGRect) -> Int? {
+            guard let depth = depths[pane], occlusion.reaches(after: depth, into: box) else { return nil }
+            return BannerLayout.share(of: name, under: fronts.rects(before: pane, near: name)) < mostlyHidden ? depth : nil
+        }
+        for index in plan.banners.indices {
+            let hanging = plan.banners[index]
+            plan.banners[index].hiddenFrom = behind(hanging.pane, hanging.box, name: hanging.banner.footprint)
+        }
+        for index in plan.ribbons.indices {
+            let ribbon = plan.ribbons[index]
+            plan.ribbons[index].hiddenFrom = behind(ribbon.pane, ribbon.box, name: ribbon.ribbon.rect)
+        }
         return plan
     }
+
+    /// How much of a name may be under the crown in front of its bough before it's drawn in front
+    /// instead: hidden any more, it couldn't be read.
+    static let mostlyHidden: CGFloat = 0.5
 
     /// A bough too short to hang a ribbon from keeps its name on its trunk's pennant.
     private func label(_ trees: inout [Standing], without ribbons: [BannerPlan.Ribbon], of panes: [Pane]) {
@@ -178,6 +272,27 @@ extension Landscape {
         return rects
     }
 
+    /// What a bough's wood and foliage cover, on screen, as far as its leaves, sprays and twigs reach:
+    /// what it would hide of a banner behind it.
+    private func foliage(_ stems: [TreeLayout.Stem], frame: TreeFrame) -> [CGRect] {
+        let leaf = style.leafSize * frame.detail
+        var rects: [CGRect] = []
+        func square(_ point: CGPoint, _ half: CGFloat) -> CGRect {
+            CGRect(x: point.x - half, y: point.y - half, width: half * 2, height: half * 2)
+        }
+        for stem in stems {
+            // A bough's main has twigs along it (`TreeDrawing.twigs`).
+            let twiggy = stem.isTrunk && !stem.commits.isEmpty
+            for node in stem.curve {
+                rects.append(square(frame.point(node.point), max(node.width * frame.scale / 2 + 2, twiggy ? leaf * 2 : 0)))
+            }
+            let leafy = stem.isTrunk ? stem.nodes.suffix(30) : stem.nodes.dropFirst()
+            for node in leafy where !stem.commits.isEmpty || stem.isBud { rects.append(square(frame.point(node.point), leaf * 1.8)) }
+            if let tip = stem.tip, !stem.isTrunk || !stem.commits.isEmpty { rects.append(square(frame.point(tip.point), leaf * 2.4)) }
+        }
+        return rects
+    }
+
     /// Where banners may hang: under the menu bar, above the ground.
     private var bounds: CGRect { bounds(floor: Composition.groundY(size.height) - 8) }
 
@@ -195,14 +310,15 @@ extension Landscape {
     static let fartherStops: [Double] = [0.66, 0.76, 0.86, 0.95]
 
     /// Each repository's ribbon, hung from the underside of its bough's first stretch, where it's
-    /// still near the shared trunk.
-    private func ribbons(_ boughs: [(pane: Pane, bough: YggdrasilLayout.Bough)], frame: TreeFrame,
+    /// still near the shared trunk, and out from behind the crown in front of its bough (`fronts`, one
+    /// per bough) where it can.
+    private func ribbons(_ boughs: [(pane: Pane, bough: YggdrasilLayout.Bough)], fronts: [[CGRect]], frame: TreeFrame,
                          obstacles: [CGRect], bounds: CGRect) -> [BannerPlan.Ribbon] {
         let treeFit = fit(for: boughs.count)
         let fontSize = max(14, (style.ribbonSize * frame.detail * treeFit.ribbonScale(count: boughs.count)).rounded())
         var requests: [BannerLayout.RibbonRequest] = []
         var panes: [String: (pane: Pane, stretch: TreeLayout.Stretch)] = [:]
-        for (pane, bough) in boughs {
+        for ((pane, bough), front) in zip(boughs, fronts) {
             guard let stem = bough.layout.stems.first, stem.curve.count > 2 else { continue }
             let stops = treeFit.ribbonStops + Self.fartherStops.filter { $0 > (treeFit.ribbonStops.last ?? 0) }
             let anchors = stops.map { fraction -> CGPoint in
@@ -212,7 +328,8 @@ extension Landscape {
             }
             let id = "ribbon\u{1F}\(pane.id)"
             panes[id] = (pane, bough.layout.schedule.trunk)
-            requests.append(.init(id: id, anchors: anchors, size: RibbonShape.size(pane.name, fontSize: fontSize, style: style)))
+            requests.append(.init(id: id, anchors: anchors, size: RibbonShape.size(pane.name, fontSize: fontSize, style: style),
+                                  front: front))
         }
         return BannerLayout.hang(requests, obstacles: obstacles, bounds: bounds).compactMap { ribbon in
             panes[ribbon.id].map {
@@ -424,14 +541,16 @@ struct BannerLayer: View {
             ZStack(alignment: .topLeading) {
                 ForEach(plan.ribbons) { ribbon in
                     // Heavier: it swings less, and the wind doesn't lift it.
-                    RibbonView(ribbon: ribbon, style: style,
+                    RibbonView(ribbon: ribbon, style: style, occlusion: plan.occlusion,
                                angle: Self.sway(ribbon.id, side: 1, lift: 0, strength: strength * 0.35, seconds: seconds))
                         .opacity(shown[ribbon.id] ?? 1)
                 }
                 ForEach(plan.banners) { hanging in
-                    BannerView(hanging: hanging, style: style,
-                               angle: Self.sway(hanging.id, side: hanging.banner.side, lift: 1.8, strength: strength,
-                                                seconds: seconds))
+                    let banner = hanging.banner
+                    BannerView(hanging: hanging, style: style, occlusion: plan.occlusion,
+                               angle: banner.droop > 0
+                                   ? Self.lift(hanging.id, side: banner.side, droop: banner.droop, strength: strength, seconds: seconds)
+                                   : Self.sway(hanging.id, side: banner.side, lift: 1.8, strength: strength, seconds: seconds))
                         .opacity(shown[hanging.id] ?? 1)
                 }
             }
@@ -450,6 +569,29 @@ struct BannerLayer: View {
         // Positive turns clockwise: for a pennant streaming right, that drops its free end.
         return strength * side * (swing - lift)
     }
+
+    /// How far below level a pennant hanging from its bough is held up by the wind at its strongest.
+    static let lifted = 12.0
+
+    /// A hanging pennant's turn about its hook, in degrees: dangling `droop` below level while it's
+    /// still, lifted toward level (`lifted`) as a gust rises, flapping a little more than a streaming
+    /// one sways, and falling back to dangling as the gust passes.
+    static func lift(_ id: String, side: Double, droop: Double, strength: Double, seconds: TimeInterval) -> Double {
+        let flap = sway(id, side: 1, lift: 0, strength: strength, seconds: seconds) * 1.8
+        return side * (droop - (droop - lifted) * strength + flap)
+    }
+}
+
+extension View {
+    /// The view (covering `box` on the screen) less what's painted in front of it, when something is.
+    @ViewBuilder
+    func hidden(behind occlusion: Occlusion?, from depth: Int?, box: CGRect) -> some View {
+        if let occlusion, let depth {
+            mask(alignment: .topLeading) { OcclusionMask(occlusion: occlusion, depth: depth, box: box).equatable() }
+        } else {
+            self
+        }
+    }
 }
 
 /// A repository's ribbon: two cords from its anchor on the bough, and the ribbon hanging from them,
@@ -457,11 +599,12 @@ struct BannerLayer: View {
 private struct RibbonView: View {
     let ribbon: BannerPlan.Ribbon
     let style: WallpaperStyle
+    let occlusion: Occlusion?
     let angle: Double
 
     var body: some View {
         let hung = ribbon.ribbon
-        let box = hung.footprint.insetBy(dx: -10, dy: -10)
+        let box = ribbon.box
         let anchor = CGPoint(x: hung.anchor.x - box.minX, y: hung.anchor.y - box.minY)
         ZStack(alignment: .topLeading) {
             Cords(anchor: anchor, ends: [hung.cordEnds.0, hung.cordEnds.1].map { end in
@@ -476,6 +619,8 @@ private struct RibbonView: View {
         }
         .frame(width: box.width, height: box.height, alignment: .topLeading)
         .rotationEffect(.degrees(angle), anchor: UnitPoint(x: anchor.x / box.width, y: anchor.y / box.height))
+        // Fixed on the screen: the ribbon swings behind what's in front of it.
+        .hidden(behind: occlusion, from: ribbon.hiddenFrom, box: box)
         .offset(x: box.minX, y: box.minY)
     }
 }
@@ -606,12 +751,13 @@ struct RibbonShape: View, Equatable {
 private struct BannerView: View {
     let hanging: BannerPlan.Hanging
     let style: WallpaperStyle
+    let occlusion: Occlusion?
     let angle: Double
 
     var body: some View {
         let banner = hanging.banner
         // A box around the tip, the hook and the pennant, with room for its swing.
-        let box = banner.rect.union(CGRect(origin: banner.tip, size: .zero)).insetBy(dx: -14, dy: -14)
+        let box = hanging.box
         ZStack(alignment: .topLeading) {
             Thread(tip: CGPoint(x: banner.tip.x - box.minX, y: banner.tip.y - box.minY),
                    hook: CGPoint(x: banner.hook.x - box.minX, y: banner.hook.y - box.minY),
@@ -624,6 +770,7 @@ private struct BannerView: View {
                 .offset(x: banner.rect.minX - box.minX, y: banner.rect.minY - box.minY)
         }
         .frame(width: box.width, height: box.height, alignment: .topLeading)
+        .hidden(behind: occlusion, from: hanging.hiddenFrom, box: box)
         .offset(x: box.minX, y: box.minY)
     }
 }

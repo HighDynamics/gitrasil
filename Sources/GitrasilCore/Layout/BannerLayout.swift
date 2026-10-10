@@ -14,7 +14,8 @@ import CoreGraphics
 /// outward side first. A spot must keep the pennant (with a margin for its sway) and its thread off
 /// every pennant placed before it, inside the bounds; among those it takes the first that's clear of
 /// the crown (the obstacles), else the one that covers the least of it. A tip with no such spot gets
-/// no banner, rather than one piled on another.
+/// no banner, rather than one piled on another. Hung from its bough instead (`place`'s `hanging`), a
+/// pennant dangles from a short thread under its tip.
 public enum BannerLayout {
 
     public struct Request: Sendable, Equatable {
@@ -43,6 +44,33 @@ public enum BannerLayout {
         public let rect: CGRect
         /// The side it streams to: -1 left, 1 right.
         public let side: Double
+        /// How far below level it hangs while still, in degrees: 0 streaming from a thread, more for a
+        /// pennant dangling from its bough (`place`'s `hanging`). It turns about its hook.
+        public var droop: Double = 0
+
+        public init(id: String, tip: CGPoint, hook: CGPoint, rect: CGRect, side: Double, droop: Double = 0) {
+            self.id = id
+            self.tip = tip
+            self.hook = hook
+            self.rect = rect
+            self.side = side
+            self.droop = droop
+        }
+
+        /// What it covers while still: its rect, turned down by `droop` about its hook.
+        public var footprint: CGRect { BannerLayout.turned(rect, about: hook, degrees: side * droop) }
+
+        /// The same, closer: a streaming pennant's rect, or boxes around stretches of a dangling one, which
+        /// a single box around it would overstate by half again.
+        public var pieces: [CGRect] {
+            guard droop != 0 else { return [rect] }
+            let count = 5, length = rect.width / CGFloat(count)
+            return (0..<count).map { k in
+                let x = side > 0 ? rect.minX + CGFloat(k) * length : rect.maxX - CGFloat(k + 1) * length
+                return BannerLayout.turned(CGRect(x: x, y: rect.minY, width: length, height: rect.height), about: hook,
+                                           degrees: side * droop)
+            }
+        }
     }
 
     /// Room kept around each pennant for its sway and for breathing space.
@@ -51,30 +79,47 @@ public enum BannerLayout {
     /// Thread lengths tried, and angles below the horizontal (radians; positive hangs lower).
     static let reaches: [CGFloat] = [24, 36, 50, 66, 86, 110, 140, 175]
     static let angles: [Double] = [0.3, 0.6, 0.05, 0.9, -0.25, 1.2, -0.55, -0.85]
+    /// The same for a pennant hanging from its bough: a short thread, down from the tip.
+    static let hangingReaches: [CGFloat] = [6, 12, 19, 26, 34, 44, 56]
+    static let hangingAngles: [Double] = [1.35, 1.1, 1.55, 0.85, 0.6, 0.35]
+    /// How far below level a hanging pennant dangles while still, in degrees (seeded by its id).
+    public static let dangle: ClosedRange<Double> = 66...80
+
+    /// How far below level the pennant `id` dangles while still, in degrees.
+    public static func dangle(_ id: String) -> Double {
+        var rng = SeededRandom(id, -19)
+        return rng.next(in: dangle)
+    }
 
     /// - Parameters:
     ///   - obstacles: the crown (wood and leaves), as rects to keep pennants off.
     ///   - taken: anything already on screen that pennants must not cover (other text).
     ///   - bounds: where pennants may go.
+    ///   - hanging: each pennant hangs from its bough instead: on a short thread down from its tip, it
+    ///     dangles from its hook (`dangle`), and what it covers dangling is what's kept clear. It has
+    ///     to hang near its tip, so fewer find room than stream out.
     public static func place(_ requests: [Request], obstacles: [CGRect], taken: [CGRect] = [],
-                             bounds: CGRect) -> [Banner] {
+                             bounds: CGRect, hanging: Bool = false) -> [Banner] {
         let crown = Crown(obstacles)
         var placed: [CGRect] = taken
         var banners: [Banner] = []
         for request in requests {
             var best: (banner: Banner, cost: CGFloat)?
+            let droop = hanging ? dangle(request.id) : 0
             search: for side in [request.outward >= 0 ? 1.0 : -1.0, request.outward >= 0 ? -1.0 : 1.0] {
-                for reach in reaches {
-                    for angle in angles {
+                for reach in hanging ? hangingReaches : reaches {
+                    for angle in hanging ? hangingAngles : angles {
                         let hook = CGPoint(x: request.tip.x + CGFloat(side * cos(angle)) * reach,
                                            y: request.tip.y + CGFloat(sin(angle)) * reach)
-                        let rect = pennant(at: hook, side: side, size: request.size)
-                        let padded = rect.insetBy(dx: -margin, dy: -margin)
-                        guard bounds.contains(rect),
-                              !placed.contains(where: { $0.intersects(padded) || crosses(request.tip, hook, $0) })
-                        else { continue }
-                        let cover = crown.covered(rect)
-                        let banner = Banner(id: request.id, tip: request.tip, hook: hook, rect: rect, side: side)
+                        var banner = Banner(id: request.id, tip: request.tip, hook: hook,
+                                            rect: pennant(at: hook, side: side, size: request.size), side: side)
+                        banner.droop = droop
+                        let pieces = banner.pieces
+                        let padded = pieces.map { $0.insetBy(dx: -margin, dy: -margin) }
+                        guard bounds.contains(banner.footprint), !placed.contains(where: { other in
+                            padded.contains { other.intersects($0) } || crosses(request.tip, hook, other)
+                        }) else { continue }
+                        let cover = pieces.reduce(0) { $0 + crown.covered($1) }
                         if cover == 0 { best = (banner, 0); break search }
                         // A little extra cover is worth a shorter thread and the outward side.
                         let cost = cover + reach * 2 + (side == (request.outward >= 0 ? 1 : -1) ? 0 : 400)
@@ -84,7 +129,7 @@ public enum BannerLayout {
             }
             guard let chosen = best?.banner else { continue }
             banners.append(chosen)
-            placed.append(chosen.rect)
+            placed += chosen.pieces
         }
         return banners
     }
@@ -99,11 +144,14 @@ public enum BannerLayout {
         public let anchors: [CGPoint]
         /// The ribbon's size.
         public let size: CGSize
+        /// The crown painted in front of its bough, which would hide it (`frontWeight`).
+        public let front: [CGRect]
 
-        public init(id: String, anchors: [CGPoint], size: CGSize) {
+        public init(id: String, anchors: [CGPoint], size: CGSize, front: [CGRect] = []) {
             self.id = id
             self.anchors = anchors
             self.size = size
+            self.front = front
         }
     }
 
@@ -130,17 +178,21 @@ public enum BannerLayout {
     /// it centred; off centre it hangs beside an upright bough).
     static let drops: [CGFloat] = [14, 24, 36, 50, 66, 86]
     static let hangs: [CGFloat] = [0.5, 0.3, 0.7, 0.15, 0.85]
+    /// How much worse covering the crown in front of a ribbon's bough is than covering the crown
+    /// behind it: there a ribbon hangs behind the leaves, and its name is lost.
+    public static let frontWeight: CGFloat = 2
 
     /// Hangs each ribbon (in the order given) from one of its anchors: never on another ribbon, its
     /// cords never through one, inside the bounds; among those, the spot that covers the least of the
-    /// crown, weighing a preferred anchor, a short drop and hanging centred against a little cover.
-    /// A ribbon with no such spot is left out.
+    /// crown (more so of the crown in front of it), weighing a preferred anchor, a short drop and
+    /// hanging centred against a little cover. A ribbon with no such spot is left out.
     public static func hang(_ requests: [RibbonRequest], obstacles: [CGRect], taken: [CGRect] = [],
                             bounds: CGRect) -> [Ribbon] {
         let crown = Crown(obstacles)
         var placed: [CGRect] = taken
         var ribbons: [Ribbon] = []
         for request in requests {
+            let front = Crown(request.front)
             var best: (ribbon: Ribbon, cost: CGFloat)?
             for (rank, anchor) in request.anchors.enumerated() {
                 for drop in drops {
@@ -153,7 +205,8 @@ public enum BannerLayout {
                             other.intersects(padded) || crosses(anchor, ribbon.cordEnds.0, other)
                                 || crosses(anchor, ribbon.cordEnds.1, other)
                         }) else { continue }
-                        let cost = crown.covered(rect) + CGFloat(rank) * 40 + drop * 3 + CGFloat(offset) * 60
+                        let cost = crown.covered(rect) + front.covered(rect) * frontWeight + CGFloat(rank) * 40 + drop * 3
+                            + CGFloat(offset) * 60
                         if best == nil || cost < best!.cost { best = (ribbon, cost) }
                     }
                 }
@@ -166,6 +219,35 @@ public enum BannerLayout {
     }
 
     // MARK: Geometry
+
+    /// The share of `rect` under any of `rects`, sampled on a grid of points about `step` apart.
+    public static func share(of rect: CGRect, under rects: [CGRect], step: CGFloat = 6) -> CGFloat {
+        guard rect.width > 0, rect.height > 0 else { return 0 }
+        let near = rects.filter { $0.intersects(rect) }
+        guard !near.isEmpty else { return 0 }
+        let columns = max(Int((rect.width / step).rounded()), 1), rows = max(Int((rect.height / step).rounded()), 1)
+        var under = 0
+        for row in 0..<rows {
+            for column in 0..<columns {
+                let point = CGPoint(x: rect.minX + (CGFloat(column) + 0.5) * rect.width / CGFloat(columns),
+                                    y: rect.minY + (CGFloat(row) + 0.5) * rect.height / CGFloat(rows))
+                if near.contains(where: { $0.contains(point) }) { under += 1 }
+            }
+        }
+        return CGFloat(under) / CGFloat(columns * rows)
+    }
+
+    /// The box around `rect` turned `degrees` clockwise (on the screen, y down) about `pivot`.
+    public static func turned(_ rect: CGRect, about pivot: CGPoint, degrees: Double) -> CGRect {
+        guard degrees != 0 else { return rect }
+        let a = degrees * .pi / 180, c = CGFloat(cos(a)), s = CGFloat(sin(a))
+        let corners = [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
+                       CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY)].map { p in
+            CGPoint(x: pivot.x + (p.x - pivot.x) * c - (p.y - pivot.y) * s, y: pivot.y + (p.x - pivot.x) * s + (p.y - pivot.y) * c)
+        }
+        let xs = corners.map(\.x), ys = corners.map(\.y)
+        return CGRect(x: xs.min()!, y: ys.min()!, width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
+    }
 
     /// The pennant hanging from `hook` and streaming to `side`.
     public static func pennant(at hook: CGPoint, side: Double, size: CGSize) -> CGRect {

@@ -132,6 +132,16 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         repos.toolTip = "In a single tree, each repository’s name hangs on a ribbon from its bough "
             + "(an orchard always writes it under its tree)"
         menu.addItem(repos)
+        let inView = action("Draw All Banners in View", #selector(toggleAllBannersInView), nil)
+        inView.state = settings.drawsAllBannersInView ? .on : .off
+        inView.toolTip = "Every banner on top of the tree. Off, each hangs at its bough’s depth, "
+            + "so the boughs and leaves in front of it hide it"
+        menu.addItem(inView)
+        let hanging = action("Hang Banners from Boughs", #selector(toggleHangingBanners), nil)
+        hanging.state = settings.hangsBanners ? .on : .off
+        hanging.toolTip = "Each branch’s pennant dangles from its bough until a gust lifts it. "
+            + "Off, it streams out from its tip on a thread"
+        menu.addItem(hanging)
         let gusts = action("Sway in Gusts", #selector(toggleGusts), nil)
         gusts.state = settings.gusts && !gustsOverridden ? .on : .off
         gusts.toolTip = gustsOverridden
@@ -262,6 +272,14 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         settings.showsRepoNames.toggle()
     }
 
+    @objc private func toggleAllBannersInView() {
+        settings.drawsAllBannersInView.toggle()
+    }
+
+    @objc private func toggleHangingBanners() {
+        settings.hangsBanners.toggle()
+    }
+
     @objc private func toggleGusts() {
         settings.gusts.toggle()
     }
@@ -335,10 +353,13 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
     }
 
     /// Gusts sway banners, so with none hanging (or the breeze turned off from outside) there's nothing
-    /// to set; with nothing pinned there's nothing to grow.
+    /// to set, nor where the banners are drawn; only pennants hang from boughs; with nothing pinned
+    /// there's nothing to grow.
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
         case #selector(toggleGusts): settings.hasBanners && !gustsOverridden
+        case #selector(toggleAllBannersInView): settings.hasBanners
+        case #selector(toggleHangingBanners): settings.showsBranchNames
         case #selector(watchGrow), #selector(reshuffleBranches): !pins.shown.isEmpty
         // The orchard has no tree to hold them: the choice is kept, and waits.
         case #selector(chooseTreeCapacity(_:)), #selector(openTreeCapacity): settings.arrangement == .singleTree

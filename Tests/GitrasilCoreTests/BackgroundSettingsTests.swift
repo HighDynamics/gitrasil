@@ -224,4 +224,29 @@ final class BackgroundSettingsTests: XCTestCase {
         XCTAssertEqual(settings.forest, .rows)
         XCTAssertNil(storage.saved["forest"])
     }
+
+    func testBannersAreHiddenByWhatsInFrontAndStreamUntilChosenOtherwise() {
+        let storage = MemorySettings()
+        let settings = BackgroundSettings(storage: storage)
+        XCTAssertFalse(settings.drawsAllBannersInView, "by default a banner is drawn at its bough's depth")
+        XCTAssertFalse(settings.hangsBanners, "by default a pennant streams from its tip")
+        XCTAssertTrue(storage.saved.isEmpty, "nothing is written until chosen")
+
+        settings.drawsAllBannersInView = true
+        settings.hangsBanners = true
+        XCTAssertEqual(storage.saved["drawsAllBannersInView"] as? Bool, true)
+        XCTAssertEqual(storage.saved["hangsBanners"] as? Bool, true)
+        let again = BackgroundSettings(storage: storage)
+        XCTAssertTrue(again.drawsAllBannersInView, "kept between launches")
+        XCTAssertTrue(again.hangsBanners, "kept between launches")
+
+        again.hangsBanners = false
+        XCTAssertEqual(storage.saved["hangsBanners"] as? Bool, false)
+        XCTAssertTrue(BackgroundSettings(storage: storage).drawsAllBannersInView, "each is kept on its own")
+
+        storage.saved = ["drawsAllBannersInView": "yes", "hangsBanners": 3.5]
+        let unreadable = BackgroundSettings(storage: storage)
+        XCTAssertFalse(unreadable.drawsAllBannersInView, "unreadable: the default")
+        XCTAssertFalse(unreadable.hangsBanners, "unreadable: the default")
+    }
 }

@@ -56,8 +56,10 @@ extension TreeDrawing {
             var twig = Path()
             twig.move(to: base)
             twig.addQuadCurve(to: end, control: control)
-            context.stroke(twig, with: .color(style.ink.opacity(0.85)),
-                           style: StrokeStyle(lineWidth: max(style.lineWidth, 1), lineCap: .round))
+            if shows(twig.boundingRect) {
+                context.stroke(twig, with: .color(style.ink.opacity(0.85)),
+                               style: StrokeStyle(lineWidth: max(style.lineWidth, 1), lineCap: .round))
+            }
             func heading(_ v: CGPoint) -> Double { atan2(Double(v.x), Double(-v.y)) }
             let h = heading(direction), leafSeed = HandDrawn.seed(key, -40 - k)
             for (j, u) in [0.3, 0.52, 0.74].enumerated() {
@@ -88,7 +90,9 @@ extension TreeDrawing {
         var twig = Path()
         twig.move(to: base)
         twig.addQuadCurve(to: end, control: control)
-        context.stroke(twig, with: .color(style.ink.opacity(0.6 * alpha)), lineWidth: style.lineWidth * 0.8)
+        if shows(twig.boundingRect) {
+            context.stroke(twig, with: .color(style.ink.opacity(0.6 * alpha)), lineWidth: style.lineWidth * 0.8)
+        }
         let size = style.leafSize * frame.detail * 0.8
         let scale = min(1, length / (style.leafSize * frame.detail * 1.2))
         leaf(at: control, heading: heading + (bend > 0 ? -0.9 : 0.9), length: size * 0.8 * scale,
@@ -100,6 +104,12 @@ extension TreeDrawing {
         }
     }
 
+    /// Whether something covering `rect` is drawn where it matters (`only`). Skipping it never changes
+    /// anything else: every leaf and twig draws its own seeded randomness before this is asked.
+    func shows(_ rect: CGRect) -> Bool {
+        only.map { $0.insetBy(dx: -style.lineWidth * 2, dy: -style.lineWidth * 2).intersects(rect) } ?? true
+    }
+
     /// Seed `seed`'s `index`th neighbour: for the leaves of one node or cluster.
     static func mix(_ seed: UInt64, _ index: Int) -> UInt64 {
         seed &+ UInt64(bitPattern: Int64(index + 1)) &* 0x9E3779B97F4A7C15
@@ -109,7 +119,8 @@ extension TreeDrawing {
     /// touch lopsided (its tip, sides and swell nudged by its seed).
     func leaf(at base: CGPoint, heading: Double, length: CGFloat, color: Color, alpha: Double,
               seed: UInt64, in context: inout GraphicsContext) {
-        guard length > 0.5 else { return }
+        guard length > 0.5, shows(CGRect(x: base.x, y: base.y, width: 0, height: 0).insetBy(dx: -length * 1.2, dy: -length * 1.2))
+        else { return }
         var tip = CGPoint(x: length, y: 0)
         var upper = length * 0.36, lower = length * 0.36, swell = length * 0.45
         if style.hand > 0 {

@@ -70,9 +70,11 @@ enum Offscreen {
                         let paper = median(runs) { render(paperCanvas(background, style: style), screen: screen, dark: dark) }
                         let banners = median(runs) { render(bannerLayer(background, style: style, size: screen.size),
                                                             screen: screen, dark: dark) }
-                        print(String(format: "  %@ %@ %@ %@: trees %.1f, grow-in frame %.1f, paper %.1f, banners %.1f",
+                        let gust = GustLoad(bannerPlan(background, style: style, size: screen.size))
+                        print(String(format: "  %@ %@ %@ %@: trees %.1f, grow-in frame %.1f, paper %.1f, banners %.1f "
+                                         + "(a gust frame turns %d layers, %d masked, %.2f Mpt²)",
                                      medium.rawValue, arrangement.rawValue, screen.name, dark ? "dark" : "light",
-                                     trees, frame, paper, banners))
+                                     trees, frame, paper, banners, gust.layers, gust.masked, gust.area / 1e6))
                     }
                 }
             }
@@ -116,7 +118,8 @@ enum Offscreen {
         let plan = Landscape(style: style, now: background.now, size: screen.size, shuffle: background.settings.layoutSeed,
                              trunkGrowIn: nil, forest: background.settings.forest, policy: background.policy)
             .plan(panes(background), arrangement: background.settings.arrangement,
-                  branchNames: background.settings.showsBranchNames, repoNames: background.settings.showsRepoNames)
+                  branchNames: background.settings.showsBranchNames, repoNames: background.settings.showsRepoNames,
+                  hanging: background.settings.hangsBanners, occluded: !background.settings.drawsAllBannersInView)
         let count = Int(ceil(span.upperBound.timeIntervalSince(span.lowerBound) * fps)) + Int(fps / 2)
         for index in 0...count {
             let date = span.lowerBound.addingTimeInterval(Double(index) / fps)
@@ -172,12 +175,31 @@ enum Offscreen {
         }
     }
 
-    static func bannerLayer(_ background: BackgroundModel, style: WallpaperStyle, size: CGSize) -> some View {
-        let plan = Landscape(style: style, now: background.now, size: size, shuffle: background.settings.layoutSeed,
-                             trunkGrowIn: nil, forest: background.settings.forest, policy: background.policy)
+    static func bannerPlan(_ background: BackgroundModel, style: WallpaperStyle, size: CGSize) -> BannerPlan {
+        Landscape(style: style, now: background.now, size: size, shuffle: background.settings.layoutSeed,
+                  trunkGrowIn: nil, forest: background.settings.forest, policy: background.policy)
             .plan(panes(background), arrangement: background.settings.arrangement,
-                  branchNames: background.settings.showsBranchNames, repoNames: background.settings.showsRepoNames)
-        return BannerLayer(plan: plan, shown: [:], style: style, breeze: background.breeze)
+                  branchNames: background.settings.showsBranchNames, repoNames: background.settings.showsRepoNames,
+                  hanging: background.settings.hangsBanners, occluded: !background.settings.drawsAllBannersInView)
+    }
+
+    static func bannerLayer(_ background: BackgroundModel, style: WallpaperStyle, size: CGSize) -> some View {
+        BannerLayer(plan: bannerPlan(background, style: style, size: size), shown: [:], style: style, breeze: background.breeze)
+    }
+
+    /// What a frame of a gust asks of the compositor: every banner's layer turned (its drawing and any
+    /// mask are fixed), so the layers, how many carry a mask, and the area they cover (a masked one's
+    /// counted twice, for its mask).
+    struct GustLoad {
+        let layers: Int, masked: Int
+        let area: CGFloat
+
+        init(_ plan: BannerPlan) {
+            let boxes = plan.ribbons.map { ($0.box, $0.hiddenFrom != nil) } + plan.banners.map { ($0.box, $0.hiddenFrom != nil) }
+            layers = boxes.count
+            masked = boxes.filter(\.1).count
+            area = boxes.reduce(0) { $0 + $1.0.width * $1.0.height * ($1.1 ? 2 : 1) }
+        }
     }
 
     // MARK: Rendering
