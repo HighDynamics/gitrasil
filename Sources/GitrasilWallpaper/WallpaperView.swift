@@ -391,6 +391,10 @@ struct Landscape {
 
     func fit(for count: Int) -> YggdrasilLayout.Fit { treeFit ?? .fitting(count: count) }
 
+    /// About how many leafy twigs a single tree has in all, shared among its boughs: enough for a full
+    /// crown, few enough to draw quickly.
+    static let twigBudget = 640
+
     /// The single tree (each repository's name hangs on its ribbon over it: `BannerLayer`); `panes`
     /// are every pane's, for the problems written under it.
     func drawSingleTree(_ ready: [Pane], problems panes: [Pane], narrowed: Bool, in context: inout GraphicsContext) {
@@ -412,9 +416,11 @@ struct Landscape {
         }
         drawing.shadow(width: full.bounds.width, in: &context)
         // A tall tree's boughs are painted one by one over the trunk, each hiding what it passes in front
-        // of: the crown at the back, then the tiers from the top down.
+        // of: the crown at the back, then the tiers from the top down. Any single tree is leafy, its
+        // twigs shared out among its boughs.
         let shape = YggdrasilLayout.Shape(count: layout.boughs.count)
         var groups: [[Int]]?
+        let foliage = TreeDrawing.Foliage(twigs: min(max(Self.twigBudget / max(shape.count, 1), 10), 36))
         if shape.tiers > 0 {
             var ranges: [Range<Int>] = [], start = 1
             for bough in layout.boughs {
@@ -425,7 +431,7 @@ struct Landscape {
             groups = [[0]] + order.map { Array(ranges[$0]) }
         }
         drawing.draw(stems, seeds: seeds, parents: parents, rootedAt: 0, rootSeed: "yggdrasil", groups: groups,
-                     in: &context)
+                     foliage: foliage, in: &context)
         let problems = panes.compactMap { pane in pane.problem.map { "\(pane.name): \($0)" } }
         if !problems.isEmpty {
             problemText(problems.joined(separator: "   "),
@@ -501,9 +507,10 @@ struct TreeDrawing {
     ///
     /// Without `groups` the whole tree's wood is one piece. With them, each group of stems (a bough of
     /// the single tree, say) is painted whole in turn, wood, outlines and leaves, over an opaque
-    /// underlay, so a later group hides what it passes in front of.
+    /// underlay, so a later group hides what it passes in front of. `foliage` puts leafy twigs along
+    /// every trunk with commits (a bough's main).
     func draw(_ stems: [TreeLayout.Stem], seeds: [String], parents: [Int?], rootedAt ground: Int?, rootSeed: String,
-              groups: [[Int]]? = nil, in context: inout GraphicsContext) {
+              groups: [[Int]]? = nil, foliage: Foliage? = nil, in context: inout GraphicsContext) {
         for stem in stems { canopy(stem, in: &context) }
         let outlines = stems.map(outline)
         let woodSeeds = zip(stems, seeds).map { woodSeed($0, repo: $1) }
@@ -539,7 +546,12 @@ struct TreeDrawing {
                          in: &context)
                 rootLines(roots, around: ground.map { tapers[$0].shape }, seed: rootSeed, in: &context)
             }
-            for index in group { leaves(stems[index], repo: seeds[index], in: &context) }
+            for index in group {
+                if let foliage, stems[index].isTrunk, !stems[index].commits.isEmpty {
+                    twigs(stems[index], outlines[index], repo: seeds[index], foliage: foliage, in: &context)
+                }
+                leaves(stems[index], repo: seeds[index], in: &context)
+            }
             for index in group where stems[index].isCheckedOut { blossom(stems[index], repo: seeds[index], in: &context) }
         }
     }
@@ -562,7 +574,7 @@ struct TreeDrawing {
     }
 
     /// Freshness rescaled so the fade floor is 0 and a brand-new commit is 1.
-    private func vigour(_ commit: RepoTree.Commit?) -> Double {
+    func vigour(_ commit: RepoTree.Commit?) -> Double {
         style.fadeFloor < 1 ? (freshness(commit) - style.fadeFloor) / (1 - style.fadeFloor) : 1
     }
 

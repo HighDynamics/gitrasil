@@ -96,3 +96,25 @@ every limb inside its parent, boughs on the side they lean to, bases still while
 4. **Small trees.** Tiers from 5 (above); from 6 or later is one number (`Shape.fanUpTo`).
 5. **Tree capacity.** Still 12 (laptop) / 20 (1440 pt and up) before the Forest takes the rest. A policy change I
    left alone.
+
+## Round 3: leafy, slim, opaque
+
+Daniel ran the tall tree live with 32 repositories. He liked the trunk and the colours, but it looked bare, the
+wood was too thick, and the overlapping boughs showed through each other.
+
+- **Leaves.** Each repository's main or default branch (its bough's trunk) puts out leafy twigs in the neutral
+  leaf ink, so the real branches and worktrees stay the coloured part (`TreeDrawing.twigs`, in `Foliage.swift`).
+  A bough gets 5 + 3·√commits twigs, capped by a budget of about 640 for the whole tree (10–36 per bough). Each
+  twig has three leaves along it and a fan of four or five at its tip, sits mostly on the bough's upper side, and
+  shows once the bough has grown past it. Twigs are seeded by repository and place, so a new commit doesn't move
+  the others. At 32 boughs a frame takes about 80–105 ms to draw. It only redraws on changes and while the tree
+  grows in.
+- **Slim wood.** A tall tree's boughs (trunk and limbs) are drawn at 0.4 of their own trees' thickness
+  (`Planting.girth`, `YggdrasilLayout.boughGirth`). The shared trunk adds up their widths cubed instead of squared
+  (`tallExponent`), so 64 boughs make a trunk about as thick as four boughs' fan.
+- **Opaque wood.** A tall tree's boughs are painted one at a time, each over a paper-coloured underlay (`draw`'s
+  `groups`), with the crown at the back and the tiers from the top down. A bough in front hides the wood behind
+  it.
+- **Small trees.** The leaves suit them too, so every single tree gets them, from 2 boughs up. The wood of trees
+  with up to 4 boughs is unchanged: full thickness, one piece, and the pipe-model trunk. Turning the leaves off
+  for them takes one line (make `foliage` nil when `shape.tiers == 0`).
