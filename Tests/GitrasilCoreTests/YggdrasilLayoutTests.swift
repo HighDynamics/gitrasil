@@ -150,7 +150,7 @@ final class YggdrasilLayoutTests: XCTestCase {
     }
 
     func testEveryBoughStartsInsideTheSharedTrunkAtEveryCount() {
-        for count in [1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16, 18, 20, 24] {
+        for count in [1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16, 18, 20, 24, 28, 32, 48, 64] {
             // As pinned, and with the outermost boughs (then the middle one) huge beside the rest.
             let cases: [Set<Int>] = [[], [0, count - 1], [count / 2], [0]]
             for huge in cases {
@@ -171,7 +171,7 @@ final class YggdrasilLayoutTests: XCTestCase {
     }
 
     func testEveryLimbStartsInsideItsParent() {
-        for count in [1, 6, 12, 18, 20, 24] {
+        for count in [1, 6, 12, 18, 20, 24, 32, 48, 64] {
             let layout = YggdrasilLayout(repos: repos(count), fit: .fitting(count: count))
             for bough in layout.boughs {
                 for stem in bough.layout.stems where stem.level > 0 {
@@ -187,7 +187,7 @@ final class YggdrasilLayoutTests: XCTestCase {
     }
 
     func testBoughsKeepToTheirSideOfTheTrunkAndTheirBasesStayPutWhileTheyGrowIn() {
-        for count in [6, 12, 18, 20] {
+        for count in [6, 12, 18, 20, 32, 48] {
             let layout = YggdrasilLayout(repos: repos(count), fit: .fitting(count: count))
             let middle = layout.trunk.nodes.last!.point.x
             for (index, bough) in layout.boughs.enumerated() {
@@ -202,6 +202,67 @@ final class YggdrasilLayoutTests: XCTestCase {
             for (a, b) in zip(layout.boughs, growing.boughs) {
                 XCTAssertEqual(a.layout.stems[0].nodes[0].point, b.layout.stems[0].nodes[0].point, "\(a.name) of \(count)")
             }
+        }
+    }
+
+    // MARK: a wide crown
+
+    /// How much wider than tall the tree is, foot to crown.
+    private func spread(_ layout: YggdrasilLayout) -> Double { Double(layout.bounds.width) / Double(layout.bounds.maxY) }
+
+    func testTheCrownSpreadsWiderThanItClimbsAsBoughsAreAdded() {
+        let counts = [4, 8, 12, 20, 32, 48]
+        let ratios = counts.map { spread(YggdrasilLayout(repos: repos($0), fit: .fitting(count: $0))) }
+        for (a, b) in zip(ratios, ratios.dropFirst()) {
+            XCTAssertGreaterThan(b, a, "more boughs, a wider crown for its height: \(ratios)")
+        }
+        XCTAssertGreaterThan(ratios[counts.firstIndex(of: 20)!], 1.6, "a big tree is far wider than tall: \(ratios)")
+        for count in [12, 20, 32, 48] {
+            var upright = YggdrasilLayout.Fit.fitting(count: count)
+            upright.oak = 0
+            let oak = YggdrasilLayout(repos: repos(count), fit: .fitting(count: count))
+            let old = YggdrasilLayout(repos: repos(count), fit: upright)
+            XCTAssertGreaterThan(oak.bounds.width, old.bounds.width, "\(count): wider")
+            XCTAssertLessThan(oak.bounds.maxY, old.bounds.maxY, "\(count): lower")
+        }
+    }
+
+    func testABigTreesOuterBoughsLeaveLowAndReachFurthest() {
+        let count = 32
+        let layout = YggdrasilLayout(repos: repos(count), fit: .fitting(count: count))
+        let (outer, middle) = (layout.boughs[0].planting, layout.boughs[count / 2].planting)
+        XCTAssertLessThan(outer.foot.y, middle.foot.y, "the outer bough leaves lower down the trunk")
+        XCTAssertGreaterThan(abs(outer.heading), 80 * .pi / 180, "and nearly level")
+        XCTAssertGreaterThan(outer.reach, 1, "reaching further than its tree would")
+        XCTAssertLessThan(middle.reach, 1, "the middle ones stay low, for a dome")
+        XCTAssertLessThan(outer.straighten, middle.straighten, "the outer ones keep more of their lean")
+    }
+
+    func testAHandfulOfBoughsIsTheTreeAsItWas() {
+        for count in 1...5 {
+            let layout = YggdrasilLayout(repos: repos(count), fit: .fitting(count: count))
+            XCTAssertEqual(layout.trunk.nodes.last!.point.y, YggdrasilLayout.crotchHeight, accuracy: 1e-12)
+            for bough in layout.boughs {
+                XCTAssertEqual(bough.planting.reach, 1, "\(bough.name) of \(count)")
+                XCTAssertEqual(bough.planting.straighten, TreeLayout.boughStraighten, "\(bough.name) of \(count)")
+            }
+        }
+    }
+
+    func testTheSharedTrunkThickensWithTheTree() {
+        let widths = [4, 12, 32, 64].map { YggdrasilLayout(repos: repos($0), fit: .fitting(count: $0)).trunk.nodes[0].width }
+        XCTAssertEqual(widths, widths.sorted(), "\(widths)")
+        XCTAssertGreaterThan(widths.last!, widths.first! * 2)
+    }
+
+    func testAWideCrownIsTheSameEveryTime() {
+        for count in [20, 48] {
+            let a = YggdrasilLayout(repos: repos(count), shuffle: 7, fit: .fitting(count: count))
+            let b = YggdrasilLayout(repos: repos(count), shuffle: 7, fit: .fitting(count: count))
+            XCTAssertEqual(a.trunk.nodes, b.trunk.nodes)
+            XCTAssertEqual(a.bounds, b.bounds)
+            XCTAssertEqual(a.boughs.map(\.planting), b.boughs.map(\.planting))
+            for bough in 0..<count { XCTAssertEqual(points(a, bough: bough), points(b, bough: bough), "\(count), bough \(bough)") }
         }
     }
 }

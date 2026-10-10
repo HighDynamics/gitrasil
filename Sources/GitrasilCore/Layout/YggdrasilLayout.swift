@@ -59,10 +59,15 @@ public struct YggdrasilLayout: Sendable {
         public var ribbonStops: [Double]
         /// A ribbon's size by the number of boughs: full up to `ribbonCrowd`, then smaller (never under `ribbonFloor`).
         public var ribbonCrowd: Int, ribbonFloor: Double
+        /// How far the tree has grown into an oak, 0…1 (`oak(count:)`): 0 is the tree as it has always
+        /// been; toward 1 the outer boughs leave lower down the trunk, the fan opens to level, the outer boughs
+        /// keep their lean and reach further and the middle ones stay lower, so the crown spreads into a broad
+        /// dome.
+        public var oak: Double
 
         public init(base: Double = 16, perBough: Double = 12, cap: Double = 52, footSpread: Double = 0,
                     ribbonStops: [Double] = [0.14, 0.2, 0.26, 0.32, 0.4, 0.48, 0.56], ribbonCrowd: Int = .max,
-                    ribbonFloor: Double = 1) {
+                    ribbonFloor: Double = 1, oak: Double = 0) {
             self.base = base
             self.perBough = perBough
             self.cap = cap
@@ -70,7 +75,32 @@ public struct YggdrasilLayout: Sendable {
             self.ribbonStops = ribbonStops
             self.ribbonCrowd = ribbonCrowd
             self.ribbonFloor = ribbonFloor
+            self.oak = oak
         }
+
+        /// How far a tree of `count` boughs grows into an oak (`oak`): not at all up to `from` boughs, then
+        /// easing out to fully by `by`, so it changes fastest where the boughs start to crowd.
+        public static func oak(count: Int, from: Int = 5, by: Int = 28) -> Double {
+            let t = min(max(Double(count - from) / Double(max(by - from, 1)), 0), 1)
+            return t * (2 - t)
+        }
+
+        private var spreading: Double { min(max(oak, 0), 1) }
+
+        /// How far down the trunk below the crotch the outermost foot stands in a fully spread fit: further
+        /// as the tree spreads, so its outer limbs leave the trunk low.
+        var footDrop: Double { YggdrasilLayout.footDrop + 0.04 * spreading }
+
+        /// The fan's widest half-angle, in degrees: `cap`, opening toward level as the tree spreads.
+        var fanCap: Double { cap + (88 - cap) * spreading }
+
+        /// How much of its lean a bough `away` from the middle (0…1) gives up by its tip: the outer boughs of
+        /// a spread tree keep most of theirs.
+        func straighten(away: Double) -> Double { TreeLayout.boughStraighten * (1 - 0.3 * spreading * away) }
+
+        /// How long a bough `away` from the middle (0…1) grows, as a multiple of its tree's own size: as the
+        /// tree spreads, the outer boughs longer and the middle ones shorter, so the tips trace a dome.
+        func reach(away: Double) -> Double { 1 + spreading * (0.55 * away * away - 0.42 * (1 - away) * (1 - away)) }
 
         /// How large ribbons are drawn among `count` boughs, as a fraction of their full size.
         public func ribbonScale(count: Int) -> Double {
@@ -84,18 +114,22 @@ public struct YggdrasilLayout: Sendable {
                                      ribbonCrowd: 6, ribbonFloor: 0.62)
 
         /// The fit for `count` boughs: the standard fan up to `standardUpTo` of them, the wide one from
-        /// `wideFrom`, blended between. It depends on the count only, so the tree stays as it is until a
-        /// repository is added or dropped.
+        /// `wideFrom`, blended between, and from there spreading into an oak as boughs are added (`oak(count:)`).
+        /// It depends on the count only, so the tree stays as it is until a repository is added or dropped.
         public static func fitting(count: Int, standardUpTo: Int = 4, wideFrom: Int = 8) -> Fit {
             let t = min(max(Double(count - standardUpTo) / Double(max(wideFrom - standardUpTo, 1)), 0), 1)
             guard t > 0 else { return .standard }
-            guard t < 1 else { return .wide }
-            func blend(_ a: Double, _ b: Double) -> Double { a + (b - a) * t }
-            let (a, b) = (standard, wide)
-            return Fit(base: blend(a.base, b.base), perBough: blend(a.perBough, b.perBough), cap: blend(a.cap, b.cap),
-                       footSpread: blend(a.footSpread, b.footSpread),
-                       ribbonStops: count >= 6 ? b.ribbonStops : a.ribbonStops, ribbonCrowd: count >= 6 ? b.ribbonCrowd : a.ribbonCrowd,
-                       ribbonFloor: blend(a.ribbonFloor, b.ribbonFloor))
+            var fit = wide
+            if t < 1 {
+                func blend(_ a: Double, _ b: Double) -> Double { a + (b - a) * t }
+                let (a, b) = (standard, wide)
+                fit = Fit(base: blend(a.base, b.base), perBough: blend(a.perBough, b.perBough), cap: blend(a.cap, b.cap),
+                          footSpread: blend(a.footSpread, b.footSpread),
+                          ribbonStops: count >= 6 ? b.ribbonStops : a.ribbonStops, ribbonCrowd: count >= 6 ? b.ribbonCrowd : a.ribbonCrowd,
+                          ribbonFloor: blend(a.ribbonFloor, b.ribbonFloor))
+            }
+            fit.oak = oak(count: count)
+            return fit
         }
     }
 
@@ -166,16 +200,18 @@ public struct YggdrasilLayout: Sendable {
     /// of the wood rather than sitting on it, and don't all spring from one point. A crowded tree
     /// (`Fit.footSpread`) stands the feet down the head of the trunk instead, the outer boughs lowest
     /// and furthest to their side, each still inside the trunk's width at its height. `width` is the
-    /// bough's own base width (`TreeLayout.footWidth`): it must fit, not only its middle.
+    /// bough's own base width (`TreeLayout.footWidth`): it must fit, not only its middle. A big tree
+    /// (`Fit.oak`) also opens its fan toward level and plants each bough with its reach and straightening
+    /// by how far out it stands, so the crown spreads into a dome; the feet are placed as for any tree.
     static func planting(index: Int, of count: Int, name: String, width: Double, trunk: [TreeLayout.Node],
                          fit: Fit = .standard) -> TreeLayout.Planting {
         var rng = SeededRandom(name, -5)
         let crotch = trunk[trunk.count - 1]
         let spread = count > 1 ? Double(index) / Double(count - 1) * 2 - 1 : 0
-        let fan = min(fit.base + fit.perBough * Double(count), fit.cap) * .pi / 180
+        let fan = min(fit.base + fit.perBough * Double(count), fit.fanCap) * .pi / 180
         let heading = spread * fan + rng.next(in: -3...3) * .pi / 180
         let spreadOut = min(max(fit.footSpread, 0), 1)
-        let y = crotch.point.y - 0.03 - footDrop * spreadOut * abs(spread) + rng.next(in: -0.012...0.012)
+        let y = crotch.point.y - 0.03 - fit.footDrop * spreadOut * abs(spread) + rng.next(in: -0.012...0.012)
         let wood = wood(at: y, in: trunk)
         let reach = (1 - spreadOut) * sin(heading) * 0.012 + spreadOut * spread * footRoom * wood.width
         // Its whole base, `width` across, stays inside the trunk: a big repository stands nearer the middle.
@@ -183,6 +219,7 @@ public struct YggdrasilLayout: Sendable {
         let foot = CGPoint(x: wood.x + min(max(reach, -limit), limit), y: y)
         let outward: Double = abs(spread) < 0.2 ? 0 : (spread < 0 ? -1 : 1)
         let fork = TreeLayout.Fork(parent: nil, node: trunk.lastIndex { $0.point.y <= y } ?? 0, width: wood.width, heading: wood.heading)
-        return TreeLayout.Planting(foot: foot, heading: heading, outward: outward, fork: fork)
+        return TreeLayout.Planting(foot: foot, heading: heading, outward: outward, fork: fork,
+                                   straighten: fit.straighten(away: abs(spread)), reach: fit.reach(away: abs(spread)))
     }
 }

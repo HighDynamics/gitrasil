@@ -119,12 +119,20 @@ public struct TreeLayout: Sendable {
         public var outward: Double
         /// The wood the trunk grows out of (a shared trunk's top), for its foot's collar; nil on the ground.
         public var fork: Fork?
+        /// How much of its lean a leaning trunk (a bough) gives up by its tip: the default bends it most of
+        /// the way back up; less keeps it reaching out sideways (`bough`).
+        public var straighten: Double
+        /// How long the tree grows, trunk and limbs alike, as a multiple of its own size (widths unchanged).
+        public var reach: Double
 
-        public init(foot: CGPoint = .zero, heading: Double = 0, outward: Double = 0, fork: Fork? = nil) {
+        public init(foot: CGPoint = .zero, heading: Double = 0, outward: Double = 0, fork: Fork? = nil,
+                    straighten: Double = TreeLayout.boughStraighten, reach: Double = 1) {
             self.foot = foot
             self.heading = heading
             self.outward = outward
             self.fork = fork
+            self.straighten = straighten
+            self.reach = reach
         }
 
         public static let upright = Planting()
@@ -176,12 +184,12 @@ public struct TreeLayout: Sendable {
 
         // The trunk: a gentle seeded sway, its commits spaced on a log scale from the tip down.
         let count = tree.trunk.count
-        let height = Self.trunkHeight(commits: count)
+        let height = Self.trunkHeight(commits: count) * planting.reach
         var rng = SeededRandom(SeededRandom.key(seed, shuffle: shuffle), -1)
         let sway = (amplitude: rng.next(in: 0.015...0.04), waves: rng.next(in: 0.6...1.3),
                     phase: rng.next(in: 0...(2 * .pi)), lean: rng.next(in: -0.07...0.07))
         // A leaning trunk (a bough) is walked out along its length, straightening as it rises.
-        let arc = planting.isUpright ? [] : Self.bough(heading: planting.heading, length: height)
+        let arc = planting.isUpright ? [] : Self.bough(heading: planting.heading, length: height, straighten: planting.straighten)
         func trunkPoint(_ h: Double) -> CGPoint {
             let t = h / max(height, 0.001)
             let x = sway.amplitude * sin(t * .pi * 2 * sway.waves + sway.phase) * t + sway.lean * t * t
@@ -284,7 +292,7 @@ public struct TreeLayout: Sendable {
             if let growIn {
                 shown = full * schedule.limbs[index].progress(at: growIn)
             }
-            let (nodes, curve) = Self.grow(limb, from: base, lean: lean, scale: scale, shown: shown, shuffle: shuffle,
+            let (nodes, curve) = Self.grow(limb, from: base, lean: lean, scale: scale * planting.reach, shown: shown, shuffle: shuffle,
                                            weight: { k in Self.remainingWeight(limb, index: index, tree: tree, weights: weights, beyond: k) })
             let stem = Stem(name: limb.name, level: level, nodes: nodes, curve: curve, commits: limb.commits, grown: shown,
                             isBud: limb.isBud, isCheckedOut: limb.isCheckedOut, scale: scale, fork: fork)
@@ -611,14 +619,15 @@ public struct TreeLayout: Sendable {
     static let substeps = 4
 
     /// A bough's centreline, from its foot, a point every `boughStep` of its length: it leaves at
-    /// `heading` and straightens toward its tip, to about a third of its lean.
-    static func bough(heading: Double, length: Double) -> [CGPoint] {
+    /// `heading` and straightens toward its tip, giving up `straighten` of its lean (by default, down to
+    /// about a third of it).
+    static func bough(heading: Double, length: Double, straighten: Double = boughStraighten) -> [CGPoint] {
         var points = [CGPoint.zero]
         var point = CGPoint.zero
         let count = Int(ceil((length + 0.05) / boughStep))
         for i in 1...max(count, 1) {
             let t = min(Double(i) / max(length / boughStep, 1), 1)
-            let h = heading * (1 - 0.65 * t)
+            let h = heading * (1 - straighten * t)
             point = CGPoint(x: point.x + sin(h) * boughStep, y: point.y + cos(h) * boughStep)
             points.append(point)
         }
@@ -626,6 +635,8 @@ public struct TreeLayout: Sendable {
     }
 
     static let boughStep = 0.005
+    /// How much of its lean a bough gives up by its tip, unless its planting says otherwise.
+    public static let boughStraighten = 0.65
 
     /// The trunk's width at its foot, before it's grown: what a shared trunk has to carry for it.
     public static func footWidth(_ tree: RepoTree) -> Double {
