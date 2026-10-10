@@ -67,6 +67,15 @@ public struct TreeLayout: Sendable {
             }
         }
 
+        /// The stem with its wood `girth` times as thick, and its fork's on its parent (but not the wood
+        /// a trunk grows out of, which isn't its own).
+        func thinned(_ girth: Double) -> Stem {
+            func thin(_ node: Node) -> Node { Node(point: node.point, width: node.width * girth, heading: node.heading) }
+            let joint = level == 0 ? fork : fork.map { Fork(parent: $0.parent, node: $0.node, width: $0.width * girth, heading: $0.heading) }
+            return Stem(name: name, level: level, nodes: nodes.map(thin), curve: curve.map(thin), commits: commits, grown: grown,
+                        isBud: isBud, isCheckedOut: isCheckedOut, scale: scale, fork: joint)
+        }
+
         /// How much of its width the stem keeps, as drawn, at the point of its curve nearest `point`: 1
         /// well back from its end, narrowing to `TipTaper.point` at it. 1 for a stem that doesn't taper
         /// or has no length yet.
@@ -128,9 +137,12 @@ public struct TreeLayout: Sendable {
         /// it, at their own size, and bend up only gently, rather than climbing toward upright: for a bough
         /// reaching out nearly level.
         public var splay: Bool
+        /// How thick its wood is drawn, trunk and limbs alike, as a multiple of what the pipe model gives.
+        public var girth: Double
 
         public init(foot: CGPoint = .zero, heading: Double = 0, outward: Double = 0, fork: Fork? = nil,
-                    straighten: Double = TreeLayout.boughStraighten, reach: Double = 1, splay: Bool = false) {
+                    straighten: Double = TreeLayout.boughStraighten, reach: Double = 1, splay: Bool = false,
+                    girth: Double = 1) {
             self.foot = foot
             self.heading = heading
             self.outward = outward
@@ -138,6 +150,7 @@ public struct TreeLayout: Sendable {
             self.straighten = straighten
             self.reach = reach
             self.splay = splay
+            self.girth = girth
         }
 
         public static let upright = Planting()
@@ -314,6 +327,7 @@ public struct TreeLayout: Sendable {
             stems.append(stem)
         }
 
+        if planting.girth != 1 { stems = stems.map { $0.thinned(planting.girth) } }
         self.stems = stems
         self.schedule = schedule
         var bounds = CGRect.null

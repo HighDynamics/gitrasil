@@ -297,13 +297,26 @@ final class YggdrasilLayoutTests: XCTestCase {
     func testTheSharedTrunkTapersAsTheTiersLeaveIt() {
         let widths = tall(32).trunk.nodes.map { Double($0.width) }
         for (a, b) in zip(widths, widths.dropFirst()) { XCTAssertGreaterThanOrEqual(a, b - 1e-12) }
-        XCTAssertGreaterThan(widths.first!, widths.last! * 2)
+        XCTAssertGreaterThan(widths.first!, widths.last! * 1.5)
     }
 
     func testTheSharedTrunkThickensWithTheTree() {
-        let widths = [4, 12, 32, 64].map { tall($0).trunk.nodes[0].width }
+        let widths = [12, 32, 64].map { tall($0).trunk.nodes[0].width }
         XCTAssertEqual(widths, widths.sorted(), "\(widths)")
-        XCTAssertGreaterThan(widths.last!, widths.first! * 2)
+        XCTAssertGreaterThan(widths.last!, widths.first! * 1.4)
+    }
+
+    func testATallTreeStaysSlim() {
+        // Its boughs are thin, and its trunk only a little thicker than four boughs' fan, even with 64.
+        let small = tall(4), big = tall(64)
+        XCTAssertLessThanOrEqual(Double(big.trunk.nodes[0].width), Double(small.trunk.nodes[0].width) * 1.25)
+        XCTAssertTrue(small.boughs.allSatisfy { $0.planting.girth == 1 })
+        for bough in big.boughs {
+            XCTAssertEqual(bough.planting.girth, YggdrasilLayout.boughGirth)
+            let foot = TreeLayout.footWidth(repos(64)[Int(bough.name.dropFirst(4))!].tree)
+            XCTAssertEqual(Double(bough.layout.stems[0].nodes[0].width), foot * YggdrasilLayout.boughGirth, accuracy: 1e-9,
+                           bough.name)
+        }
     }
 
     func testATallTreeIsTheSameEveryTime() {

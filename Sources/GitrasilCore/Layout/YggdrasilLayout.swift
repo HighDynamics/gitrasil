@@ -150,12 +150,14 @@ public struct YggdrasilLayout: Sendable {
         let shape = Shape(count: repos.count)
         let height = shape.trunkHeight
         let names = repos.map { SeededRandom.key($0.name, shuffle: shuffle) }
-        let feet = repos.map { TreeLayout.footWidth($0.tree) }
+        let girth = shape.tiers > 0 ? Self.boughGirth : 1
+        let feet = repos.map { TreeLayout.footWidth($0.tree) * girth }
         let heights = repos.indices.map { Self.footHeight(index: $0, shape: shape, name: names[$0], fit: fit) }
         // The pipe model again (width² adds up): the trunk carries every bough leaving above it, and a
         // tier's wood a little past its foot, so it tapers from the ground to the crown. The crown's
-        // boughs it carries to the top.
+        // boughs it carries to the top. A tall trunk adds them up more slimly (`tallExponent`).
         let carriedTo = repos.indices.map { $0 < shape.tiers ? heights[$0] + Self.carriedPast : .infinity }
+        let exponent = shape.tiers > 0 ? Self.tallExponent : 2
         var rng = SeededRandom(SeededRandom.key("yggdrasil", shuffle: shuffle), -1)
         let lean = rng.next(in: -0.03...0.03), phase = rng.next(in: 0...(2 * .pi))
         func trunkPoint(_ h: Double) -> CGPoint {
@@ -166,7 +168,7 @@ public struct YggdrasilLayout: Sendable {
         let nodes = (0...count).map { k -> TreeLayout.Node in
             let h = height * Double(k) / Double(count)
             let p = trunkPoint(h), q = trunkPoint(h + 0.01)
-            let carried = sqrt(repos.indices.reduce(0) { $0 + (h <= carriedTo[$1] ? feet[$1] * feet[$1] : 0) })
+            let carried = pow(repos.indices.reduce(0) { $0 + (h <= carriedTo[$1] ? pow(feet[$1], exponent) : 0) }, 1 / exponent)
             let width = carried * (1 + 0.3 * (1 - Double(k) / Double(count))) + 0.004
             return TreeLayout.Node(point: p, width: width, heading: atan2(q.x - p.x, q.y - p.y))
         }
@@ -177,8 +179,9 @@ public struct YggdrasilLayout: Sendable {
                                 isBud: false, isCheckedOut: false, scale: 1, fork: nil)
 
         boughs = repos.enumerated().map { index, repo in
-            let planting = Self.planting(index: index, shape: shape, name: names[index], width: feet[index],
+            var planting = Self.planting(index: index, shape: shape, name: names[index], width: feet[index],
                                          at: heights[index], trunk: nodes, fit: fit)
+            planting.girth = girth
             return Bough(name: repo.name,
                          layout: TreeLayout(tree: repo.tree, seed: repo.name, grown: repo.grown, planting: planting,
                                             growIn: repo.growIn, shuffle: shuffle),
@@ -210,6 +213,14 @@ public struct YggdrasilLayout: Sendable {
     /// How far a tier reaches, as a multiple of its tree's own size: further than a crown bough, so the
     /// tiers lay the boughs out across the screen.
     static let tierReach = 1.55
+
+    /// How thick a tall tree's boughs are drawn, as a multiple of what their repositories' own trees
+    /// would be: slim, so the trunk they leave stays slim too.
+    static let boughGirth = 0.4
+
+    /// How a tall trunk adds up the boughs it carries: their widths to this power add up (the pipe
+    /// model's is 2), so many boughs make a trunk only a little thicker than its biggest.
+    static let tallExponent = 3.0
 
     /// How far a crown bough reaches over tiers, as a multiple of its tree's own size.
     static let crownReach = 0.8
