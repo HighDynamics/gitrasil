@@ -157,10 +157,10 @@ extension Landscape {
                                       allowance: nil))
             }
             obstacles += crowns.joined()
-            let ranks = Self.paintRanks(full), foliage = full.boughs.map { foliage($0.layout.stems, frame: frame) }
-            let inFront = ranks.map { rank in zip(ranks, foliage).filter { $0.0 > rank }.flatMap(\.1) }
+            let ranks = Self.paintRanks(full), leaves = full.boughs.map { foliage($0.layout.stems, frame: frame) }
+            let inFront = ranks.map { rank in zip(ranks, leaves).filter { $0.0 > rank }.flatMap(\.1) }
             let painted = ranks.indices.sorted { ranks[$0] < ranks[$1] }
-            fronts.layers = painted.map { foliage[$0] }
+            fronts.layers = painted.map { leaves[$0] }
             for (place, bough) in painted.enumerated() { fronts.places[ready[bough].id] = place }
             // The repositories' ribbons first, so they hang in the same places whether or not the
             // branches' pennants are shown; the pennants keep off them. Whether or not banners hang at
