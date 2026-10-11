@@ -512,6 +512,7 @@ final class TreeLayoutTests: XCTestCase {
             // A bough leaning left bends the mirror way.
             let left = TreeLayout.Bend(name, shuffle: 0, side: -1, length: 1.8), right = TreeLayout.Bend(name, shuffle: 0, side: 1, length: 1.8)
             XCTAssertEqual(left.curl, -right.curl, accuracy: 1e-12)
+            XCTAssertEqual(left.wave, -right.wave, accuracy: 1e-12)
             XCTAssertEqual(left.elbows.map(\.turn), right.elbows.map { -$0.turn })
         }
         XCTAssertGreaterThan(ups, names.count / 2, "most boughs curl up toward the light")
@@ -551,11 +552,11 @@ final class TreeLayoutTests: XCTestCase {
     func testNoBoughTurnsPastTheCapAnywhereAlongIt() {
         let most = TreeLayout.boughTurn * .pi / 180
         var worst = 0.0
-        for index in 0..<600 {
+        for index in 0..<150 {
             for length in stride(from: 0.4, through: 2.2, by: 0.2) {
                 for side in [1.0, -1.0] {
                     let bend = TreeLayout.Bend("repo\(index)", shuffle: index % 3, side: side, length: length)
-                    for t in stride(from: 0.0, through: 1, by: 0.002) { worst = max(worst, abs(bend.turn(at: t))) }
+                    for t in stride(from: 0.0, through: 1, by: 0.0002) { worst = max(worst, abs(bend.turn(at: t))) }
                 }
             }
         }
