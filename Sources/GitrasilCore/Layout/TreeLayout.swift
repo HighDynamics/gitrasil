@@ -42,8 +42,18 @@ public struct TreeLayout: Sendable {
         public let scale: Double
         /// Where it grows out of other wood (nil for a trunk standing on the ground).
         public let fork: Fork?
+        /// The limbs leaving it, each where it leaves and how wide its base is: its taper never narrows it
+        /// below one before that limb leaves (`tipTaper`), so one carrying on from its tip carries on from
+        /// wood as wide as itself.
+        public var carries: [Carry] = []
         /// Knots drawn on its wood at some of its elbows.
         public var knots: [Knot] = []
+
+        /// How wide the widest limb carrying on from its very tip is, once it's grown that far (nil for
+        /// none): the stem ends that wide, rather than in a point (`tipTaper`).
+        public var carriedOn: Double? {
+            carries.filter { $0.node == nodes.count - 1 && Double($0.node) <= grown }.map(\.width).max()
+        }
 
         public var isTrunk: Bool { level == 0 }
         public var tip: Node? { nodes.last }
@@ -52,7 +62,8 @@ public struct TreeLayout: Sendable {
         /// no commits of its own and ends in the boughs it carries.
         public var tapersToTip: Bool { !(isTrunk && commits.isEmpty && !isBud) }
 
-        /// How this stem narrows to its end, as drawn (its curve as grown so far).
+        /// How this stem narrows to its end, as drawn (its curve as grown so far), held as wide as each
+        /// limb leaving it until that limb leaves (`carries`, once it's grown that far).
         public var tipTaper: TipTaper {
             // Nothing grown yet, or a single point: no length to taper over.
             guard curve.count >= 2 else { return TipTaper(stemLength: 0) { _ in 0 } }
@@ -61,7 +72,15 @@ public struct TreeLayout: Sendable {
             for (a, b) in zip(backwards, backwards.dropFirst()) {
                 ends.append(ends[ends.count - 1] + hypot(b.point.x - a.point.x, b.point.y - a.point.y))
             }
-            return TipTaper(stemLength: ends.last ?? 0) { distance in
+            let holds = carries.compactMap { carry -> (distance: Double, width: Double)? in
+                guard nodes.indices.contains(carry.node), Double(carry.node) <= grown else { return nil }
+                let wood = nodes[carry.node].point
+                let nearest = curve.indices.min { a, b in
+                    hypot(curve[a].point.x - wood.x, curve[a].point.y - wood.y) < hypot(curve[b].point.x - wood.x, curve[b].point.y - wood.y)
+                }!
+                return (ends[curve.count - 1 - nearest], carry.width)
+            }
+            return TipTaper(stemLength: ends.last ?? 0, holds: holds) { distance in
                 guard let i = ends.firstIndex(where: { $0 >= distance }) else { return backwards.last?.width ?? 0 }
                 guard i > 0 else { return backwards[0].width }
                 let f = (distance - ends[i - 1]) / max(ends[i] - ends[i - 1], 1e-12)
@@ -75,7 +94,8 @@ public struct TreeLayout: Sendable {
             func thin(_ node: Node) -> Node { Node(point: node.point, width: node.width * girth, heading: node.heading) }
             let joint = level == 0 ? fork : fork.map { Fork(parent: $0.parent, node: $0.node, width: $0.width * girth, heading: $0.heading) }
             return Stem(name: name, level: level, nodes: nodes.map(thin), curve: curve.map(thin), commits: commits, grown: grown,
-                        isBud: isBud, isCheckedOut: isCheckedOut, scale: scale, fork: joint, knots: knots)
+                        isBud: isBud, isCheckedOut: isCheckedOut, scale: scale, fork: joint,
+                        carries: carries.map { Carry(node: $0.node, width: $0.width * girth) }, knots: knots)
         }
 
         /// How much of its width the stem keeps, as drawn, at the point of its curve nearest `point`: 1
@@ -261,6 +281,7 @@ public struct TreeLayout: Sendable {
             let index = curveHeights.indices.min { abs(curveHeights[$0] - h) < abs(curveHeights[$1] - h) } ?? 0
             return Knot(index: index, size: elbow.knot, side: elbow.turn > 0 ? -1 : 1)
         }
+        let carries = Self.carries(tree, weights: weights, count: count)
         let trunkName = tree.trunkName ?? ""
         var trunkGrown = grown[trunkName] ?? Double(count)
         // Growing in, each stem grows over its own stretch (`growInSchedule`): the trunk rises from its
@@ -279,7 +300,7 @@ public struct TreeLayout: Sendable {
         stems.append(Stem(name: tree.trunkName, level: 0, nodes: shownTrunk, curve: shownCurve, commits: tree.trunk,
                           grown: trunkGrown, isBud: false,
                           isCheckedOut: tree.isTrunkCheckedOut, scale: 1, fork: planting.fork,
-                          knots: trunkKnots.filter { $0.index < shownCurve.count }))
+                          carries: carries[-1] ?? [], knots: trunkKnots.filter { $0.index < shownCurve.count }))
 
         // The limbs, each grown from its parent's node.
         var limbStems: [Stem?] = []
@@ -330,7 +351,7 @@ public struct TreeLayout: Sendable {
                                            weight: { k in Self.remainingWeight(limb, index: index, tree: tree, weights: weights, beyond: k) })
             let stem = Stem(name: limb.name, level: level, nodes: nodes, curve: curve, commits: limb.commits, grown: shown,
                             isBud: limb.isBud, isCheckedOut: limb.isCheckedOut, scale: scale, fork: fork,
-                            knots: knots)
+                            carries: carries[index] ?? [], knots: knots)
             stemIndex[index] = stems.count
             limbStems.append(stem)
             stems.append(stem)
@@ -630,41 +651,6 @@ public struct TreeLayout: Sendable {
         return (nodes, curve, knots)
     }
 
-    /// How a stem narrows to a point at its end. The layout's widths (the pipe model) never get below
-    /// a floor at the last node, which drawn as is leaves a flat cut, so the drawing multiplies a
-    /// stem's width by `factor` over its last `length`: from 1 where the taper starts (easing in, so
-    /// there's no corner there) to a fine point at the very end.
-    public struct TipTaper: Sendable, Equatable {
-        /// How far from the end the taper starts, in tree units.
-        public let length: Double
-
-        /// The taper is this many times the stem's width where it starts, ...
-        static let reach = 12.0
-        /// ... but at most this much of the stem, so a short limb or a bud is a thorn: pointed over
-        /// nearly all of it, rather than a stub with a point on.
-        static let share = 0.85
-        /// The factor at the very end: a point as fine as a line.
-        static let point = 0.04
-
-        /// - Parameters:
-        ///   - stemLength: how long the stem is as drawn (as grown so far, while it's growing).
-        ///   - widthAt: the stem's width, before tapering, `distance` from its end. It's asked where
-        ///     the taper would start, so a stem that's still wide a little way back (a trunk's top)
-        ///     tapers over a longer stretch than one that's already fine.
-        public init(stemLength: Double, widthAt: (Double) -> Double) {
-            var length = Self.reach * widthAt(0)
-            for _ in 0..<2 { length = Self.reach * widthAt(min(length, stemLength)) }
-            self.length = max(min(length, Self.share * stemLength), 0)
-        }
-
-        /// The width's multiplier `distance` from the end (0 at the end; 1 from `length` on).
-        public func factor(distanceToTip distance: Double) -> Double {
-            guard length > 0, distance < length else { return 1 }
-            let s = max(distance / length, 0)
-            return Self.point + (1 - Self.point) * sin(s * .pi / 2)
-        }
-    }
-
     /// A branch collar: how wide a stem is drawn `distance` along it from its fork (tree units), where
     /// its own width there is `own` and its parent's is `parentWidth`, leaving at `angle` (radians) off
     /// the parent's heading. Inside the parent's wood it's as wide as the parent allows (up to
@@ -907,5 +893,84 @@ public struct TreeLayout: Sendable {
             return total
         }
         return width(weight: limbs + Double(tree.trunk.count) * trunkCommitWeight + 1)
+    }
+}
+
+// MARK: - Carrying on
+
+extension TreeLayout {
+    /// A limb leaving a stem (`Stem.carries`): the stem's node it leaves from, and its base's width.
+    public struct Carry: Sendable, Equatable {
+        public let node: Int
+        public let width: Double
+    }
+
+    /// What leaves each stem of `tree`, and how wide (`Stem.carries`): the trunk's under -1, a limb's under
+    /// its index. `count` is the trunk's commits.
+    static func carries(_ tree: RepoTree, weights: [Double], count: Int) -> [Int: [Carry]] {
+        var carries: [Int: [Carry]] = [:]
+        for (index, limb) in tree.limbs.enumerated() {
+            let width = Self.width(weight: Self.remainingWeight(limb, index: index, tree: tree, weights: weights, beyond: 0))
+            switch limb.parent {
+            case .trunk(let node): carries[-1, default: []].append(Carry(node: min(node, count), width: width))
+            case .limb(let parent, let node): carries[parent, default: []].append(Carry(node: node, width: width))
+            }
+        }
+        return carries
+    }
+
+    /// How a stem narrows to a point at its end. The layout's widths (the pipe model) never get below
+    /// a floor at the last node, which drawn as is leaves a flat cut, so the drawing multiplies a
+    /// stem's width by `factor` over its last `length`: from 1 where the taper starts (easing in, so
+    /// there's no corner there) to a fine point at the very end.
+    public struct TipTaper: Sendable, Equatable {
+        /// How far from the end the taper starts, in tree units.
+        public let length: Double
+        /// Where a limb leaves within it (its distance from the end), and the factor that keeps the stem as
+        /// wide as that limb's base there (`Stem.carries`).
+        public let holds: [Hold]
+
+        // swiftlint:disable:next nesting - a hold is the taper's alone, nowhere else to put it
+        public struct Hold: Sendable, Equatable {
+            public let distance: Double
+            public let factor: Double
+        }
+
+        /// The taper is this many times the stem's width where it starts, ...
+        static let reach = 12.0
+        /// ... but at most this much of the stem, so a short limb or a bud is a thorn: pointed over
+        /// nearly all of it, rather than a stub with a point on.
+        static let share = 0.85
+        /// The factor at the very end: a point as fine as a line.
+        static let point = 0.04
+
+        /// - Parameters:
+        ///   - stemLength: how long the stem is as drawn (as grown so far, while it's growing).
+        ///   - widthAt: the stem's width, before tapering, `distance` from its end. It's asked where
+        ///     the taper would start, so a stem that's still wide a little way back (a trunk's top)
+        ///     tapers over a longer stretch than one that's already fine.
+        ///   - holds: where limbs leave it, as distances from its end, and their bases' widths.
+        public init(stemLength: Double, holds: [(distance: Double, width: Double)] = [], widthAt: (Double) -> Double) {
+            var length = Self.reach * widthAt(0)
+            for _ in 0..<2 { length = Self.reach * widthAt(min(length, stemLength)) }
+            self.length = max(min(length, Self.share * stemLength), 0)
+            self.holds = holds.map { Hold(distance: $0.distance, factor: min($0.width / max(widthAt($0.distance), 1e-12), 1)) }
+        }
+
+        /// The width's multiplier `distance` from the end (0 at the end; 1 from `length` on). Where a limb
+        /// leaves, it's no narrower than that limb's base, and past it narrows from there to the end in
+        /// the same way: one leaving at the very end leaves the stem ending as wide as it.
+        public func factor(distanceToTip distance: Double) -> Double {
+            holds.reduce(tapered(distance)) { factor, hold in
+                guard distance < hold.distance else { return max(factor, hold.factor) }
+                return max(factor, hold.factor * (Self.point + (1 - Self.point) * sin(distance / hold.distance * .pi / 2)))
+            }
+        }
+
+        private func tapered(_ distance: Double) -> Double {
+            guard length > 0, distance < length else { return 1 }
+            let s = max(distance / length, 0)
+            return Self.point + (1 - Self.point) * sin(s * .pi / 2)
+        }
     }
 }

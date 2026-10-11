@@ -49,7 +49,12 @@ final class TreeDrawingTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(samples.count, 2, stem.name ?? "?")
             // 0.9 pt is the drawing's floor. A collar flared over the end (the taper applied before the
             // collar, so the collar widens the tip again) or the width never tapering (the layout's
-            // own tip is 4–10 pt at this scale) both show up here.
+            // own tip is 4–10 pt at this scale) both show up here. One a limb carries on from ends as wide
+            // as that limb instead.
+            if let carried = stem.carriedOn {
+                XCTAssertEqual(samples.last?.width ?? 0, max(carried * 800, 0.9), accuracy: 1e-6, "\(stem.name ?? "?") carries on")
+                continue
+            }
             XCTAssertEqual(samples.last?.width ?? 0, 0.9, accuracy: 1e-9, "\(stem.name ?? "?") ends in a point")
         }
     }
