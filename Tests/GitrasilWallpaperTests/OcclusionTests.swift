@@ -119,6 +119,56 @@ final class OcclusionTests: XCTestCase {
         XCTAssertEqual(Landscape.paintRanks(singleTree(3)), [0, 1, 2])
     }
 
+    /// `count` repositories, each a small tree, and a laptop's screen to stand them on.
+    private func scene(_ count: Int) -> (Landscape, [Pane]) {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let panes = (0..<count).map { index in
+            let name = String(format: "p%02d", index)
+            let trunk = commits(name, 20 + index % 7).map {
+                RepoTree.Commit(sha: $0.sha, date: now.addingTimeInterval(-$0.date.timeIntervalSince1970))
+            }
+            let limbs = [RepoTree.Limb(name: "fix", commits: commits("\(name)f", 4), parent: .trunk(node: 10), isCheckedOut: false)]
+            return Pane(id: "/repos/\(name)", name: name, seed: name,
+                        tree: RepoTree(trunkName: "main", trunk: trunk, limbs: limbs, isTrunkCheckedOut: false))
+        }
+        let landscape = Landscape(style: .make(.chalk, dark: false), now: now, size: CGSize(width: 1440, height: 900), shuffle: 0,
+                                  trunkGrowIn: nil, forest: .auto, policy: ForestPolicy().choosing(treeCapacity: nil))
+        return (landscape, panes)
+    }
+
+    func testThePlanKeepsTheSingleTreesBoughsInTheOrderTheyArePainted() {
+        let (landscape, panes) = scene(12)
+        let plan = landscape.plan(panes, arrangement: .singleTree, branchNames: true, repoNames: true, occluded: true)
+        let ready = landscape.scene(panes, arrangement: .singleTree).tree
+        let ranks = Landscape.paintRanks(landscape.singleTree(ready).full)
+        XCTAssertEqual(Set(plan.places.values), Set(ready.indices), "each bough has a place of its own")
+        for (a, first) in ready.enumerated() {
+            for (b, second) in ready.enumerated() where ranks[a] < ranks[b] {
+                XCTAssertLessThan(plan.places[first.id]!, plan.places[second.id]!, "\(first.name) is painted before \(second.name)")
+            }
+        }
+    }
+
+    func testThePlanKeepsTheOrchardsTreesInTheOrderTheyArePainted() {
+        let (landscape, panes) = scene(30)
+        let plan = landscape.plan(panes, arrangement: .orchard, branchNames: true, repoNames: false, occluded: true)
+        // As `drawPlanted` paints them: the forest's rows from the back, then the plots in front.
+        let painted = landscape.orchard(panes).sorted { ($0.forest?.line ?? 0) > ($1.forest?.line ?? 0) }
+        XCTAssertGreaterThan(Set(painted.compactMap { $0.forest?.line }).count, 1, "rows behind rows, so some trees are in front of others")
+        XCTAssertEqual(plan.places.count, painted.count)
+        for (place, planted) in painted.enumerated() {
+            XCTAssertEqual(plan.places[panes[planted.index].id], place, panes[planted.index].name)
+        }
+        // So a tree in a row further forward is in front.
+        for first in painted {
+            for second in painted where (first.forest?.line ?? 0) > (second.forest?.line ?? 0) {
+                XCTAssertLessThan(plan.places[panes[first.index].id]!, plan.places[panes[second.index].id]!)
+            }
+        }
+        XCTAssertTrue(landscape.plan(panes, arrangement: .orchard, branchNames: true, repoNames: false).places.isEmpty,
+                      "nothing is placed when every banner is drawn in view")
+    }
+
     // MARK: Gusts
 
     private func hanging(side: Double, droop: Double = 72) -> BannerLayout.Banner {
