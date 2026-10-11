@@ -214,9 +214,10 @@ public struct TreeLayout: Sendable {
         let sway = (amplitude: rng.next(in: 0.015...0.04), waves: rng.next(in: 0.6...1.3),
                     phase: rng.next(in: 0...(2 * .pi)), lean: rng.next(in: -0.07...0.07))
         // A leaning trunk (a bough) is walked out along its length, straightening as it rises and bending
-        // a little its own way.
+        // its own way, at an elbow or two if it's long.
+        let bend = planting.isUpright ? Bend.none : Bend(seed, shuffle: shuffle, side: planting.heading < 0 ? -1 : 1, length: height)
         let arc = planting.isUpright ? [] : Self.bough(heading: planting.heading, length: height, straighten: planting.straighten,
-                                                       bend: Bend(seed, shuffle: shuffle, side: planting.heading < 0 ? -1 : 1))
+                                                       bend: bend)
         func trunkPoint(_ h: Double) -> CGPoint {
             let t = h / max(height, 0.001)
             let x = sway.amplitude * sin(t * .pi * 2 * sway.waves + sway.phase) * t + sway.lean * t * t
@@ -242,20 +243,7 @@ public struct TreeLayout: Sendable {
             let p = trunkPoint(h), q = trunkPoint(h + 0.01)
             return Node(point: p, width: Self.width(weight: above[node] + 1), heading: atan2(q.x - p.x, q.y - p.y))
         }
-        // The trunk's curve: its nodes, with points between any two far apart (the bare foot, say).
-        var trunkCurve: [Node] = [], curveHeights: [Double] = []
-        for (index, (a, b)) in zip(trunkNodes, trunkNodes.dropFirst()).enumerated() {
-            let from = trunkHeights[index], to = trunkHeights[index + 1]
-            let pieces = max(1, Int(ceil((to - from) / 0.03)))
-            for piece in 0..<pieces {
-                let t = Double(piece) / Double(pieces)
-                let p = trunkPoint(from + (to - from) * t)
-                trunkCurve.append(Node(point: p, width: a.width + (b.width - a.width) * t, heading: a.heading))
-                curveHeights.append(from + (to - from) * t)
-            }
-        }
-        trunkCurve += trunkNodes.suffix(1)
-        curveHeights += trunkHeights.suffix(1)
+        let (trunkCurve, curveHeights) = Self.trunkCurve(trunkNodes, heights: trunkHeights, height: height, bend: bend, at: trunkPoint)
         let trunkName = tree.trunkName ?? ""
         var trunkGrown = grown[trunkName] ?? Double(count)
         // Growing in, each stem grows over its own stretch (`growInSchedule`): the trunk rises from its
@@ -537,6 +525,31 @@ public struct TreeLayout: Sendable {
         return sides
     }
 
+    /// The trunk's curve, and each point's height up it: its `nodes` (at `heights`), with points between
+    /// any two far apart (the bare foot, say), and closer through an elbow of its `bend`, so it turns there
+    /// rather than kinks, its wood thickening at the joint. `point` places a height up the trunk.
+    private static func trunkCurve(_ nodes: [Node], heights: [Double], height: Double, bend: Bend,
+                                   at point: (Double) -> CGPoint) -> (curve: [Node], heights: [Double]) {
+        // Where the elbows turn, as heights up the trunk.
+        let joints = bend.elbows.map { (from: ($0.at - $0.span * 0.75) * height, to: ($0.at + $0.span * 0.75) * height) }
+        var curve: [Node] = [], curveHeights: [Double] = []
+        for (index, (a, b)) in zip(nodes, nodes.dropFirst()).enumerated() {
+            let from = heights[index], to = heights[index + 1]
+            let pieces = max(1, Int(ceil((to - from) / 0.03)))
+            var hs = (0..<pieces).map { from + (to - from) * Double($0) / Double(pieces) }
+            for joint in joints where joint.from < to && joint.to > from {
+                hs += stride(from: max(joint.from, from), to: min(joint.to, to), by: elbowStep).filter { $0 > from }
+            }
+            for h in Set(hs).sorted() {
+                let t = (h - from) / max(to - from, 1e-12)
+                curve.append(Node(point: point(h), width: (a.width + (b.width - a.width) * t) * bend.knuckle(at: h / max(height, 0.001)),
+                                  heading: a.heading))
+                curveHeights.append(h)
+            }
+        }
+        return (curve + nodes.suffix(1), curveHeights + heights.suffix(1))
+    }
+
     /// What a limb still carries beyond node `k`: its later commits and the limbs leaving at or after it.
     static func remainingWeight(_ limb: RepoTree.Limb, index: Int, tree: RepoTree, weights: [Double], beyond k: Int) -> Double {
         var weight = Double(max(limb.commits.count - k, 0))
@@ -548,8 +561,10 @@ public struct TreeLayout: Sendable {
 
     /// Walk a limb out from its base, a step per commit: each step a little shorter than the last,
     /// turning by a seeded amount, curling its own seeded way (`limbCurl`) and bending toward straight
-    /// up, spread over a few sub-steps so a long step curves too. `shown` commits are grown, the last
-    /// one part-way. Returns the commit nodes and the finer curve through them.
+    /// up, spread over a few sub-steps so a long step curves too. Now and then, past its first few
+    /// steps, a step turns sharply at an elbow (`limbElbow`), thickening a little at the joint, so a long
+    /// limb has more of them. `shown` commits are grown, the last one part-way. Returns the commit nodes
+    /// and the finer curve through them.
     static func grow(_ limb: RepoTree.Limb, from base: Node, lean: Double, scale: Double, shown: Double,
                      shuffle: Int = 0, tropism: Double = tropism, weight: (Int) -> Double) -> (nodes: [Node], curve: [Node]) {
         let steps = Int(ceil(shown))
@@ -562,21 +577,28 @@ public struct TreeLayout: Sendable {
         let bendPerSubstep = 1 - pow(1 - tropism, 1 / Double(substeps))
         // The same every step, so a new commit curls on as the others did and moves none of them.
         let curl = curl(of: limb.name, shuffle: shuffle)
+        // Each step's elbow hangs only on the steps before it, so a new commit moves none of them either.
+        var lastElbow = 0.0
         for k in 1...steps {
             var rng = SeededRandom(SeededRandom.key(limb.name, shuffle: shuffle), k)
             let turn = rng.next(in: -11...11) * .pi / 180
+            let elbow = elbow(of: limb.name, shuffle: shuffle, step: k, after: lastElbow)
+            if elbow != 0 { lastElbow = elbow }
+            let knuckle = Self.knuckle(elbow)
             let fraction = min(1, shown - Double(k - 1))
             let from = curve[curve.count - 1].width, to = width(weight: weight(k))
             for j in 1...substeps {
                 let start = Double(j - 1) / Double(substeps)
                 guard fraction > start else { break }
                 let part = min(1 / Double(substeps), fraction - start)
-                heading += turn / Double(substeps) + curl * part
+                // An elbow turns over the step's first half, the joint at its middle.
+                heading += turn / Double(substeps) + curl * part + (j <= 2 ? elbow * part * 2 : 0)
                 heading -= heading * bendPerSubstep
                 heading = min(max(heading, -1.75), 1.75)
                 point = CGPoint(x: point.x + sin(heading) * length * part, y: point.y + cos(heading) * length * part)
                 let t = start + part
-                curve.append(Node(point: point, width: from + (to - from) * t, heading: heading))
+                let thick = j == 1 ? knuckle : j == 2 ? 1 + (knuckle - 1) * 0.4 : 1
+                curve.append(Node(point: point, width: (from + (to - from) * t) * thick, heading: heading))
             }
             nodes.append(curve[curve.count - 1])
             length = (k == 1 ? step * scale : length * stepDecay)
@@ -649,8 +671,34 @@ public struct TreeLayout: Sendable {
     /// Sub-steps per commit step in a limb's curve.
     static let substeps = 4
     /// How far a limb curls its own way each step, in degrees (seeded by its name); tropism pulls it back
-    /// toward upright, so a long limb settles into a gentle arc rather than curling round.
-    static let limbCurl: ClosedRange<Double> = 1.2...3
+    /// toward upright, so a long limb settles into an arc rather than curling round.
+    static let limbCurl: ClosedRange<Double> = 2...4
+    /// A limb's elbows: from its `limbElbowFrom`th step on, each step has this chance of one, turning it
+    /// this many degrees, back the other way from its last elbow more often than not. Tropism eases it
+    /// back toward upright after, as a real limb grows on toward the light.
+    static let limbElbowChance = 0.14
+    static let limbElbowFrom = 3
+    static let limbElbow: ClosedRange<Double> = 16...30
+    /// How much wider the wood is at an elbow's joint, at most (for the sharpest), and at least.
+    static let knuckleWidth: ClosedRange<Double> = 0.1...0.22
+
+    /// The elbow limb `name` turns at its step `step`, in radians, or 0 where it has none; `after` is the
+    /// last elbow before it (0 for none).
+    static func elbow(of name: String, shuffle: Int, step: Int, after last: Double) -> Double {
+        guard step >= limbElbowFrom else { return 0 }
+        var rng = SeededRandom(SeededRandom.key(name, shuffle: shuffle), -100 - step)
+        guard rng.next() < limbElbowChance else { return 0 }
+        let back = rng.next() < 0.7
+        let way: Double = last == 0 ? (rng.next() < 0.5 ? -1 : 1) : (back ? -1 : 1) * (last < 0 ? -1 : 1)
+        return way * rng.next(in: limbElbow) * .pi / 180
+    }
+
+    /// How much wider the wood is at the joint of an elbow turning `turn` radians.
+    static func knuckle(_ turn: Double) -> Double {
+        guard turn != 0 else { return 1 }
+        let sharpness = min(abs(turn) / (boughElbow.upperBound * .pi / 180), 1)
+        return 1 + knuckleWidth.lowerBound + (knuckleWidth.upperBound - knuckleWidth.lowerBound) * sharpness
+    }
 
     /// How far the limb `name` curls each step, in radians, either way (`limbCurl`).
     static func curl(of name: String, shuffle: Int) -> Double {
@@ -658,49 +706,144 @@ public struct TreeLayout: Sendable {
         return (rng.next() < 0.5 ? -1 : 1) * rng.next(in: limbCurl) * .pi / 180
     }
 
-    /// A bough's own gentle bend, on top of its straightening (`bough`): its heading at `t` along it (0 at
-    /// its foot, 1 at its tip) turns by `curl·t² + wave·sin(πt)·t`, a curl gathering toward the tip and a
-    /// bow along its middle. Both are nothing, and level, at the foot, so the bough still leaves where and
-    /// how its planting says.
+    /// A joint where a bough turns sharply and carries on its new way (`Bend`): `turn` radians (as a
+    /// bend's `curl`), turned over `span` of the bough's length centred `at` along it (both as `t`).
+    public struct Elbow: Sendable, Equatable {
+        public var at: Double
+        public var span: Double
+        public var turn: Double
+
+        public init(at: Double, span: Double, turn: Double) {
+            self.at = at
+            self.span = span
+            self.turn = turn
+        }
+
+        /// How much of its turn it has made by `t`: none before it, all after, smoothly between.
+        func made(at t: Double) -> Double {
+            let u = min(max((t - at) / span + 0.5, 0), 1)
+            return u * u * (3 - 2 * u)
+        }
+    }
+
+    /// A bough's own bend, on top of its straightening (`bough`): its heading at `t` along it (0 at its
+    /// foot, 1 at its tip) turns by `curl·t² + wave·sin(πt)·t`, a curl gathering toward the tip and a bow
+    /// along its middle, and at each of its elbows by that elbow's turn. Each is nothing, and level, at
+    /// the foot, so the bough still leaves where and how its planting says.
     public struct Bend: Sendable, Equatable {
         /// Radians, positive turning clockwise (right, on a bough leaning right: down).
         public var curl: Double
         public var wave: Double
+        public var elbows: [Elbow] = []
 
         public static let none = Bend(curl: 0, wave: 0)
 
-        public init(curl: Double, wave: Double) {
+        public init(curl: Double, wave: Double, elbows: [Elbow] = []) {
             self.curl = curl
             self.wave = wave
+            self.elbows = elbows
         }
 
         /// Seeded by the repository's name (`seed`) and the layout seed, for a bough leaning to `side`
-        /// (-1 left, 1 right): the curl turns it up toward the light more often than down.
-        public init(_ seed: String, shuffle: Int, side: Double) {
+        /// (-1 left, 1 right) and `length` long: the curl turns it up toward the light more often than
+        /// down, and a bough leaning left bends as the mirror of one leaning right. Each elbow has its own
+        /// place, a seeded distance from the foot (`elbowFirst`, then about every `elbowEvery`), and is
+        /// there once the bough is long enough to hold it (`elbowReach`), at most `mostElbows`: a short
+        /// bough stays simple, and one growing longer gains an elbow where there's room and leaves the
+        /// others where they were. After the first, each turns back the other way more often than not
+        /// (back up after a droop, say), and none takes the bough past `boughTurn` (`fitted`).
+        public init(_ seed: String, shuffle: Int, side: Double, length: Double) {
             var rng = SeededRandom(SeededRandom.key(seed, shuffle: shuffle), -3)
             let up: Double = rng.next() < 0.68 ? -side : side
             curl = up * rng.next(in: TreeLayout.boughCurl) * .pi / 180
-            wave = (rng.next() < 0.5 ? -1 : 1) * rng.next(in: TreeLayout.boughWave) * .pi / 180
+            wave = side * (rng.next() < 0.5 ? -1 : 1) * rng.next(in: TreeLayout.boughWave) * .pi / 180
+            let most = TreeLayout.boughTurn * .pi / 180
+            var way = side
+            for k in 0..<TreeLayout.mostElbows {
+                // Its own draws, all of them every time, so nothing about it hangs on how many there are.
+                var joint = SeededRandom(SeededRandom.key(seed, shuffle: shuffle), -23 - k)
+                let distance = TreeLayout.elbowFirst + TreeLayout.elbowEvery * (Double(k) + joint.next(in: k == 0 ? 0...0.3 : -0.3...0.3))
+                let down = joint.next() < 0.45, back = joint.next() < 0.7
+                let size = joint.next(in: TreeLayout.boughElbow) * .pi / 180
+                guard distance <= TreeLayout.elbowReach * length else { break }
+                way = k == 0 ? (down ? side : -side) : (back ? -way : way)
+                let elbow = Elbow(at: distance / length, span: TreeLayout.elbowSpan / length, turn: way * size)
+                guard let fitted = fitted(elbow, within: most) else { continue }
+                way = fitted.turn < 0 ? -1 : 1
+                elbows.append(fitted)
+            }
         }
 
+        /// `elbow` as it can turn on top of the curl, the wave and the elbows before it without turning the
+        /// bough more than `most` from its planting's heading anywhere past it: its own way if it can, else
+        /// the other way, else smaller; nil if even a small one can't.
+        private func fitted(_ elbow: Elbow, within most: Double) -> Elbow? {
+            for scale in [1.0, 0.8, 0.6, 0.4] {
+                for way in [1.0, -1.0] {
+                    var trial = self
+                    trial.elbows.append(Elbow(at: elbow.at, span: elbow.span, turn: elbow.turn * scale * way))
+                    if trial.most(from: elbow.at - elbow.span / 2) <= most - Self.sampling { return trial.elbows.last }
+                }
+            }
+            return nil
+        }
+
+        /// The most it turns the heading either way, from `t` along the bough to its tip, sampled every 0.002:
+        /// between samples it can turn up to about `sampling` further.
+        func most(from t: Double) -> Double {
+            stride(from: max(t, 0), through: 1, by: 0.002).reduce(abs(turn(at: 1))) { max($0, abs(turn(at: $1))) }
+        }
+
+        static let sampling = 0.05 * .pi / 180
+
         /// How far it turns the heading at `t` along the bough.
-        public func turn(at t: Double) -> Double { curl * t * t + wave * sin(.pi * t) * t }
+        public func turn(at t: Double) -> Double {
+            elbows.reduce(curl * t * t + wave * sin(.pi * t) * t) { $0 + $1.turn * $1.made(at: t) }
+        }
+
+        /// How much wider the bough's wood is at `t` along it: thicker at each elbow's joint (`knuckle`).
+        public func knuckle(at t: Double) -> Double {
+            elbows.reduce(1) { total, elbow in
+                let d = (t - elbow.at) / elbow.span
+                return total + (TreeLayout.knuckle(elbow.turn) - 1) * exp(-d * d * 4)
+            }
+        }
     }
 
     /// How far a bough's curl turns it by its tip, and its bow at most, in degrees.
-    static let boughCurl: ClosedRange<Double> = 4...12
-    static let boughWave: ClosedRange<Double> = 2...7
+    static let boughCurl: ClosedRange<Double> = 8...20
+    static let boughWave: ClosedRange<Double> = 4...11
+    /// How far a bough's elbow turns it, in degrees, before `boughTurn` holds it back; and how much of
+    /// its length an elbow takes to turn (in tree units, about one and a half of a bough's widths).
+    static let boughElbow: ClosedRange<Double> = 18...34
+    static let elbowSpan = 0.06
+    /// The most a bough's curl, wave and elbows together ever turn it from its planting's heading, either
+    /// way, in degrees, so it zigzags rather than curling round. The one place the cap is set.
+    static let boughTurn = 26.0
+    /// Where a bough's elbows fall, in tree units from its foot: the first at least `elbowFirst` out, each
+    /// next about `elbowEvery` further (seeded, ±30% of that), and only within `elbowReach` of its length,
+    /// so none turns right at its tip; at most `mostElbows`.
+    static let elbowFirst = 0.35
+    static let elbowEvery = 0.4
+    static let elbowReach = 0.85
+    static let mostElbows = 3
+    /// How far apart a bough's curve's points are through an elbow, in tree units.
+    static let elbowStep = 0.012
 
     /// A bough's centreline, from its foot, a point every `boughStep` of its length: it leaves at
     /// `heading` and straightens toward its tip, giving up `straighten` of its lean (by default, down to
-    /// about a third of it), and bends its own way (`bend`).
+    /// about a third of it), and bends its own way (`bend`). A bough leaning well out never bends down
+    /// further than its planting leans (or level, if that's higher), so an elbow heading down can't
+    /// take it nearer the ground than its planting already has it, nor up past straight up.
     static func bough(heading: Double, length: Double, straighten: Double = boughStraighten, bend: Bend = .none) -> [CGPoint] {
         var points = [CGPoint.zero]
         var point = CGPoint.zero
         let count = Int(ceil((length + 0.05) / boughStep))
+        let side: Double = heading < 0 ? -1 : 1, lowest = max(abs(heading), .pi / 2), leaning = abs(heading) > leaningOut
         for i in 1...max(count, 1) {
             let t = min(Double(i) / max(length / boughStep, 1), 1)
-            let h = heading * (1 - straighten * t) + bend.turn(at: t)
+            var h = heading * (1 - straighten * t) + bend.turn(at: t)
+            if leaning { h = side * min(max(side * h, 0), lowest) }
             point = CGPoint(x: point.x + sin(h) * boughStep, y: point.y + cos(h) * boughStep)
             points.append(point)
         }
@@ -708,6 +851,8 @@ public struct TreeLayout: Sendable {
     }
 
     static let boughStep = 0.005
+    /// A bough leaning out further than this (radians) is kept between straight up and its lowest (`bough`).
+    static let leaningOut = 0.5
     /// How much of its lean a bough gives up by its tip, unless its planting says otherwise.
     public static let boughStraighten = 0.65
 

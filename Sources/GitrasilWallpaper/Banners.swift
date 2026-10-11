@@ -351,8 +351,13 @@ extension Landscape {
         for ((pane, bough), front) in zip(boughs, fronts) {
             guard let stem = bough.layout.stems.first, stem.curve.count > 2 else { continue }
             let stops = treeFit.ribbonStops + Self.fartherStops.filter { $0 > (treeFit.ribbonStops.last ?? 0) }
+            // By distance along the bough: its curve's points crowd together through an elbow.
+            var along: [Double] = [0]
+            for (a, b) in zip(stem.curve, stem.curve.dropFirst()) {
+                along.append(along[along.count - 1] + hypot(b.point.x - a.point.x, b.point.y - a.point.y))
+            }
             let anchors = stops.map { fraction -> CGPoint in
-                let node = stem.curve[Int(Double(stem.curve.count - 1) * fraction)]
+                let node = stem.curve[along.lastIndex { $0 <= along[along.count - 1] * fraction } ?? 0]
                 let point = frame.point(node.point)
                 return CGPoint(x: point.x, y: point.y + node.width * frame.scale / 2)
             }
