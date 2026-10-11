@@ -975,3 +975,42 @@ enum Sketched {
         return HandDrawn.displace(points, seed: seed, amplitude: 0.6 * hand, wavelength: 28)
     }
 }
+
+extension WallpaperView {
+
+    /// How far each banner on growing wood has faded in at `date`: a pennant as its stem reaches its
+    /// tip (`TreeLayout.Stretch.nameShown`), a ribbon as its bough does; on a limb growing new
+    /// commits, over the end of the growth. Banners on still wood aren't listed (they're shown). A banner
+    /// hidden behind what's painted in front of it is masked by the full-grown trees, so on a tree growing
+    /// in it waits for every tree growing in to finish, rather than show holes where leaves are still to come.
+    /// `growIn` is how far a pane's tree is in growing in at a date (`BackgroundModel.growIn`). Each
+    /// banner carries its stretch from the plan, so a frame only looks up a progress or two per pane.
+    static func shownBanners(_ plan: BannerPlan, panes: [WallpaperModel], at date: Date,
+                             growIn: (URL, Date) -> Double?) -> [String: Double] {
+        var growingIn: [String: Double] = [:], growing: [String: (pane: WallpaperModel, progress: Double)] = [:]
+        for pane in panes {
+            if let progress = growIn(pane.repoURL, date) {
+                growingIn[pane.repoURL.path] = progress
+            } else if let progress = pane.growthProgress(at: date) {
+                growing[pane.repoURL.path] = (pane, progress)
+            }
+        }
+        guard !growingIn.isEmpty || !growing.isEmpty else { return [:] }
+        var shown: [String: Double] = [:]
+        let last = TreeLayout.Stretch.nameFade, everyone = growingIn.values.min() ?? 1
+        let whole = min(max((everyone - (1 - last)) / last, 0), 1)
+        for hanging in plan.banners {
+            if let progress = growingIn[hanging.pane] {
+                shown[hanging.id] = min(hanging.stretch.nameShown(at: progress), hanging.hiddenFrom == nil ? 1 : whole)
+            } else if let (pane, progress) = growing[hanging.pane], pane.growth[hanging.stem] != nil {
+                shown[hanging.id] = min(max((progress - 0.85) / 0.15, 0), 1)
+            }
+        }
+        for ribbon in plan.ribbons {
+            if let progress = growingIn[ribbon.pane] {
+                shown[ribbon.id] = min(ribbon.stretch.nameShown(at: progress), ribbon.hiddenFrom == nil ? 1 : whole)
+            }
+        }
+        return shown
+    }
+}
