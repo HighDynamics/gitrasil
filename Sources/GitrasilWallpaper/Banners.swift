@@ -386,10 +386,34 @@ final class Breeze {
 
     /// When the gust blowing now began; nil when it's still.
     private(set) var gustStart: Date?
+    /// The gust blowing now, or the last one.
+    private(set) var gust = Gust.streaming
 
-    static let gustLength: TimeInterval = 7
+    /// How a gust blows: rising, holding at its strongest for `hold` of its `length`, and falling.
+    struct Gust: Equatable {
+        let length: TimeInterval
+        let hold: Double
+
+        /// For streaming pennants: up and down again in seven seconds, a sway at once.
+        static let streaming = Gust(length: 7, hold: 0)
+        /// For pennants hanging from their boughs, which take a while to swing out on their threads: long
+        /// enough for them to reach nearly level and stay there a couple of seconds before they settle.
+        static let hanging = Gust(length: 11, hold: 0.2)
+
+        /// How hard it's blowing `seconds` into it: rising as `sin²` to 1, holding, falling the same way;
+        /// 0 before and after. With no hold, `sin²(πt)` over its length.
+        func strength(at seconds: TimeInterval) -> Double {
+            let t = seconds / length, rise = (1 - hold) / 2
+            guard t > 0, t < 1 else { return 0 }
+            return pow(sin(.pi / 2 * min(min(t, 1 - t) / rise, 1)), 2)
+        }
+    }
+
     /// The pause between gusts, before its seeded jitter of up to a third either way.
     static let pause: TimeInterval = 45
+
+    /// Whether the pennants hang from their boughs: the next gust blows longer (`Gust.hanging`).
+    var hangs = false
 
     /// Whether gusts blow (the menu's setting, while banners hang). Turning it off stills them
     /// at once.
@@ -458,9 +482,7 @@ final class Breeze {
     /// How hard it's blowing at `date`: rising and falling over the gust, 0 when still.
     func strength(at date: Date) -> Double {
         guard let gustStart else { return 0 }
-        let t = date.timeIntervalSince(gustStart) / Self.gustLength
-        guard t > 0, t < 1 else { return 0 }
-        return pow(sin(.pi * t), 2)
+        return gust.strength(at: date.timeIntervalSince(gustStart))
     }
 
     /// A gust at once (gusts were just turned on): now if it can be seen, else the moment it can; the
@@ -532,11 +554,12 @@ final class Breeze {
         guard asked ? canShow : mayBlow else { return update() }
         let start = Date()
         gustStart = start
+        gust = hangs ? .hanging : .streaming
         isOwed = false
         isAsked = asked
         logEvent(asked ? "gust (asked for)" : "gust")
-        Task {
-            try? await Task.sleep(for: .seconds(Self.gustLength))
+        Task { [gust] in
+            try? await Task.sleep(for: .seconds(gust.length))
             if gustStart == start { gustStart = nil }
         }
         if mayBlow { scheduleNext() }

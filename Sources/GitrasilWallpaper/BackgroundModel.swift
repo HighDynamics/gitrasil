@@ -115,7 +115,7 @@ final class BackgroundModel {
         let names = (settings.showsBranchNames, settings.showsRepoNames, settings.gusts)
         withObservationTracking {
             _ = (settings.arrangement, settings.medium, settings.showsBranchNames, settings.showsRepoNames, settings.gusts,
-                 settings.layoutSeed, settings.forest, settings.treeCapacity)
+                 settings.layoutSeed, settings.forest, settings.treeCapacity, settings.hangsBanners)
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
@@ -156,8 +156,10 @@ final class BackgroundModel {
         }
     }
 
-    /// Gusts blow only while there are banners to sway and they're wanted.
+    /// Gusts blow only while there are banners to sway and they're wanted, longer for banners hanging from
+    /// their boughs.
     private func updateBreeze() {
+        breeze.hangs = settings.hangsBanners
         breeze.isEnabled = settings.gustsBlow
     }
 

@@ -79,6 +79,13 @@ The forest behind the single tree is painted before it, so it never hides the tr
   Still no redraw per frame: the thread is drawn once, straight down, and turned about the tip; the pennant is
   turned about its hook and moved to the thread's end. Two transforms per banner instead of one; its view is
   bigger, to hold every pose of the swing.
+- **A longer gust.** A streaming pennant's gust is `sin²` over 7 s, at 90% or more for only about 1.4 s: a
+  hanging pennant barely reached level before it fell back (Daniel, live: gusts "should last a bit longer").
+  Hanging, a gust lasts 11 s instead: it rises as `sin²` over 4.4 s, holds at full strength for 2.2 s, and falls
+  the same way (`Breeze.Gust.hanging`), so the pennant is nearly level (90% or more) for about 4 s. Streaming
+  gusts are unchanged; the pause between gusts (45 s, jittered) is the same. A gust frame costs the same; a
+  hanging gust has 11/7 as many of them (at most 132 at 12 fps, from 84), and the breeze blows about a fifth
+  of the time instead of an eighth.
 - **The floor.** Still, the thread hangs at its longest and the pennant at its lowest; every pose of a gust is
   higher, so the floor check on the still pose holds through the gust (tested).
 - **Ribbons** already hang from their boughs on cords, so they're unchanged.
@@ -119,7 +126,8 @@ overestimate of the screen's cost). The trees take 96–106 ms either way.
 - `BackgroundSettings`: both settings default off, persist, and read back.
 - Wallpaper: the paint order (crown first, front boughs last); a mask cuts out the wood in front and nothing
   when nothing's in front (rendered); a hanging pennant hangs plumb when still, swings out and lifts toward level
-  at the height of a gust; no pose of a gust hangs it lower than it hangs still.
+  at the height of a gust; no pose of a gust hangs it lower than it hangs still; a gust blows as it did for
+  streaming pennants, and longer, holding at its strongest, for hanging ones.
 
 ## Checks
 
