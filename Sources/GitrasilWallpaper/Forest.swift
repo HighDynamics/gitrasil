@@ -6,6 +6,21 @@ import GitrasilCore
 // plots, once the orchard has more than `ForestPolicy.plainLimit` of them, and in the single tree the
 // repositories that don't fit on it, standing behind it on either side.
 
+extension Pane {
+
+    /// A pane made from its parts rather than a repository's model. For tests (`WallpaperModel`'s tree can only be
+    /// read from a repository, and it can't be set).
+    init(id: String, name: String, seed: String, tree: RepoTree?) {
+        self.id = id
+        self.name = name
+        self.seed = seed
+        self.tree = tree
+        problem = nil
+        grown = [:]
+        growIn = nil
+    }
+}
+
 extension Landscape {
 
     /// Where the repositories are drawn: on the single tree, in the forest, or (a plain orchard) neither.

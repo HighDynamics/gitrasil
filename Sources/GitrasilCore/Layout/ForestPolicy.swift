@@ -27,6 +27,27 @@ public struct ForestPolicy: Sendable, Equatable {
                             fixedTreeCapacity: number("GITRASIL_TREE_CAPACITY"))
     }()
 
+    /// What the "Repos on the Tree" setting may be (docs/tree-capacity/PLAN.md): the menu offers these steps, and a
+    /// saved number anywhere in their range is kept. Fewer than four is no tree; more than the tallest display's
+    /// automatic number (24) crowds the names off the boughs.
+    public static let treeCapacitySteps = [4, 8, 12, 16, 20, 24]
+    public static let treeCapacityRange = 4...24
+
+    /// This policy with the user's chosen number of repositories on the tree (`BackgroundSettings.treeCapacity`;
+    /// nil, Automatic, leaves it be). A number from the environment (GITRASIL_TREE_CAPACITY) wins, for test runs.
+    public func choosing(treeCapacity chosen: Int?) -> ForestPolicy {
+        guard fixedTreeCapacity == nil, let chosen, Self.treeCapacityRange.contains(chosen) else { return self }
+        var policy = self
+        policy.fixedTreeCapacity = chosen
+        return policy
+    }
+
+    /// The most repositories shown with the Forest off: a dozen, or fewer when the single tree is set to hold
+    /// fewer (the cut is the pins' order, as for a dozen). The setting's number, not the display's.
+    public func shownWithoutForest(singleTree: Bool) -> Int {
+        singleTree ? min(plainLimit, fixedTreeCapacity ?? plainLimit) : plainLimit
+    }
+
     /// How many repositories one tree holds before it stops reading well. The tree is as tall as the
     /// screen allows and its crown isn't wider than that, so the room for names grows with the display's
     /// height, not its width: 12 on a laptop's 900 points, 20 from 1440 up (an ultrawide or a 5K).

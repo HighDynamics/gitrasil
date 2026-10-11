@@ -152,6 +152,52 @@ final class ForestPolicyTests: XCTestCase {
         XCTAssertEqual(ForestPolicy(fixedTreeCapacity: 5).treeCapacity(for: CGSize(width: 3440, height: 1440)), 5)
     }
 
+    func testNoChoiceLeavesThePolicyAsItWas() {
+        let policy = ForestPolicy()
+        XCTAssertEqual(policy.choosing(treeCapacity: nil), policy, "Automatic is the default")
+        for size in [CGSize(width: 1440, height: 900), CGSize(width: 3440, height: 1440), CGSize(width: 800, height: 400)] {
+            XCTAssertEqual(policy.choosing(treeCapacity: nil).treeCapacity(for: size), policy.treeCapacity(for: size))
+        }
+    }
+
+    func testAChosenCapacityHoldsOnEveryDisplay() {
+        let policy = ForestPolicy().choosing(treeCapacity: 16)
+        XCTAssertEqual(policy.treeCapacity(for: CGSize(width: 1440, height: 900)), 16)
+        XCTAssertEqual(policy.treeCapacity(for: CGSize(width: 3440, height: 1440)), 16)
+        XCTAssertEqual(policy.treeCapacity(for: CGSize(width: 800, height: 400)), 16)
+    }
+
+    func testTheEnvironmentsNumberBeatsTheChosenOne() {
+        // GITRASIL_TREE_CAPACITY, kept for test runs, is the policy's `fixedTreeCapacity`.
+        let policy = ForestPolicy(fixedTreeCapacity: 5).choosing(treeCapacity: 16)
+        XCTAssertEqual(policy.treeCapacity(for: CGSize(width: 1440, height: 900)), 5)
+    }
+
+    func testOnlyTheOffersRangeIsKept() {
+        for chosen in [0, 3, 25, 64, -1] {
+            XCTAssertEqual(ForestPolicy().choosing(treeCapacity: chosen), ForestPolicy(), "\(chosen) is Automatic")
+        }
+        for chosen in ForestPolicy.treeCapacitySteps {
+            XCTAssertTrue(ForestPolicy.treeCapacityRange.contains(chosen))
+        }
+        XCTAssertEqual(ForestPolicy.treeCapacitySteps, ForestPolicy.treeCapacitySteps.sorted())
+    }
+
+    func testWithoutTheForestAtMostADozenAndFewerWhenTheTreeHoldsFewer() {
+        let policy = ForestPolicy()
+        XCTAssertEqual(policy.shownWithoutForest(singleTree: true), 12)
+        XCTAssertEqual(policy.shownWithoutForest(singleTree: false), 12)
+        XCTAssertEqual(policy.choosing(treeCapacity: 8).shownWithoutForest(singleTree: true), 8)
+        XCTAssertEqual(policy.choosing(treeCapacity: 8).shownWithoutForest(singleTree: false), 12)
+        XCTAssertEqual(policy.choosing(treeCapacity: 20).shownWithoutForest(singleTree: true), 12)
+    }
+
+    func testTheTreeTakesTheMostRecentlyActiveUpToTheCapacity() {
+        let entries: [(id: String, lastActive: Date)] = (0..<10).map { ("r\($0)", now.addingTimeInterval(Double($0) * 3 * day)) }
+        let onTree = ForestPolicy().choosing(treeCapacity: 4).onTree(entries, size: CGSize(width: 1440, height: 900))
+        XCTAssertEqual(onTree, [6, 7, 8, 9])
+    }
+
     private func calendar(_ zone: String) -> Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: zone)!

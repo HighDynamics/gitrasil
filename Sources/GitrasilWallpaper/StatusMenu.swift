@@ -106,6 +106,7 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
             + "the single tree keeps the most recently active, the rest stand in a forest behind it, "
             + "and an orchard goes into rows. Their order is set at launch and each midnight"
         menu.addItem(forest)
+        menu.addItem(treeCapacityItem())
         menu.addItem(.separator())
         menu.addItem(.sectionHeader(title: "Medium"))
         for (choice, title, tip) in [
@@ -194,6 +195,40 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         menu.addItem(.separator())
     }
 
+    /// "Repos on the Tree": how many repositories the single tree holds, Automatic (the display's number) or a step.
+    /// The rest stand behind it in the Forest when that's on; without it, the background shows no more than this.
+    private func treeCapacityItem() -> NSMenuItem {
+        let policy = ForestPolicy(), plain = policy.plainLimit
+        let parent = NSMenuItem(title: "Repos on the Tree", action: #selector(openTreeCapacity), keyEquivalent: "")
+        parent.target = self
+        parent.toolTip = "How many repositories the single tree holds. With Forest on, the rest stand behind it; "
+            + "with it off, the background shows no more than \(plain)."
+        if let held = ForestPolicy.standard.fixedTreeCapacity {
+            parent.toolTip = "Held at \(held) by GITRASIL_TREE_CAPACITY: the choices below do nothing"
+        }
+        let submenu = NSMenu(title: parent.title)
+        submenu.autoenablesItems = true
+        for choice in [nil] + ForestPolicy.treeCapacitySteps.map(Optional.some) {
+            let entry = NSMenuItem(title: choice.map(String.init) ?? "Automatic", action: #selector(chooseTreeCapacity(_:)), keyEquivalent: "")
+            entry.target = self
+            entry.representedObject = choice
+            entry.state = settings.treeCapacity == choice ? .on : .off
+            if let choice {
+                entry.toolTip = "At most \(choice) on the tree" + (choice > plain ? ", more than \(plain) only with Forest on" : "")
+            } else {
+                let laptop = policy.treeCapacity(for: CGSize(width: 1440, height: 900))
+                let tall = policy.treeCapacity(for: CGSize(width: 2560, height: 1440))
+                entry.toolTip = "As many as the display reads well: \(laptop) on a 900 point tall display, \(tall) from 1440 points tall"
+            }
+            submenu.addItem(entry)
+        }
+        parent.submenu = submenu
+        return parent
+    }
+
+    /// Only here for the menu to validate (it greys the parent in the orchard): the item opens its submenu.
+    @objc private func openTreeCapacity() {}
+
     private func action(_ title: String, _ selector: Selector, _ url: URL?, key: String = "") -> NSMenuItem {
         let item = NSMenuItem(title: title, action: selector, keyEquivalent: key)
         item.target = self
@@ -209,6 +244,10 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
     @objc private func draw(in sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let choice = Medium(rawValue: raw) else { return }
         settings.medium = choice
+    }
+
+    @objc private func chooseTreeCapacity(_ sender: NSMenuItem) {
+        settings.treeCapacity = sender.representedObject as? Int
     }
 
     @objc private func toggleForest() {
@@ -301,6 +340,8 @@ final class StatusMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
         switch menuItem.action {
         case #selector(toggleGusts): settings.hasBanners && !gustsOverridden
         case #selector(watchGrow), #selector(reshuffleBranches): !pins.shown.isEmpty
+        // The orchard has no tree to hold them: the choice is kept, and waits.
+        case #selector(chooseTreeCapacity(_:)), #selector(openTreeCapacity): settings.arrangement == .singleTree
         // Unregistering is always allowed, so a login item made before a move can be removed.
         case #selector(toggleOpenAtLogin): app.map { !$0.runsFromATemporaryPlace || $0.loginItem != .off } ?? false
         case #selector(checkForUpdatesNow): app.map { !$0.updates.isChecking } ?? false
