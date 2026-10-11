@@ -553,7 +553,9 @@ struct TreeDrawing {
                     }
                     wood(pieces + feet, roots: roots, in: &context)
                 }
-                for index in group { bark(stems[index], outlines[index], in: &context) }
+                let knotted = group.map { knots(stems[$0], outlines[$0]) }
+                for (index, knots) in zip(group, knotted) { bark(stems[index], outlines[index], around: knots, in: &context) }
+                for knots in knotted { draw(knots, in: &context) }
                 for index in group { ridge(stems[index], outlines[index], in: &context) }
                 tint(group, stems, outlines, shapes, parents: parents, in: &context)
                 if style.contour > 0 {
@@ -918,9 +920,13 @@ struct TreeDrawing {
     }
 
     /// Light dry-brush streaks along the thicker wood. A limb's start where it leaves its parent's
-    /// edge, so the parent's streaks run on past the join and the limb's come out of its collar.
-    private func bark(_ stem: TreeLayout.Stem, _ samples: [(point: CGPoint, width: CGFloat)], in context: inout GraphicsContext) {
+    /// edge, so the parent's streaks run on past the join and the limb's come out of its collar. They
+    /// part around its `knots`, as the grain does.
+    private func bark(_ stem: TreeLayout.Stem, _ samples: [(point: CGPoint, width: CGFloat)], around knots: [Knot],
+                      in context: inout GraphicsContext) {
         guard style.barkOpacity > 0, samples.count > 2 else { return }
+        var context = context
+        for knot in knots { context.clip(to: knot.oval(1.35), options: .inverse) }
         let start = stem.fork.map { fork in
             TreeLayout.collarExit(parentWidth: fork.width, angle: (stem.nodes.first?.heading ?? 0) - fork.heading) * frame.scale
         } ?? 0

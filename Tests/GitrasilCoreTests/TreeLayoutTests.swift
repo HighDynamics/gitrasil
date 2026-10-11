@@ -468,8 +468,8 @@ final class TreeLayoutTests: XCTestCase {
         let reference: [String: (x: Double, y: Double, width: Double, heading: Double)] = [
             "main": (-0.02418423723063762, 1.0, 0.009474613391789283, -0.19116934729886464),
             "one": (0.1184200771269034, 0.288733800889022, 0.0051698484809835, 1.3379967982619327),
-            "long": (0.4655516895454619, 0.6660514218492436, 0.010057480512225277, 0.20648551668815687),
-            "long-sub": (0.5886239034168722, 0.80775819372573, 0.0051698484809835, 0.4272037179614403),
+            "long": (0.4720518518086952, 0.661936017598704, 0.010057480512225277, 0.6705170358624362),
+            "long-sub": (0.6347697016896418, 0.7509732445725454, 0.0051698484809835, 0.6830558486255242),
             "bud": (-0.043428361378252955, 0.26641045365687754, 0.0051698484809835, -1.0922475979199362),
             "mid": (-0.2720834821981477, 0.6131224741529162, 0.0051698484809835, -0.5128087524281576),
             "at-the-tip": (-0.058727177320739225, 1.1109655372818492, 0.0051698484809835, -0.13301953209843087)
@@ -580,6 +580,7 @@ final class TreeLayoutTests: XCTestCase {
                 for (before, now) in zip(last, elbows) {
                     XCTAssertEqual(before.at * lastLength, now.at * length, accuracy: 1e-9, "\(name) at \(length)")
                     XCTAssertEqual(before.span * lastLength, now.span * length, accuracy: 1e-9)
+                    XCTAssertEqual(before.knot, now.knot, "\(name) at \(length): and keeps its knot")
                 }
                 last = elbows
                 lastLength = length
@@ -661,5 +662,56 @@ final class TreeLayoutTests: XCTestCase {
         let curls = (0..<100).map { TreeLayout.curl(of: "feature/\($0)", shuffle: 0) }
         for curl in curls { XCTAssertTrue(TreeLayout.limbCurl.contains(abs(curl) * 180 / .pi)) }
         XCTAssertTrue(curls.contains { $0 > 0 } && curls.contains { $0 < 0 }, "either way")
+    }
+}
+
+// MARK: Knots
+
+extension TreeLayoutTests {
+    func testSomeElbowsHaveAKnotSeededByTheirName() {
+        var elbows = 0, knotted = 0
+        for index in 0..<400 {
+            let bend = TreeLayout.Bend("repo\(index)", shuffle: 0, side: 1, length: 1.6)
+            XCTAssertEqual(bend.elbows.map(\.knot), TreeLayout.Bend("repo\(index)", shuffle: 0, side: 1, length: 1.6).elbows.map(\.knot))
+            for elbow in bend.elbows {
+                elbows += 1
+                if elbow.knot > 0 {
+                    knotted += 1
+                    XCTAssertTrue(TreeLayout.knotSize.contains(elbow.knot))
+                }
+            }
+        }
+        XCTAssertEqual(Double(knotted) / Double(elbows), TreeLayout.boughKnotChance, accuracy: 0.05, "\(knotted) of \(elbows)")
+        // A limb's, at its elbows.
+        let sizes = (0..<2000).compactMap { TreeLayout.knot(of: "limb\($0)", shuffle: 0, step: 4) }
+        XCTAssertEqual(Double(sizes.count) / 2000, TreeLayout.limbKnotChance, accuracy: 0.04)
+        XCTAssertTrue(sizes.allSatisfy(TreeLayout.knotSize.contains))
+        XCTAssertEqual(TreeLayout.knot(of: "limb7", shuffle: 0, step: 4), TreeLayout.knot(of: "limb7", shuffle: 0, step: 4))
+    }
+
+    func testAStemsKnotsSwellItsJointsAndStayPutAsItGrowsIn() {
+        let limbs = (0..<30).map {
+            RepoTree.Limb(name: "limb\($0)", commits: commits("l\($0)", 12), parent: .trunk(node: 20 + $0 * 6), isCheckedOut: false)
+        }
+        let tree = RepoTree(trunkName: "main", trunk: commits("t", 200), limbs: limbs, isTrunkCheckedOut: false)
+        let full = TreeLayout(tree: tree, seed: "ash")
+        let knots = full.stems.dropFirst().flatMap(\.knots)
+        XCTAssertGreaterThan(knots.count, 10, "plenty of limbs, so some knots")
+        for stem in full.stems.dropFirst() {
+            for knot in stem.knots {
+                let name = "\(stem.name ?? "?") at \(knot.index)"
+                XCTAssertTrue(stem.curve.indices.dropFirst().contains(knot.index), name)
+                XCTAssertTrue(TreeLayout.knotSize.contains(knot.size), name)
+                XCTAssertEqual(abs(knot.side), 1, name)
+                XCTAssertGreaterThan(stem.curve[knot.index].width, stem.curve[knot.index - 1].width, "\(name): at a swollen joint")
+            }
+        }
+        for growIn in [0.3, 0.6, 0.9] {
+            let partway = TreeLayout(tree: tree, seed: "ash", growIn: growIn)
+            for stem in partway.stems {
+                let whole = full.stems.first { $0.name == stem.name }!
+                XCTAssertEqual(stem.knots, whole.knots.filter { $0.index < stem.curve.count }, "\(stem.name ?? "?") at \(growIn)")
+            }
+        }
     }
 }
