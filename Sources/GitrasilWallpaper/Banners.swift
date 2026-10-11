@@ -988,6 +988,8 @@ extension WallpaperView {
     /// hidden behind what's painted in front of it is masked by the full-grown trees, so on a tree growing
     /// in it waits for the trees painted in front of its own (`BannerPlan.places`) to finish, rather than
     /// show holes where leaves are still to come; trees behind it can't make holes, so it doesn't wait for them.
+    /// Nor for a tree that began growing in after its own (one arriving late), so a name already shown
+    /// doesn't vanish again when one does.
     /// `growIn` is how far a pane's tree is in growing in at a date (`BackgroundModel.growIn`). Each
     /// banner carries its stretch from the plan, so a frame only looks up a progress or two per pane.
     static func shownBanners(_ plan: BannerPlan, panes: [WallpaperModel], at date: Date,
@@ -1002,11 +1004,12 @@ extension WallpaperView {
         }
         guard !growingIn.isEmpty || !growing.isEmpty else { return [:] }
         var shown: [String: Double] = [:], waits: [String: Double] = [:]
-        // How far a hidden banner on `pane` has faded in: as the last of the trees in front of its own grows in.
+        // How far a hidden banner on `pane` has faded in: as the last of the trees in front of its own that
+        // began with it or before (as far along as it, or further) grows in.
         func whole(_ pane: String) -> Double {
             if let wait = waits[pane] { return wait }
-            let place = plan.places[pane] ?? .max
-            let front = growingIn.filter { other, _ in (plan.places[other] ?? .min) > place }
+            let place = plan.places[pane] ?? .max, own = growingIn[pane] ?? 1
+            let front = growingIn.filter { other, progress in (plan.places[other] ?? .min) > place && progress >= own - 1e-9 }
             let last = TreeLayout.Stretch.nameFade
             let wait = front.values.min().map { min(max(($0 - (1 - last)) / last, 0), 1) } ?? 1
             waits[pane] = wait

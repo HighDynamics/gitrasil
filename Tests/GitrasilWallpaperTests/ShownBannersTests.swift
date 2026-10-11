@@ -46,14 +46,20 @@ final class ShownBannersTests: XCTestCase {
 
     func testAHiddenNameWaitsForTheTreesInFrontOfItsOwn() {
         let plan = plan(["/back", "/middle", "/front"], hidden: ["/middle"])
-        XCTAssertEqual(shown(plan, growingIn: ["/back": 0.95, "/middle": 0.95, "/front": 0.5])["/middle"], 0,
+        XCTAssertEqual(shown(plan, growingIn: ["/back": 0.9, "/middle": 0.9, "/front": 0.9])["/middle"], 0,
                        "the tree in front still has leaves to come where it would show holes")
-        XCTAssertEqual(shown(plan, growingIn: ["/middle": 0.95, "/front": 0.96])["/middle"] ?? -1, 0.5, accuracy: 1e-9,
+        XCTAssertEqual(shown(plan, growingIn: ["/middle": 0.96, "/front": 0.96])["/middle"] ?? -1, 0.5, accuracy: 1e-9,
                        "it fades in as the tree in front finishes")
-        XCTAssertEqual(shown(plan, growingIn: ["/middle": 0.95, "/front": 0])["/middle"], 0,
-                       "one in front that's yet to start is waited for too")
         XCTAssertEqual(shown(plan, growingIn: ["/back": 0, "/middle": 0.95])["/middle"], 1,
                        "a tree behind it can't make holes in it, so it doesn't wait for that")
         XCTAssertEqual(shown(plan, growingIn: ["/back": 0.95, "/front": 0])["/back"], 1, "a name in view doesn't wait")
+    }
+
+    func testAHiddenNameAlreadyShownStaysWhenATreeArrivesLate() {
+        let plan = plan(["/middle", "/front", "/late"], hidden: ["/middle"])
+        XCTAssertEqual(shown(plan, growingIn: ["/middle": 0.96, "/front": 0.99, "/late": 0])["/middle"] ?? -1, 0.875, accuracy: 1e-9,
+                       "it waits for the tree in front that began before it, not the one only now beginning")
+        XCTAssertEqual(shown(plan, growingIn: ["/middle": 0, "/front": 0, "/late": 0])["/middle"], 0,
+                       "trees beginning together wait for each other")
     }
 }
