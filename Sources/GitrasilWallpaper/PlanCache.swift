@@ -27,6 +27,9 @@ final class PlanCache {
         let ranking: [String: Date]
         let branchNames: Bool
         let repoNames: Bool
+        /// Pennants hang from their boughs, and banners hang at their boughs' depths.
+        let hanging: Bool
+        let occluded: Bool
         let trees: [Tree]
     }
 

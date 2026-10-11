@@ -61,6 +61,34 @@ final class GustOnToggleTests: XCTestCase {
         }
     }
 
+    func testAGustBlowsLongerForHangingPennantsAndHoldsAtItsStrongest() async {
+        // Streaming, as it always has: sin² over seven seconds.
+        for seconds in stride(from: 0.0, through: 7, by: 0.25) {
+            XCTAssertEqual(Breeze.Gust.streaming.strength(at: seconds), pow(sin(.pi * seconds / 7), 2), accuracy: 1e-12)
+        }
+        let hanging = Breeze.Gust.hanging
+        XCTAssertGreaterThan(hanging.length, Breeze.Gust.streaming.length)
+        XCTAssertEqual(hanging.strength(at: 0), 0)
+        XCTAssertEqual(hanging.strength(at: hanging.length), 0)
+        var strong = 0.0, last = 0.0
+        for seconds in stride(from: 0.0, through: hanging.length, by: 0.01) {
+            let strength = hanging.strength(at: seconds)
+            XCTAssertLessThan(abs(strength - last), 0.01, "it rises and falls smoothly")
+            XCTAssertEqual(strength, hanging.strength(at: hanging.length - seconds), accuracy: 1e-9)
+            if strength >= 0.9 { strong += 0.01 }
+            last = strength
+        }
+        XCTAssertGreaterThan(strong, 3.5, "nearly level for a few seconds, not a moment")
+        // The model tells the breeze which.
+        let model = model()
+        await settle()
+        model.settings.hangsBanners = true
+        model.settings.gusts = true
+        await settle()
+        XCTAssertEqual(model.breeze.gust, .hanging)
+        XCTAssertTrue(model.breeze.hangs)
+    }
+
     /// The case in the field was the power gate: the first gust was held back as the timer's are.
     func testTheFirstGustBlowsInLowPowerModeButTheTimerStaysDisarmed() async {
         surroundings.isLowPowerMode = true

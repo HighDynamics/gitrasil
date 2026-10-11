@@ -41,8 +41,8 @@ public final class MemorySettings: SettingsStorage {
 }
 
 /// The background's settings from the menu, saved between launches next to the pins. Unset (or
-/// unreadable) values take their defaults: an orchard in chalk, every name shown, the banners still,
-/// the trees in their first shape.
+/// unreadable) values take their defaults: an orchard in chalk, every name shown (hidden by what's in
+/// front of it, streaming from its tip), the banners still, the trees in their first shape.
 @MainActor
 @Observable
 public final class BackgroundSettings {
@@ -55,6 +55,8 @@ public final class BackgroundSettings {
     static let layoutSeedKey = "layoutSeed"
     static let forestKey = "forest"
     static let treeCapacityKey = "treeCapacity"
+    static let allBannersInViewKey = "drawsAllBannersInView"
+    static let hangingKey = "hangsBanners"
 
     public var arrangement: Arrangement {
         didSet { if arrangement != oldValue { storage.set(arrangement.rawValue, forKey: Self.arrangementKey) } }
@@ -74,6 +76,18 @@ public final class BackgroundSettings {
     /// orchard always writes a repository's name under its tree.
     public var showsRepoNames: Bool {
         didSet { if showsRepoNames != oldValue { storage.set(showsRepoNames, forKey: Self.repoNamesKey) } }
+    }
+
+    /// Whether every banner is drawn on top of the trees, as before; off (the default), each is drawn
+    /// at its own bough's depth, so the boughs and leaves in front of it hide it.
+    public var drawsAllBannersInView: Bool {
+        didSet { if drawsAllBannersInView != oldValue { storage.set(drawsAllBannersInView, forKey: Self.allBannersInViewKey) } }
+    }
+
+    /// Whether branch names hang from their boughs, dangling until a gust lifts them; off (the
+    /// default), each streams out from its tip on a thread.
+    public var hangsBanners: Bool {
+        didSet { if hangsBanners != oldValue { storage.set(hangsBanners, forKey: Self.hangingKey) } }
     }
 
     /// Whether a gust now and then sways the banners; off (the default), they hang still.
@@ -140,5 +154,7 @@ public final class BackgroundSettings {
         layoutSeed = storage.object(forKey: Self.layoutSeedKey) as? Int ?? 0
         showsForest = storage.object(forKey: Self.forestKey) as? Bool ?? false
         treeCapacity = (storage.object(forKey: Self.treeCapacityKey) as? Int).flatMap { ForestPolicy.treeCapacityRange.contains($0) ? $0 : nil }
+        drawsAllBannersInView = storage.object(forKey: Self.allBannersInViewKey) as? Bool ?? false
+        hangsBanners = storage.object(forKey: Self.hangingKey) as? Bool ?? false
     }
 }

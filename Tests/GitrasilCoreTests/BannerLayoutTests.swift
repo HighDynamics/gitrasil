@@ -139,4 +139,123 @@ final class BannerLayoutTests: XCTestCase {
             XCTAssertEqual(crown.covered(rect), BannerLayout.covered(rect, by: obstacles), accuracy: 0.01, "\(rect)")
         }
     }
+
+    // MARK: Hanging pennants
+
+    func testTurningARectAboutAPointMovesItsCornersRound() {
+        let rect = CGRect(x: 100, y: 50, width: 80, height: 20)
+        XCTAssertEqual(BannerLayout.turned(rect, about: CGPoint(x: 100, y: 50), degrees: 0), rect)
+        // A quarter turn clockwise (y down) about its top-left corner hangs it straight down, to the left.
+        let down = BannerLayout.turned(rect, about: CGPoint(x: 100, y: 50), degrees: 90)
+        XCTAssertEqual(down.minX, 80, accuracy: 1e-9)
+        XCTAssertEqual(down.minY, 50, accuracy: 1e-9)
+        XCTAssertEqual(down.width, 20, accuracy: 1e-9)
+        XCTAssertEqual(down.height, 80, accuracy: 1e-9)
+        let half = BannerLayout.turned(rect, about: CGPoint(x: 140, y: 60), degrees: 180)
+        XCTAssertEqual(half.minX, rect.minX, accuracy: 1e-9)
+        XCTAssertEqual(half.minY, rect.minY, accuracy: 1e-9)
+    }
+
+    func testAHangingPennantDanglesFromItsHookAndItsPiecesHugIt() {
+        let rect = CGRect(x: 100, y: 50, width: 100, height: 20)
+        var banner = BannerLayout.Banner(id: "x", tip: CGPoint(x: 100, y: 40), hook: CGPoint(x: 100, y: 50), rect: rect, side: 1)
+        XCTAssertEqual(banner.pieces, [rect], "a streaming pennant is one piece")
+        XCTAssertEqual(banner.footprint, rect)
+        banner.droop = 75
+        let footprint = banner.footprint
+        XCTAssertGreaterThan(footprint.height, footprint.width, "dangling, it's taller than it's wide")
+        XCTAssertEqual(footprint.minY, 50, accuracy: 1, "it hangs from its hook")
+        XCTAssertEqual(banner.pieces.count, 5)
+        for piece in banner.pieces { XCTAssertTrue(footprint.insetBy(dx: -1e-6, dy: -1e-6).contains(piece)) }
+        let area = banner.pieces.reduce(0) { $0 + $1.width * $1.height }
+        XCTAssertLessThan(area, footprint.width * footprint.height, "the pieces cover less than the box around it")
+        // To the left it mirrors.
+        let left = BannerLayout.Banner(id: "x", tip: CGPoint(x: 200, y: 40), hook: CGPoint(x: 200, y: 50), rect: rect, side: -1,
+                                       droop: 75)
+        XCTAssertEqual(left.footprint.minX, 200 - (footprint.maxX - 100), accuracy: 1e-9)
+        XCTAssertEqual(left.footprint.maxX, 200 + (100 - footprint.minX), accuracy: 1e-9)
+        XCTAssertEqual(left.footprint.height, footprint.height, accuracy: 1e-9)
+    }
+
+    func testASwungThreadCarriesItsPennantWithIt() {
+        let rect = CGRect(x: 100, y: 70, width: 100, height: 20)
+        let banner = BannerLayout.Banner(id: "x", tip: CGPoint(x: 100, y: 40), hook: CGPoint(x: 100, y: 70), rect: rect, side: 1,
+                                         droop: 75)
+        XCTAssertEqual(banner.hook(swung: 0), banner.hook)
+        XCTAssertEqual(banner.footprint(swung: 0, turned: 75), banner.footprint)
+        // Swung 90° anticlockwise, the thread stands out level to the right of the tip.
+        let out = banner.hook(swung: -90)
+        XCTAssertEqual(out.x, 130, accuracy: 1e-9)
+        XCTAssertEqual(out.y, 40, accuracy: 1e-9)
+        let level = banner.footprint(swung: -90, turned: 0)
+        XCTAssertEqual(level.minX, 130, accuracy: 1e-9)
+        XCTAssertEqual(level.minY, 40, accuracy: 1e-9)
+        XCTAssertEqual(level.size, rect.size)
+        // Swung a little, the hook stays on the thread's circle about the tip.
+        let hook = banner.hook(swung: 20)
+        XCTAssertEqual(hypot(hook.x - 100, hook.y - 40), 30, accuracy: 1e-9)
+        XCTAssertLessThan(hook.x, 100, "clockwise swings it left")
+    }
+
+    func testEachPennantDanglesItsOwnSeededAmount() {
+        let a = BannerLayout.dangle("fix/one"), b = BannerLayout.dangle("fix/two")
+        XCTAssertTrue(BannerLayout.dangle.contains(a))
+        XCTAssertTrue(BannerLayout.dangle.contains(b))
+        XCTAssertEqual(a, BannerLayout.dangle("fix/one"), "the same name dangles the same")
+        XCTAssertNotEqual(a, b)
+    }
+
+    func testHangingPennantsHangNearTheirTipsInBoundsAndApart() {
+        let banners = BannerLayout.place(requests(24), obstacles: crown, bounds: bounds, hanging: true)
+        XCTAssertGreaterThan(banners.count, 4)
+        for (i, a) in banners.enumerated() {
+            XCTAssertTrue(BannerLayout.dangle.contains(a.droop), "\(a.id) dangles")
+            XCTAssertEqual(a.hook.x, a.tip.x, accuracy: 1e-9, "\(a.id)'s thread hangs straight down")
+            XCTAssertGreaterThan(a.hook.y, a.tip.y, "\(a.id) hangs down from its tip")
+            XCTAssertLessThanOrEqual(a.hook.y - a.tip.y, 64 + 1e-6, "\(a.id) hangs on a short thread")
+            XCTAssertTrue(bounds.contains(a.footprint), "\(a.id) dangles inside the bounds")
+            for b in banners[(i + 1)...] {
+                for piece in a.pieces {
+                    XCTAssertFalse(b.pieces.contains { $0.intersects(piece) }, "\(a.id) and \(b.id)")
+                }
+            }
+        }
+        XCTAssertEqual(banners, BannerLayout.place(requests(24), obstacles: crown, bounds: bounds, hanging: true))
+    }
+
+    func testAPennantNeverDanglesBelowTheFloor() {
+        let floor: CGFloat = 520
+        let low = (0..<8).map { i in
+            BannerLayout.Request(id: "low\(i)", tip: CGPoint(x: 200 + CGFloat(i) * 140, y: 470), outward: i % 2 == 0 ? 1 : -1,
+                                 size: CGSize(width: 110, height: 22))
+        }
+        let above = CGRect(x: 0, y: 0, width: 1440, height: floor)
+        for hanging in [false, true] {
+            for banner in BannerLayout.place(low, obstacles: [], bounds: above, hanging: hanging) {
+                XCTAssertLessThanOrEqual(banner.footprint.maxY, floor, "\(banner.id) keeps above the floor")
+            }
+        }
+    }
+
+    // MARK: Hidden by what's in front
+
+    func testTheShareOfARectUnderOthersIsSampled() {
+        let rect = CGRect(x: 0, y: 0, width: 120, height: 30)
+        XCTAssertEqual(BannerLayout.share(of: rect, under: []), 0)
+        XCTAssertEqual(BannerLayout.share(of: rect, under: [rect.insetBy(dx: -5, dy: -5)]), 1)
+        XCTAssertEqual(BannerLayout.share(of: rect, under: [CGRect(x: 0, y: -10, width: 60, height: 50)]), 0.5, accuracy: 0.05)
+        // Overlapping covers count once.
+        XCTAssertEqual(BannerLayout.share(of: rect, under: [CGRect(x: 0, y: -10, width: 60, height: 50),
+                                                            CGRect(x: 30, y: -10, width: 30, height: 50)]), 0.5, accuracy: 0.05)
+    }
+
+    func testARibbonKeepsOutFromBehindWhatsInFrontOfItsBough() {
+        let request = ribbonRequests()[0]
+        let free = BannerLayout.hang([request], obstacles: [], bounds: bounds)[0]
+        let leaves = free.rect.insetBy(dx: -30, dy: -30)
+        let moved = BannerLayout.hang([.init(id: request.id, anchors: request.anchors, size: request.size, front: [leaves])],
+                                      obstacles: [], bounds: bounds)[0]
+        XCTAssertNotEqual(moved, free)
+        XCTAssertLessThan(BannerLayout.share(of: moved.rect, under: [leaves]), 1, "it hangs out from behind the leaves")
+    }
 }

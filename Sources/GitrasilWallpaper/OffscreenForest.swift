@@ -50,7 +50,9 @@ extension Offscreen {
                     forestLines = plan.lines
                 }
                 let start = DispatchTime.now().uptimeNanoseconds
-                let banners = landscape.plan(chosen, arrangement: arrangement, branchNames: true, repoNames: true)
+                let banners = landscape.plan(chosen, arrangement: arrangement, branchNames: true, repoNames: true,
+                                             hanging: background.settings.hangsBanners,
+                                             occluded: !background.settings.drawsAllBannersInView)
                 let planMs = Double(DispatchTime.now().uptimeNanoseconds - start) / 1e6
                 let canvas = Canvas { context, _ in landscape.draw(chosen, arrangement: arrangement, in: &context) }
                 let drawMs = median(3) { render(canvas, screen: screen, dark: dark) }
@@ -61,9 +63,10 @@ extension Offscreen {
                 let named = Set(banners.ribbons.map(\.pane))
                 let unnamed = scene.tree.filter { !named.contains($0.id) }.map(\.name)
                 if !unnamed.isEmpty { print("    no ribbon: \(unnamed.joined(separator: ", "))") }
+                let hidden = banners.ribbons.filter { $0.hiddenFrom != nil }.count + banners.banners.filter { $0.hiddenFrom != nil }.count
                 print("  N=\(count) \(screen.name) tree \(scene.tree.count) forest \(scene.forest.count) · tree \(f1(treeScale)) px/unit "
                       + "crown \(f1(crown)) · forest \(f1(forestScale)) px/unit \(forestLines) lines · ribbons \(banners.ribbons.count) "
-                      + "pennants \(banners.banners.count)/\(wanted) · plan \(f1(planMs)) ms draw \(f1(drawMs)) ms")
+                      + "pennants \(banners.banners.count)/\(wanted) · hidden \(hidden) · plan \(f1(planMs)) ms draw \(f1(drawMs)) ms")
                 if output.contains("single") {
                     let view = ZStack {
                         paperCanvas(background, style: style)
