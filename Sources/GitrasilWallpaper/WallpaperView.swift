@@ -508,16 +508,26 @@ struct TreeDrawing {
     ///
     /// Without `groups` the whole tree's wood is one piece. With them, each group of stems (a bough of
     /// the single tree, say) is painted whole in turn, wood, outlines and leaves, over an opaque
-    /// underlay, so a later group hides what it passes in front of. `foliage` puts leafy twigs along
-    /// every trunk with commits (a bough's main). `emerging` stems come toward the viewer out of the
-    /// face of wood in an earlier group, and fade in from their feet (`fadeIn`).
+    /// underlay, so a later group hides what it passes in front of. A stem forking from wood in an earlier
+    /// group (a bough off the shared trunk) fades in from its foot (`fadeIn`), so it grows out of that wood
+    /// rather than lying on it as a piece of its own, with a cut end, a rim or a tone that isn't the
+    /// trunk's. `foliage` puts leafy twigs along every trunk with commits (a bough's main). `emerging`
+    /// stems come toward the viewer out of the face of wood in an earlier group.
     func draw(_ stems: [TreeLayout.Stem], seeds: [String], parents: [Int?], rootedAt ground: Int?, rootSeed: String,
               groups: [[Int]]? = nil, emerging: Set<Int> = [], foliage: Foliage? = nil, in context: inout GraphicsContext) {
         for stem in stems { canopy(stem, in: &context) }
-        let outlines = stems.map(outline)
+        var outlines = stems.map(outline)
         let woodSeeds = zip(stems, seeds).map { woodSeed($0, repo: $1) }
-        let tapers = zip(outlines, woodSeeds).map { samples, seed in
-            samples.count >= 2 ? taper(samples, seed: seed) : Taper()
+        let groupOf = (groups ?? []).enumerated().reduce(into: [Int: Int]()) { result, group in
+            for index in group.element { result[index] = group.offset }
+        }
+        var tapers: [Taper] = []
+        for index in stems.indices {
+            // Parents come first, so a grafted stem's parent already has its shape.
+            if let parent = parents[index], parent < index, let group = groupOf[index], groupOf[parent] != group {
+                outlines[index] = graft(outlines[index], into: tapers[parent].shape, own: (stems[index].nodes.first?.width ?? 0) * frame.scale)
+            }
+            tapers.append(outlines[index].count >= 2 ? taper(outlines[index], seed: woodSeeds[index]) : Taper())
         }
         let shapes = tapers.map(\.shape)
         let tops = stems.map(top)
@@ -526,6 +536,7 @@ struct TreeDrawing {
         for group in groups ?? [Array(stems.indices)] {
             let roots = ground.flatMap { group.contains($0) ? self.roots(of: stems[$0], seed: rootSeed) : nil } ?? []
             let pieces = group.map { shapes[$0] } + group.compactMap { tops[$0] }
+            let grafted = group.filter { index in parents[index].map { !group.contains($0) } ?? false }
             func paint(_ context: inout GraphicsContext) {
                 if groups != nil {
                     for piece in pieces + roots { context.fill(piece, with: .color(style.paper[1])) }
@@ -533,9 +544,10 @@ struct TreeDrawing {
                 if style.layeredWood {
                     strokes(group, outlines, pieces: pieces, shapes, pressure, roots: roots, tops: tops, in: &context)
                 } else {
-                    // A stem growing out of other wood has a rounded base, so no cut end shows past its parent.
+                    // A stem growing out of other wood has a rounded base, so no cut end shows past its parent
+                    // (one grafted on fades in instead).
                     let feet = group.compactMap { index -> Path? in
-                        guard stems[index].fork != nil, let base = outlines[index].first else { return nil }
+                        guard stems[index].fork != nil, !grafted.contains(index), let base = outlines[index].first else { return nil }
                         let r = base.width / 2
                         return Path(ellipseIn: CGRect(x: base.point.x - r, y: base.point.y - r, width: 2 * r, height: 2 * r))
                     }
@@ -550,13 +562,15 @@ struct TreeDrawing {
                     rootLines(roots, around: ground.map { tapers[$0].shape }, seed: rootSeed, in: &context)
                 }
             }
-            let fading = group.filter(emerging.contains)
-            if fading.isEmpty {
+            if grafted.isEmpty {
                 paint(&context)
             } else {
                 context.drawLayer { layer in
                     paint(&layer)
-                    for index in fading { fadeIn(index, stems, outlines, in: &layer) }
+                    for index in grafted {
+                        let parent = parents[index] ?? 0
+                        fadeIn(index, stems, outlines, over: [shapes[parent]] + [tops[parent]].compactMap { $0 }, in: &layer)
+                    }
                 }
             }
             for index in group {
@@ -839,28 +853,6 @@ struct TreeDrawing {
         context.clip(to: Path(bounds.insetBy(dx: -6, dy: -6)))
         for path in hidden { context.clip(to: path, options: .inverse) }
     }
-
-    /// Fades out the start of stem `index`'s wood in `layer`, so it grows out of the wood under it: gone
-    /// at its foot, fully there by `emergence` of its parent's width along it, with no disc at the joint.
-    private func fadeIn(_ index: Int, _ stems: [TreeLayout.Stem], _ outlines: [[(point: CGPoint, width: CGFloat)]],
-                        in layer: inout GraphicsContext) {
-        guard let fork = stems[index].fork, let foot = outlines[index].first?.point, let end = outlines[index].last?.point else { return }
-        let length = max(fork.width * frame.scale * Self.emergence, 1)
-        // Its direction from the foot, by where it is once it has faded in.
-        let ahead = outlines[index].first { hypot($0.point.x - foot.x, $0.point.y - foot.y) >= length }?.point ?? end
-        let span = max(hypot(ahead.x - foot.x, ahead.y - foot.y), 0.001)
-        let to = CGPoint(x: foot.x + (ahead.x - foot.x) / span * length, y: foot.y + (ahead.y - foot.y) / span * length)
-        var eraser = layer
-        eraser.blendMode = .destinationOut
-        eraser.fill(Path(ellipseIn: CGRect(x: foot.x - length, y: foot.y - length, width: 2 * length, height: 2 * length)),
-                    with: .linearGradient(Gradient(stops: [.init(color: .black, location: 0),
-                                                           .init(color: .black.opacity(0.45), location: 0.4),
-                                                           .init(color: .black.opacity(0), location: 1)]),
-                                          startPoint: foot, endPoint: to))
-    }
-
-    /// How far along an emerging stem it fades in, as a fraction of its parent's width (`fadeIn`).
-    static let emergence: CGFloat = 0.6
 
     /// How far from its fork stem `index` is still part of the join: past its collar, by its parent's width.
     private func reach(_ index: Int, _ stems: [TreeLayout.Stem], _ outlines: [[(point: CGPoint, width: CGFloat)]]) -> CGFloat {
