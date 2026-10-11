@@ -121,13 +121,69 @@ final class OcclusionTests: XCTestCase {
 
     // MARK: Gusts
 
-    func testAHangingPennantIsLiftedByAGustAndFallsBack() {
-        let still = BannerLayer.lift("fix/x", side: 1, droop: 72, strength: 0, seconds: 100)
-        XCTAssertEqual(still, 72, accuracy: 1e-9, "still, it dangles")
-        XCTAssertEqual(BannerLayer.lift("fix/x", side: -1, droop: 72, strength: 0, seconds: 100), -72, accuracy: 1e-9)
-        for seconds in stride(from: 0.0, to: 6, by: 0.25) {
-            let peak = BannerLayer.lift("fix/x", side: 1, droop: 72, strength: 1, seconds: seconds)
-            XCTAssertEqual(peak, BannerLayer.lifted, accuracy: 3.4 * 1.8 + 1e-9, "at the gust's peak it's held up near level")
+    private func hanging(side: Double, droop: Double = 72) -> BannerLayout.Banner {
+        let tip = CGPoint(x: 400, y: 300), hook = CGPoint(x: 400, y: 330), size = CGSize(width: 110, height: 22)
+        return BannerLayout.Banner(id: "fix/x", tip: tip, hook: hook, rect: BannerLayout.pennant(at: hook, side: side, size: size),
+                                   side: side, droop: droop)
+    }
+
+    func testAHangingPennantSwingsOutOnItsThreadInAGustAndFallsBack() {
+        for side in [1.0, -1.0] {
+            let banner = hanging(side: side)
+            let still = BannerLayer.pose(banner, strength: 0, flap: BannerLayer.sway("fix/x", side: 1, lift: 0, strength: 0, seconds: 100))
+            XCTAssertEqual(still, BannerLayer.Pose(swing: 0, turn: side * 72), "still, its thread hangs straight down and it dangles")
+            for seconds in stride(from: 0.0, to: 6, by: 0.25) {
+                let flap = BannerLayer.sway("fix/x", side: 1, lift: 0, strength: 1, seconds: seconds)
+                XCTAssertLessThanOrEqual(abs(flap), BannerLayer.flap + 1e-9)
+                let peak = BannerLayer.pose(banner, strength: 1, flap: flap)
+                XCTAssertEqual(peak.turn, side * BannerLayer.lifted, accuracy: BannerLayer.flap * 1.8 + 1e-9,
+                               "at the gust's peak it's held up near level")
+                XCTAssertEqual(peak.swing, -side * BannerLayer.swung, accuracy: BannerLayer.flap * 1.3 + 1e-9)
+                // Out to the side it streams to, and up.
+                let hook = banner.hook(swung: peak.swing)
+                XCTAssertGreaterThan((hook.x - banner.tip.x) * side, 0)
+                XCTAssertLessThan(hook.y, banner.hook.y)
+            }
+        }
+    }
+
+    func testEveryPoseOfAGustKeepsAStreamingPennantInsideItsBox() {
+        // The widest pennants rise the most as they turn; hooks above, level with and below their tips.
+        for width in [60.0, 165, 240, 320] {
+            for side in [1.0, -1.0] {
+                for rise in [-30.0, 0, 30] {
+                    let tip = CGPoint(x: 400, y: 300), hook = CGPoint(x: 400 + side * 40, y: 300 + rise)
+                    let banner = BannerLayout.Banner(id: "fix/wide", tip: tip, hook: hook,
+                                                     rect: BannerLayout.pennant(at: hook, side: side,
+                                                                                size: CGSize(width: width, height: 22)),
+                                                     side: side)
+                    let box = BannerPlan.Hanging.box(of: banner)
+                    for step in 0...20 {
+                        for seconds in stride(from: 0.0, to: 8, by: 0.05) {
+                            let turn = BannerLayer.sway("fix/wide", side: side, lift: BannerLayer.streamLift,
+                                                        strength: Double(step) / 20, seconds: seconds)
+                            XCTAssertTrue(box.contains(banner.footprint(swung: 0, turned: turn)),
+                                          "width \(width), side \(side), rise \(rise), turn \(turn)")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func testNoPoseOfAGustHangsAPennantLowerThanItHangsStill() {
+        for droop in [66.0, 72, 80] {
+            for side in [1.0, -1.0] {
+                let banner = hanging(side: side, droop: droop), floor = banner.footprint.maxY
+                for step in 0...40 {
+                    let strength = Double(step) / 40
+                    for flap in [-1.0, 0, 1] {
+                        let pose = BannerLayer.pose(banner, strength: strength, flap: flap * BannerLayer.flap * strength)
+                        XCTAssertLessThanOrEqual(banner.footprint(swung: pose.swing, turned: pose.turn).maxY, floor + 1,
+                                                 "droop \(droop), side \(side), strength \(strength)")
+                    }
+                }
+            }
         }
     }
 }

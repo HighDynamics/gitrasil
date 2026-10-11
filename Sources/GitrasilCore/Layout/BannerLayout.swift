@@ -15,7 +15,7 @@ import CoreGraphics
 /// every pennant placed before it, inside the bounds; among those it takes the first that's clear of
 /// the crown (the obstacles), else the one that covers the least of it. A tip with no such spot gets
 /// no banner, rather than one piled on another. Hung from its bough instead (`place`'s `hanging`), a
-/// pennant dangles from a short thread under its tip.
+/// pennant dangles from a thread hanging straight down from its tip.
 public enum BannerLayout {
 
     public struct Request: Sendable, Equatable {
@@ -60,6 +60,20 @@ public enum BannerLayout {
         /// What it covers while still: its rect, turned down by `droop` about its hook.
         public var footprint: CGRect { BannerLayout.turned(rect, about: hook, degrees: side * droop) }
 
+        /// Where the hook is with the thread swung `swing` degrees about the tip, clockwise on the screen
+        /// (so, for a thread hanging down, toward the left).
+        public func hook(swung swing: Double) -> CGPoint {
+            let a = swing * .pi / 180, dx = hook.x - tip.x, dy = hook.y - tip.y
+            return CGPoint(x: tip.x + dx * CGFloat(cos(a)) - dy * CGFloat(sin(a)), y: tip.y + dx * CGFloat(sin(a)) + dy * CGFloat(cos(a)))
+        }
+
+        /// What it covers with its thread swung `swing` degrees about the tip and the pennant turned
+        /// `turn` degrees from level about the hook, both clockwise on the screen.
+        public func footprint(swung swing: Double, turned turn: Double) -> CGRect {
+            let moved = hook(swung: swing)
+            return BannerLayout.turned(rect.offsetBy(dx: moved.x - hook.x, dy: moved.y - hook.y), about: moved, degrees: turn)
+        }
+
         /// The same, closer: a streaming pennant's rect, or boxes around stretches of a dangling one, which
         /// a single box around it would overstate by half again.
         public var pieces: [CGRect] {
@@ -79,9 +93,10 @@ public enum BannerLayout {
     /// Thread lengths tried, and angles below the horizontal (radians; positive hangs lower).
     static let reaches: [CGFloat] = [24, 36, 50, 66, 86, 110, 140, 175]
     static let angles: [Double] = [0.3, 0.6, 0.05, 0.9, -0.25, 1.2, -0.55, -0.85]
-    /// The same for a pennant hanging from its bough: a short thread, down from the tip.
-    static let hangingReaches: [CGFloat] = [6, 12, 19, 26, 34, 44, 56]
-    static let hangingAngles: [Double] = [1.35, 1.1, 1.55, 0.85, 0.6, 0.35]
+    /// The same for a pennant hanging from its bough: its thread hangs straight down from the tip, as
+    /// gravity has it, so only its length is chosen.
+    static let hangingReaches: [CGFloat] = [6, 10, 14, 19, 24, 30, 37, 45, 54, 64]
+    static let hangingAngles: [Double] = [.pi / 2]
     /// How far below level a hanging pennant dangles while still, in degrees (seeded by its id).
     public static let dangle: ClosedRange<Double> = 66...80
 
@@ -95,9 +110,9 @@ public enum BannerLayout {
     ///   - obstacles: the crown (wood and leaves), as rects to keep pennants off.
     ///   - taken: anything already on screen that pennants must not cover (other text).
     ///   - bounds: where pennants may go.
-    ///   - hanging: each pennant hangs from its bough instead: on a short thread down from its tip, it
+    ///   - hanging: each pennant hangs from its bough instead: on a thread straight down from its tip, it
     ///     dangles from its hook (`dangle`), and what it covers dangling is what's kept clear. It has
-    ///     to hang near its tip, so fewer find room than stream out.
+    ///     to hang under its tip, so fewer find room than stream out.
     public static func place(_ requests: [Request], obstacles: [CGRect], taken: [CGRect] = [],
                              bounds: CGRect, hanging: Bool = false) -> [Banner] {
         let crown = Crown(obstacles)

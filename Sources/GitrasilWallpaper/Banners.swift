@@ -28,18 +28,48 @@ struct BannerPlan {
         /// (`Occlusion`); nil when nothing hides it.
         var hiddenFrom: Int?
 
+        /// What its view covers (`box(of:)`), worked out once as it's planned, not every frame of a gust.
+        let box: CGRect
+
         var id: String { banner.id }
 
-        /// What its view covers: its tip, its thread and its pennant in every pose a gust swings it
-        /// through (from dangling to nearly level, for one hanging from its bough), with room to sway.
-        var box: CGRect {
-            var box = banner.rect.union(CGRect(origin: banner.tip, size: .zero))
-            if banner.droop > 0 {
-                for step in 1...8 {
-                    box = box.union(BannerLayout.turned(banner.rect, about: banner.hook, degrees: banner.side * banner.droop * Double(step) / 8))
+        init(banner: BannerLayout.Banner, pane: String, stem: String, stretch: TreeLayout.Stretch, name: String, ink: Color,
+             alpha: Double, fontSize: CGFloat, hiddenFrom: Int? = nil) {
+            self.banner = banner
+            self.pane = pane
+            self.stem = stem
+            self.stretch = stretch
+            self.name = name
+            self.ink = ink
+            self.alpha = alpha
+            self.fontSize = fontSize
+            self.hiddenFrom = hiddenFrom
+            box = Self.box(of: banner)
+        }
+
+        /// What a banner's view covers: its tip, its thread and its pennant in every pose a gust swings it
+        /// through, with room to sway. One streaming from its thread turns about its hook by the gust's
+        /// flutter and lift, at most `flap` + `streamLift` either way (`BannerLayer.sway`); one hanging
+        /// from its bough swings out on its thread and is lifted from dangling to nearly level
+        /// (`BannerLayer.pose`), fluttering either way as it goes.
+        static func box(of banner: BannerLayout.Banner) -> CGRect {
+            let tip = CGRect(origin: banner.tip, size: .zero)
+            guard banner.droop > 0 else {
+                let reach = BannerLayer.flap + BannerLayer.streamLift
+                return [-reach, reach].reduce(banner.rect.union(tip).insetBy(dx: -14, dy: -14)) { box, turn in
+                    box.union(BannerLayout.turned(banner.rect, about: banner.hook, degrees: turn).insetBy(dx: -6, dy: -6))
                 }
             }
-            return box.insetBy(dx: -14, dy: -14)
+            var box = banner.footprint.union(tip).union(CGRect(origin: banner.hook, size: .zero))
+            for step in 1...8 {
+                let strength = Double(step) / 8
+                for flutter in [-1.0, 0, 1] {
+                    let pose = BannerLayer.pose(banner, strength: strength, flap: flutter * BannerLayer.flap * strength)
+                    box = box.union(banner.footprint(swung: pose.swing, turned: pose.turn))
+                        .union(CGRect(origin: banner.hook(swung: pose.swing), size: .zero))
+                }
+            }
+            return box.insetBy(dx: -6, dy: -6)
         }
     }
 
@@ -548,9 +578,11 @@ struct BannerLayer: View {
                 ForEach(plan.banners) { hanging in
                     let banner = hanging.banner
                     BannerView(hanging: hanging, style: style, occlusion: plan.occlusion,
-                               angle: banner.droop > 0
-                                   ? Self.lift(hanging.id, side: banner.side, droop: banner.droop, strength: strength, seconds: seconds)
-                                   : Self.sway(hanging.id, side: banner.side, lift: 1.8, strength: strength, seconds: seconds))
+                               pose: banner.droop > 0
+                                   ? Self.pose(banner, strength: strength,
+                                               flap: Self.sway(hanging.id, side: 1, lift: 0, strength: strength, seconds: seconds))
+                                   : Pose(swing: 0, turn: Self.sway(hanging.id, side: banner.side, lift: Self.streamLift,
+                                                                    strength: strength, seconds: seconds)))
                         .opacity(shown[hanging.id] ?? 1)
                 }
             }
@@ -570,15 +602,32 @@ struct BannerLayer: View {
         return strength * side * (swing - lift)
     }
 
+    /// How a banner hangs at a moment, in degrees clockwise on the screen: its thread swung `swing`
+    /// about its tip, its pennant turned `turn` from level about its hook.
+    struct Pose: Equatable {
+        var swing: Double
+        var turn: Double
+    }
+
     /// How far below level a pennant hanging from its bough is held up by the wind at its strongest.
     static let lifted = 12.0
+    /// How far out from straight down the wind swings its thread at its strongest.
+    static let swung = 34.0
+    /// The most a gust's flutter (`sway`) turns a banner either way, at full strength.
+    static let flap = 3.4
+    /// How far the wind lifts a streaming pennant's free end at its strongest (`sway`'s `lift`).
+    static let streamLift = 1.8
 
-    /// A hanging pennant's turn about its hook, in degrees: dangling `droop` below level while it's
-    /// still, lifted toward level (`lifted`) as a gust rises, flapping a little more than a streaming
-    /// one sways, and falling back to dangling as the gust passes.
-    static func lift(_ id: String, side: Double, droop: Double, strength: Double, seconds: TimeInterval) -> Double {
-        let flap = sway(id, side: 1, lift: 0, strength: strength, seconds: seconds) * 1.8
-        return side * (droop - (droop - lifted) * strength + flap)
+    /// A pennant hanging from its bough at `strength` (0…1), the wind fluttering it by `flap` degrees
+    /// (from `sway`): still, its thread hangs straight down from its tip and the pennant dangles `droop`
+    /// below level from the hook. The wind swings the two out together like a pendulum, toward the
+    /// side the pennant streams to, and lifts the pennant toward level (`lifted`); the flutter rocks
+    /// both the same way at once, the pennant more. As the gust passes they fall back to hanging still.
+    static func pose(_ banner: BannerLayout.Banner, strength: Double, flap: Double) -> Pose {
+        // Positive turns clockwise: a thread swinging out to the right turns anticlockwise, and a
+        // pennant streaming right drops as it turns clockwise.
+        Pose(swing: banner.side * (flap * 1.3 - swung * strength),
+             turn: banner.side * (banner.droop - (banner.droop - lifted) * strength + flap * 1.8))
     }
 }
 
@@ -747,27 +796,38 @@ struct RibbonShape: View, Equatable {
     }
 }
 
-/// One banner: the thread from its tip, and the pennant hanging from the hook, turned by `angle`.
+/// One banner: the thread from its tip, and the pennant hanging from the hook, in its `pose`. A thread
+/// hanging from its bough is drawn once, straight down, and swung about the tip, and the pennant
+/// follows its end, so a gust frame only moves and turns the two layers.
 private struct BannerView: View {
     let hanging: BannerPlan.Hanging
     let style: WallpaperStyle
     let occlusion: Occlusion?
-    let angle: Double
+    let pose: BannerLayer.Pose
 
     var body: some View {
         let banner = hanging.banner
         // A box around the tip, the hook and the pennant, with room for its swing.
         let box = hanging.box
+        let hook = banner.hook(swung: pose.swing)
         ZStack(alignment: .topLeading) {
-            Thread(tip: CGPoint(x: banner.tip.x - box.minX, y: banner.tip.y - box.minY),
-                   hook: CGPoint(x: banner.hook.x - box.minX, y: banner.hook.y - box.minY),
-                   seed: HandDrawn.seed(hanging.id), hand: style.hand)
-                .stroke(style.ink.opacity(0.42), style: StrokeStyle(lineWidth: 0.7, lineCap: .round))
+            if banner.droop > 0 {
+                Plumb(seed: HandDrawn.seed(hanging.id), hand: style.hand)
+                    .stroke(style.ink.opacity(0.42), style: StrokeStyle(lineWidth: 0.7, lineCap: .round))
+                    .frame(width: Plumb.width, height: banner.hook.y - banner.tip.y + Plumb.knot)
+                    .rotationEffect(.degrees(pose.swing), anchor: UnitPoint(x: 0.5, y: 0))
+                    .offset(x: banner.tip.x - Plumb.width / 2 - box.minX, y: banner.tip.y - box.minY)
+            } else {
+                Thread(tip: CGPoint(x: banner.tip.x - box.minX, y: banner.tip.y - box.minY),
+                       hook: CGPoint(x: banner.hook.x - box.minX, y: banner.hook.y - box.minY),
+                       seed: HandDrawn.seed(hanging.id), hand: style.hand)
+                    .stroke(style.ink.opacity(0.42), style: StrokeStyle(lineWidth: 0.7, lineCap: .round))
+            }
             Pennant(hanging: hanging, style: style)
                 .equatable()
                 .frame(width: banner.rect.width, height: banner.rect.height)
-                .rotationEffect(.degrees(angle), anchor: UnitPoint(x: banner.side > 0 ? 0 : 1, y: 0))
-                .offset(x: banner.rect.minX - box.minX, y: banner.rect.minY - box.minY)
+                .rotationEffect(.degrees(pose.turn), anchor: UnitPoint(x: banner.side > 0 ? 0 : 1, y: 0))
+                .offset(x: banner.rect.minX + hook.x - banner.hook.x - box.minX, y: banner.rect.minY + hook.y - banner.hook.y - box.minY)
         }
         .frame(width: box.width, height: box.height, alignment: .topLeading)
         .hidden(behind: occlusion, from: hanging.hiddenFrom, box: box)
@@ -799,6 +859,26 @@ private struct Thread: Shape {
             path.move(to: tip)
             path.addQuadCurve(to: hook, control: control)
         }
+        path.addEllipse(in: CGRect(x: hook.x - 1.4, y: hook.y - 1.4, width: 2.8, height: 2.8))
+        return path
+    }
+}
+
+/// A thread hanging straight down from the top middle of its frame to a knot at the bottom, as gravity
+/// pulls it, not quite true when drawn by hand.
+private struct Plumb: Shape {
+    let seed: UInt64
+    let hand: CGFloat
+
+    /// Its frame's width, with room for the hand's wobble and the knot; and how far the frame reaches
+    /// below the hook, for the knot.
+    static let width: CGFloat = 6
+    static let knot: CGFloat = 1.4
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let top = CGPoint(x: rect.midX, y: 0), hook = CGPoint(x: rect.midX, y: rect.height - Self.knot)
+        path.addLines(Sketched.line(from: top, to: hook, seed: seed, hand: hand * 0.8))
         path.addEllipse(in: CGRect(x: hook.x - 1.4, y: hook.y - 1.4, width: 2.8, height: 2.8))
         return path
     }

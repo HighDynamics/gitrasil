@@ -35,7 +35,10 @@ painted in front of it:
    and twigs wholly outside the box (`TreeDrawing.only`), using up its random numbers all the same, so the ones
    inside come out exactly as the tree draws them.
 4. **Gusts.** The mask is fixed on the screen and the banner turns under it, so a bough in front stays put while
-   the banner sways behind it. The mask is drawn once per plan (an equatable view), never per frame.
+   the banner sways behind it. The mask is drawn once per plan (an equatable view), never per frame. A banner's
+   box (`Hanging.box`), which the mask covers, takes in every pose a gust turns it through: a streaming pennant
+   turns up to 5.2° either way about its hook (flutter and lift), which lifts a wide one's free end well past
+   the box's margin. It's worked out once as the plan is made, not every frame.
 5. **Mostly hidden names come forward.** At 32 boughs the front boughs' leaves cover the middle of the crown,
    and true occlusion lost whole repository names there (tamarack, yucca, olive, mahogany in the fixtures). So:
    - Ribbons are placed to keep out from behind the crown painted after their own bough: covering it costs twice
@@ -58,17 +61,26 @@ The forest behind the single tree is painted before it, so it never hides the tr
 
 *Hang Banners from Boughs*: a branch's pennant hangs from its bough instead of streaming out on a long thread.
 
-- **Placement.** Its hook is just under its tip (a short thread, 6–56 pt), and it dangles from its hoist, a
-  seeded 66–80° below level, toward its outward side. Placement keeps the dangling pennant off the other banners
+- **Placement.** Its thread hangs straight down from its tip, as gravity has it (6–64 pt; only the length and
+  the side are chosen), and the pennant dangles from its hoist at the thread's end, a seeded 66–80° below level,
+  toward its outward side. (A first version slanted the thread out from the tip; Daniel, live: "the attaching
+  string is still floating magically. The attaching string should be practically vertical".) Placement keeps the dangling pennant off the other banners
   and the crown, as it does today for streaming ones. A box around a slanting pennant would overstate it by half
   again, so collisions and cover use five boxes along it (`Banner.pieces`); the bounds check uses the whole box.
-- **Fewer fit.** A pennant has to hang near its tip, and tips cluster, so far fewer find room than stream out:
-  in the fixtures 19–24 of 52 at 8 boughs, 34–42 of 128 at 20, 29–34 of 202 at 32 (streaming: 44–47, 79–82,
-  82–84). The rest are rejected for overlapping. Accepted: it's an option, and the ones it shows are the most
-  important (the order is the same).
-- **Gusts.** The same gust strength (rising and falling over 7 s) lifts it: from dangling to about 12° below
-  level at the height of the gust, flapping a little more than today's sway, and it falls back to dangling as
-  the gust passes. Still one rotation per banner per frame; only its view is bigger, to hold every pose.
+- **Fewer fit.** A pennant has to hang right under its tip, and tips cluster, so far fewer find room than stream
+  out: in the fixtures 15–16 of 52 at 8 boughs, 25–29 of 128 at 20, 19–22 of 202 at 32 (streaming: 44–47,
+  79–82, 82–84; with the slanting thread it was 19–24, 34–42, 29–34). The rest are rejected for overlapping.
+  Longer threads (to 90 pt) won only one or two more, so they stop at 64. Accepted: it's an option, and the ones
+  it shows are the most important (the order is the same).
+- **Gusts.** The same gust strength (rising and falling over 7 s) swings thread and pennant out together like a
+  pendulum about the tip (`BannerLayer.pose`): the thread up to 34° from straight down, toward the side the
+  pennant streams to, and the pennant lifted from dangling to about 12° below level. The gust's seeded flutter
+  rocks both the same way at once, the pennant more, and as the gust passes they fall back to hanging still.
+  Still no redraw per frame: the thread is drawn once, straight down, and turned about the tip; the pennant is
+  turned about its hook and moved to the thread's end. Two transforms per banner instead of one; its view is
+  bigger, to hold every pose of the swing.
+- **The floor.** Still, the thread hangs at its longest and the pennant at its lowest; every pose of a gust is
+  higher, so the floor check on the still pose holds through the gust (tested).
 - **Ribbons** already hang from their boughs on cords, so they're unchanged.
 
 ## Low banners
@@ -93,18 +105,21 @@ overestimate of the screen's cost). The trees take 96–106 ms either way.
   (34 of 54 masked). Most of a mask's cost is the extra layer; drawing what's in front, culled to the box, is
   about 1 ms. Only when the plan changes.
 - A gust frame turns the same layers either way, and redraws neither the tree nor a mask: all in view, 107
-  layers and 1.28 Mpt² composited; masked, 107 layers (65 masked) and 2.07 Mpt²; hanging, 54 layers (34
-  masked) and 1.17 Mpt². The extra per frame is compositing the masks: about 1.6× the area.
+  layers and 1.28 Mpt² composited; masked, 107 layers (65 masked) and 2.07 Mpt²; hanging, 44 layers (27
+  masked) and 0.88 Mpt², each pennant moving its thread and its pennant (with the slanting thread: 54 layers, 34
+  masked, 1.17 Mpt²; about as much area per banner). The extra per frame is compositing the masks: about 1.6×
+  the area.
 
 ## Tests
 
-- `BannerLayout`: turning a rect; a dangling pennant's footprint and pieces, mirrored to the left; each pennant's
-  seeded dangle; hanging pennants hook near their tips, never overlap, stay in bounds; the floor keeps pennants
+- `BannerLayout`: turning a rect; a dangling pennant's footprint and pieces, mirrored to the left; a swung thread
+  carries its pennant; each pennant's seeded dangle; hanging pennants hang straight down from their tips on short
+  threads, never overlap, stay in bounds; the floor keeps pennants
   above it; the sampled share of a rect under others; a ribbon keeps out from behind what's in front.
 - `BackgroundSettings`: both settings default off, persist, and read back.
 - Wallpaper: the paint order (crown first, front boughs last); a mask cuts out the wood in front and nothing
-  when nothing's in front (rendered); the hanging sway dangles when still and lifts toward level at the height of
-  a gust.
+  when nothing's in front (rendered); a hanging pennant hangs plumb when still, swings out and lifts toward level
+  at the height of a gust; no pose of a gust hangs it lower than it hangs still.
 
 ## Checks
 

@@ -177,6 +177,26 @@ final class BannerLayoutTests: XCTestCase {
         XCTAssertEqual(left.footprint.height, footprint.height, accuracy: 1e-9)
     }
 
+    func testASwungThreadCarriesItsPennantWithIt() {
+        let rect = CGRect(x: 100, y: 70, width: 100, height: 20)
+        let banner = BannerLayout.Banner(id: "x", tip: CGPoint(x: 100, y: 40), hook: CGPoint(x: 100, y: 70), rect: rect, side: 1,
+                                         droop: 75)
+        XCTAssertEqual(banner.hook(swung: 0), banner.hook)
+        XCTAssertEqual(banner.footprint(swung: 0, turned: 75), banner.footprint)
+        // Swung 90° anticlockwise, the thread stands out level to the right of the tip.
+        let out = banner.hook(swung: -90)
+        XCTAssertEqual(out.x, 130, accuracy: 1e-9)
+        XCTAssertEqual(out.y, 40, accuracy: 1e-9)
+        let level = banner.footprint(swung: -90, turned: 0)
+        XCTAssertEqual(level.minX, 130, accuracy: 1e-9)
+        XCTAssertEqual(level.minY, 40, accuracy: 1e-9)
+        XCTAssertEqual(level.size, rect.size)
+        // Swung a little, the hook stays on the thread's circle about the tip.
+        let hook = banner.hook(swung: 20)
+        XCTAssertEqual(hypot(hook.x - 100, hook.y - 40), 30, accuracy: 1e-9)
+        XCTAssertLessThan(hook.x, 100, "clockwise swings it left")
+    }
+
     func testEachPennantDanglesItsOwnSeededAmount() {
         let a = BannerLayout.dangle("fix/one"), b = BannerLayout.dangle("fix/two")
         XCTAssertTrue(BannerLayout.dangle.contains(a))
@@ -190,8 +210,9 @@ final class BannerLayoutTests: XCTestCase {
         XCTAssertGreaterThan(banners.count, 4)
         for (i, a) in banners.enumerated() {
             XCTAssertTrue(BannerLayout.dangle.contains(a.droop), "\(a.id) dangles")
-            XCTAssertLessThanOrEqual(hypot(a.hook.x - a.tip.x, a.hook.y - a.tip.y), 56 + 1e-6, "\(a.id) hangs on a short thread")
-            XCTAssertGreaterThanOrEqual(a.hook.y, a.tip.y, "\(a.id) hangs down from its tip")
+            XCTAssertEqual(a.hook.x, a.tip.x, accuracy: 1e-9, "\(a.id)'s thread hangs straight down")
+            XCTAssertGreaterThan(a.hook.y, a.tip.y, "\(a.id) hangs down from its tip")
+            XCTAssertLessThanOrEqual(a.hook.y - a.tip.y, 64 + 1e-6, "\(a.id) hangs on a short thread")
             XCTAssertTrue(bounds.contains(a.footprint), "\(a.id) dangles inside the bounds")
             for b in banners[(i + 1)...] {
                 for piece in a.pieces {
