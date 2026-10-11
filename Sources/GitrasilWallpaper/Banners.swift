@@ -111,6 +111,9 @@ struct BannerPlan {
     var ribbons: [Ribbon] = []
     /// What hides the banners, when each hangs at its bough's depth; nil when all are drawn in view.
     var occlusion: Occlusion?
+    /// Each repository's place in the order the trees or boughs are painted, by its pane's id
+    /// (`Fronts.places`), when banners can be hidden: what's painted after its place is in front of it.
+    var places: [String: Int] = [:]
 }
 
 extension Landscape {
@@ -251,6 +254,7 @@ extension Landscape {
     static func hidden(_ plan: BannerPlan, depths: [String: Int], fronts: BannerPlan.Fronts) -> BannerPlan {
         var plan = plan
         guard let occlusion = plan.occlusion else { return plan }
+        plan.places = fronts.places
         func behind(_ pane: String, _ box: CGRect, name: CGRect) -> Int? {
             guard let depth = depths[pane], occlusion.reaches(after: depth, into: box) else { return nil }
             return BannerLayout.share(of: name, under: fronts.rects(before: pane, near: name)) < mostlyHidden ? depth : nil
@@ -982,7 +986,8 @@ extension WallpaperView {
     /// tip (`TreeLayout.Stretch.nameShown`), a ribbon as its bough does; on a limb growing new
     /// commits, over the end of the growth. Banners on still wood aren't listed (they're shown). A banner
     /// hidden behind what's painted in front of it is masked by the full-grown trees, so on a tree growing
-    /// in it waits for every tree growing in to finish, rather than show holes where leaves are still to come.
+    /// in it waits for the trees painted in front of its own (`BannerPlan.places`) to finish, rather than
+    /// show holes where leaves are still to come; trees behind it can't make holes, so it doesn't wait for them.
     /// `growIn` is how far a pane's tree is in growing in at a date (`BackgroundModel.growIn`). Each
     /// banner carries its stretch from the plan, so a frame only looks up a progress or two per pane.
     static func shownBanners(_ plan: BannerPlan, panes: [WallpaperModel], at date: Date,
@@ -996,19 +1001,27 @@ extension WallpaperView {
             }
         }
         guard !growingIn.isEmpty || !growing.isEmpty else { return [:] }
-        var shown: [String: Double] = [:]
-        let last = TreeLayout.Stretch.nameFade, everyone = growingIn.values.min() ?? 1
-        let whole = min(max((everyone - (1 - last)) / last, 0), 1)
+        var shown: [String: Double] = [:], waits: [String: Double] = [:]
+        // How far a hidden banner on `pane` has faded in: as the last of the trees in front of its own grows in.
+        func whole(_ pane: String) -> Double {
+            if let wait = waits[pane] { return wait }
+            let place = plan.places[pane] ?? .max
+            let front = growingIn.filter { other, _ in (plan.places[other] ?? .min) > place }
+            let last = TreeLayout.Stretch.nameFade
+            let wait = front.values.min().map { min(max(($0 - (1 - last)) / last, 0), 1) } ?? 1
+            waits[pane] = wait
+            return wait
+        }
         for hanging in plan.banners {
             if let progress = growingIn[hanging.pane] {
-                shown[hanging.id] = min(hanging.stretch.nameShown(at: progress), hanging.hiddenFrom == nil ? 1 : whole)
+                shown[hanging.id] = min(hanging.stretch.nameShown(at: progress), hanging.hiddenFrom == nil ? 1 : whole(hanging.pane))
             } else if let (pane, progress) = growing[hanging.pane], pane.growth[hanging.stem] != nil {
                 shown[hanging.id] = min(max((progress - 0.85) / 0.15, 0), 1)
             }
         }
         for ribbon in plan.ribbons {
             if let progress = growingIn[ribbon.pane] {
-                shown[ribbon.id] = min(ribbon.stretch.nameShown(at: progress), ribbon.hiddenFrom == nil ? 1 : whole)
+                shown[ribbon.id] = min(ribbon.stretch.nameShown(at: progress), ribbon.hiddenFrom == nil ? 1 : whole(ribbon.pane))
             }
         }
         return shown
