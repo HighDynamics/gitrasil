@@ -213,8 +213,10 @@ public struct TreeLayout: Sendable {
         var rng = SeededRandom(SeededRandom.key(seed, shuffle: shuffle), -1)
         let sway = (amplitude: rng.next(in: 0.015...0.04), waves: rng.next(in: 0.6...1.3),
                     phase: rng.next(in: 0...(2 * .pi)), lean: rng.next(in: -0.07...0.07))
-        // A leaning trunk (a bough) is walked out along its length, straightening as it rises.
-        let arc = planting.isUpright ? [] : Self.bough(heading: planting.heading, length: height, straighten: planting.straighten)
+        // A leaning trunk (a bough) is walked out along its length, straightening as it rises and bending
+        // a little its own way.
+        let arc = planting.isUpright ? [] : Self.bough(heading: planting.heading, length: height, straighten: planting.straighten,
+                                                       bend: Bend(seed, shuffle: shuffle, side: planting.heading < 0 ? -1 : 1))
         func trunkPoint(_ h: Double) -> CGPoint {
             let t = h / max(height, 0.001)
             let x = sway.amplitude * sin(t * .pi * 2 * sway.waves + sway.phase) * t + sway.lean * t * t
@@ -545,9 +547,9 @@ public struct TreeLayout: Sendable {
     }
 
     /// Walk a limb out from its base, a step per commit: each step a little shorter than the last,
-    /// turning by a seeded amount and bending toward straight up, spread over a few sub-steps so a
-    /// long step curves too. `shown` commits are grown, the last one part-way. Returns the commit
-    /// nodes and the finer curve through them.
+    /// turning by a seeded amount, curling its own seeded way (`limbCurl`) and bending toward straight
+    /// up, spread over a few sub-steps so a long step curves too. `shown` commits are grown, the last
+    /// one part-way. Returns the commit nodes and the finer curve through them.
     static func grow(_ limb: RepoTree.Limb, from base: Node, lean: Double, scale: Double, shown: Double,
                      shuffle: Int = 0, tropism: Double = tropism, weight: (Int) -> Double) -> (nodes: [Node], curve: [Node]) {
         let steps = Int(ceil(shown))
@@ -558,6 +560,8 @@ public struct TreeLayout: Sendable {
         var point = base.point
         var length = (limb.isBud ? 0.35 : 1) * firstStep * scale
         let bendPerSubstep = 1 - pow(1 - tropism, 1 / Double(substeps))
+        // The same every step, so a new commit curls on as the others did and moves none of them.
+        let curl = curl(of: limb.name, shuffle: shuffle)
         for k in 1...steps {
             var rng = SeededRandom(SeededRandom.key(limb.name, shuffle: shuffle), k)
             let turn = rng.next(in: -11...11) * .pi / 180
@@ -567,7 +571,7 @@ public struct TreeLayout: Sendable {
                 let start = Double(j - 1) / Double(substeps)
                 guard fraction > start else { break }
                 let part = min(1 / Double(substeps), fraction - start)
-                heading += turn / Double(substeps)
+                heading += turn / Double(substeps) + curl * part
                 heading -= heading * bendPerSubstep
                 heading = min(max(heading, -1.75), 1.75)
                 point = CGPoint(x: point.x + sin(heading) * length * part, y: point.y + cos(heading) * length * part)
@@ -644,17 +648,59 @@ public struct TreeLayout: Sendable {
 
     /// Sub-steps per commit step in a limb's curve.
     static let substeps = 4
+    /// How far a limb curls its own way each step, in degrees (seeded by its name); tropism pulls it back
+    /// toward upright, so a long limb settles into a gentle arc rather than curling round.
+    static let limbCurl: ClosedRange<Double> = 1.2...3
+
+    /// How far the limb `name` curls each step, in radians, either way (`limbCurl`).
+    static func curl(of name: String, shuffle: Int) -> Double {
+        var rng = SeededRandom(SeededRandom.key(name, shuffle: shuffle), -21)
+        return (rng.next() < 0.5 ? -1 : 1) * rng.next(in: limbCurl) * .pi / 180
+    }
+
+    /// A bough's own gentle bend, on top of its straightening (`bough`): its heading at `t` along it (0 at
+    /// its foot, 1 at its tip) turns by `curl·t² + wave·sin(πt)·t`, a curl gathering toward the tip and a
+    /// bow along its middle. Both are nothing, and level, at the foot, so the bough still leaves where and
+    /// how its planting says.
+    public struct Bend: Sendable, Equatable {
+        /// Radians, positive turning clockwise (right, on a bough leaning right: down).
+        public var curl: Double
+        public var wave: Double
+
+        public static let none = Bend(curl: 0, wave: 0)
+
+        public init(curl: Double, wave: Double) {
+            self.curl = curl
+            self.wave = wave
+        }
+
+        /// Seeded by the repository's name (`seed`) and the layout seed, for a bough leaning to `side`
+        /// (-1 left, 1 right): the curl turns it up toward the light more often than down.
+        public init(_ seed: String, shuffle: Int, side: Double) {
+            var rng = SeededRandom(SeededRandom.key(seed, shuffle: shuffle), -3)
+            let up: Double = rng.next() < 0.68 ? -side : side
+            curl = up * rng.next(in: TreeLayout.boughCurl) * .pi / 180
+            wave = (rng.next() < 0.5 ? -1 : 1) * rng.next(in: TreeLayout.boughWave) * .pi / 180
+        }
+
+        /// How far it turns the heading at `t` along the bough.
+        public func turn(at t: Double) -> Double { curl * t * t + wave * sin(.pi * t) * t }
+    }
+
+    /// How far a bough's curl turns it by its tip, and its bow at most, in degrees.
+    static let boughCurl: ClosedRange<Double> = 4...12
+    static let boughWave: ClosedRange<Double> = 2...7
 
     /// A bough's centreline, from its foot, a point every `boughStep` of its length: it leaves at
     /// `heading` and straightens toward its tip, giving up `straighten` of its lean (by default, down to
-    /// about a third of it).
-    static func bough(heading: Double, length: Double, straighten: Double = boughStraighten) -> [CGPoint] {
+    /// about a third of it), and bends its own way (`bend`).
+    static func bough(heading: Double, length: Double, straighten: Double = boughStraighten, bend: Bend = .none) -> [CGPoint] {
         var points = [CGPoint.zero]
         var point = CGPoint.zero
         let count = Int(ceil((length + 0.05) / boughStep))
         for i in 1...max(count, 1) {
             let t = min(Double(i) / max(length / boughStep, 1), 1)
-            let h = heading * (1 - straighten * t)
+            let h = heading * (1 - straighten * t) + bend.turn(at: t)
             point = CGPoint(x: point.x + sin(h) * boughStep, y: point.y + cos(h) * boughStep)
             points.append(point)
         }

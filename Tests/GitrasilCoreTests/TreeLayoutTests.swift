@@ -463,16 +463,16 @@ final class TreeLayoutTests: XCTestCase {
         for stem in layout.stems { XCTAssertEqual(stem.curve.last, stem.nodes.last) }
         XCTAssertEqual(stem(layout, "mid")?.nodes.last?.width ?? 0, TreeLayout.width(weight: 0.5), accuracy: 1e-12,
                        "a childless limb still ends at the pipe model's floor")
-        // Each stem's last node as the layout placed it before the taper existed (recorded from main's
-        // node code, seed "ash"): x, y, width, heading.
+        // Each stem's last node as the layout places it without the taper (recorded from the node code,
+        // limbs' curl included, seed "ash"): x, y, width, heading.
         let reference: [String: (x: Double, y: Double, width: Double, heading: Double)] = [
             "main": (-0.02418423723063762, 1.0, 0.009474613391789283, -0.19116934729886464),
-            "one": (0.11883403307590866, 0.2861449896463577, 0.0051698484809835, 1.371484349456287),
-            "long": (0.4150207686886316, 0.7146781253086606, 0.010057480512225277, 0.26482676974655917),
-            "long-sub": (0.5372990508776461, 0.8556055366900073, 0.0051698484809835, 0.3732906309769736),
-            "bud": (-0.043805863975013154, 0.2654437674648494, 0.0051698484809835, -1.1297895137932747),
-            "mid": (-0.28674206045614836, 0.5975649663122765, 0.0051698484809835, -0.6277416490021319),
-            "at-the-tip": (-0.06234631035974431, 1.1099887859424826, 0.0051698484809835, -0.19271984873604858)
+            "one": (0.11858367453838087, 0.28776008100625833, 0.0051698484809835, 1.3506102276971834),
+            "long": (0.46481529997439025, 0.677346702456295, 0.010057480512225277, 0.44291174599243605),
+            "long-sub": (0.6083329809249897, 0.7961382953986901, 0.0051698484809835, 0.525862242195667),
+            "bud": (-0.04356234794511047, 0.26607653167143086, 0.0051698484809835, -1.1052664638230856),
+            "mid": (-0.2778161399441865, 0.6073300019327463, 0.0051698484809835, -0.5566903221559489),
+            "at-the-tip": (-0.060115359152481604, 1.1106094923270038, 0.0051698484809835, -0.1558512710169763)
         ]
         XCTAssertEqual(Set(layout.stems.compactMap(\.name)), Set(reference.keys))
         for (name, expected) in reference {
@@ -489,5 +489,54 @@ final class TreeLayoutTests: XCTestCase {
         let layout = YggdrasilLayout(repos: [repo, YggdrasilLayout.Repo(name: "elm", tree: tree())])
         XCTAssertFalse(layout.trunk.tapersToTip)
         for bough in layout.boughs { XCTAssertTrue(bough.layout.stems[0].tapersToTip, "a bough's trunk is a tree's and ends in a point") }
+    }
+
+    // MARK: Bending
+
+    func testABoughsBendIsSeededByItsNameAndGentle() {
+        let ash = TreeLayout.Bend("ash", shuffle: 0, side: 1)
+        XCTAssertEqual(ash, TreeLayout.Bend("ash", shuffle: 0, side: 1), "the same name bends the same")
+        XCTAssertNotEqual(ash, TreeLayout.Bend("elm", shuffle: 0, side: 1))
+        XCTAssertNotEqual(ash, TreeLayout.Bend("ash", shuffle: 7, side: 1), "a reshuffle bends it afresh")
+        let most = (TreeLayout.boughCurl.upperBound + TreeLayout.boughWave.upperBound) * .pi / 180
+        var ups = 0
+        let names = (0..<200).map { "repo\($0)" }
+        for name in names {
+            let bend = TreeLayout.Bend(name, shuffle: 0, side: 1)
+            let degrees = abs(bend.curl) * 180 / .pi
+            XCTAssertTrue(TreeLayout.boughCurl.contains(degrees), name)
+            XCTAssertTrue(TreeLayout.boughWave.contains(abs(bend.wave) * 180 / .pi), name)
+            for t in stride(from: 0.0, through: 1, by: 0.05) { XCTAssertLessThanOrEqual(abs(bend.turn(at: t)), most + 1e-12) }
+            XCTAssertEqual(bend.turn(at: 0), 0)
+            XCTAssertEqual(bend.turn(at: 0.001), 0, accuracy: 1e-4, "level at the foot")
+            if bend.curl < 0 { ups += 1 }
+            // A bough leaning left curls the mirror way.
+            XCTAssertEqual(TreeLayout.Bend(name, shuffle: 0, side: -1).curl, -bend.curl, accuracy: 1e-12)
+        }
+        XCTAssertGreaterThan(ups, names.count / 2, "most boughs curl up toward the light")
+        XCTAssertLessThan(ups, names.count, "and a few down")
+    }
+
+    func testABentBoughStillLeavesAtItsPlantingsHeading() {
+        let heading = 1.4, length = 0.8
+        let bend = TreeLayout.Bend(curl: -0.2, wave: 0.1)
+        let straight = TreeLayout.bough(heading: heading, length: length)
+        let bent = TreeLayout.bough(heading: heading, length: length, bend: bend)
+        XCTAssertEqual(bent.count, straight.count)
+        let first = atan2(bent[1].x - bent[0].x, bent[1].y - bent[0].y)
+        XCTAssertEqual(first, atan2(straight[1].x - straight[0].x, straight[1].y - straight[0].y), accuracy: 1e-5,
+                       "it leaves as its planting says")
+        XCTAssertEqual(first, heading, accuracy: 0.01)
+        XCTAssertLessThan(hypot(bent[3].x - straight[3].x, bent[3].y - straight[3].y), 1e-6, "and only bends further out")
+        let a = bent[bent.count - 2], b = bent[bent.count - 1], c = straight[straight.count - 2], d = straight[straight.count - 1]
+        XCTAssertEqual(atan2(b.x - a.x, b.y - a.y) - atan2(d.x - c.x, d.y - c.y), bend.turn(at: 1), accuracy: 0.01,
+                       "by its tip it's turned by its bend")
+    }
+
+    func testALimbCurlsItsOwnSeededWay() {
+        XCTAssertEqual(TreeLayout.curl(of: "feature/low", shuffle: 0), TreeLayout.curl(of: "feature/low", shuffle: 0))
+        let curls = (0..<100).map { TreeLayout.curl(of: "feature/\($0)", shuffle: 0) }
+        for curl in curls { XCTAssertTrue(TreeLayout.limbCurl.contains(abs(curl) * 180 / .pi)) }
+        XCTAssertTrue(curls.contains { $0 > 0 } && curls.contains { $0 < 0 }, "either way")
     }
 }
