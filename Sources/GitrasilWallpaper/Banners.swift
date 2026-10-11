@@ -97,13 +97,20 @@ struct BannerPlan {
     struct Fronts {
         /// Each tree's or bough's foliage, in the order they're painted.
         var layers: [[CGRect]] = []
-        /// Each repository's place in `layers`, by its pane's id.
+        /// Each repository's place in `layers`, by its pane's id. Every tree or bough has a place of its
+        /// own, so what's painted after it is in front of it, even one that ties with it in the paint order
+        /// and is only painted after it by coming later in the list.
         var places: [String: Int] = [:]
+
+        /// What's painted in front of `pane`'s tree or bough.
+        func rects(before pane: String) -> [CGRect] {
+            guard let place = places[pane], place + 1 < layers.count else { return [] }
+            return Array(layers[(place + 1)...].joined())
+        }
 
         /// What's painted in front of `pane`'s tree or bough, near `rect`.
         func rects(before pane: String, near rect: CGRect) -> [CGRect] {
-            guard let place = places[pane], place + 1 < layers.count else { return [] }
-            return layers[(place + 1)...].flatMap { $0.filter { $0.intersects(rect) } }
+            rects(before: pane).filter { $0.intersects(rect) }
         }
     }
 
@@ -161,10 +168,11 @@ extension Landscape {
             }
             obstacles += crowns.joined()
             let ranks = Self.paintRanks(full), leaves = full.boughs.map { foliage($0.layout.stems, frame: frame) }
-            let inFront = ranks.map { rank in zip(ranks, leaves).filter { $0.0 > rank }.flatMap(\.1) }
-            let painted = ranks.indices.sorted { ranks[$0] < ranks[$1] }
+            // In the order they're painted, and a tie in the order they come.
+            let painted = ranks.indices.sorted { (ranks[$0], $0) < (ranks[$1], $1) }
             fronts.layers = painted.map { leaves[$0] }
             for (place, bough) in painted.enumerated() { fronts.places[ready[bough].id] = place }
+            let inFront = ready.map { fronts.rects(before: $0.id) }
             // The repositories' ribbons first, so they hang in the same places whether or not the
             // branches' pennants are shown; the pennants keep off them. Whether or not banners hang at
             // their boughs' depths, a ribbon keeps out from behind the boughs painted after its own.
