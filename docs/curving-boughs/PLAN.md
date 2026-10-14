@@ -102,6 +102,24 @@ on from its parent's tip that doesn't start thin; and the lows from Arbor's revi
   a name that's already shown. Ribbons and hidden names go by one paint order: what's painted after a bough is
   in front of it, a tie broken by bough order.
 
+## Review fixes (round 3, before the PR)
+
+An internal review of `feat/bough-joints` found nothing blocking; three points are fixed before it goes public:
+
+1. **Streams collide.** A limb's knot (`knot(of:)`, stream `-200 - step`) and elbow (`elbow(of:)`, `-100 - step`)
+   share a key, so step `s`'s elbow draws are step `s - 100`'s knot draws. Knots get a base of their own, far
+   from every other stream a name is keyed with in `TreeLayout.swift` (the tree's -1, a limb's -2, 0 and its
+   steps, a repository's -3, a limb's curl -21, a bough's elbows -23…-27, a limb's elbows -100 - step). Free
+   only before release: it moves where knots fall.
+2. **`tipTaper` cost.** It searches the curve for the node nearest each carry (curve points × limbs), and
+   `taperFactor` builds it once per limb at fork time, so a stem with many limbs costs limbs² × curve length,
+   and layout reruns per frame while growing in. A limb's node lies on the curve, so the curve index is
+   recorded when the node is appended, not searched for. Timed on a stem with ~150 limbs before and after.
+3. **`fadeIn` per grafted stem.** Each builds a `Path.union` of the parent's wood, a blurred edge stroke and a
+   masked layer on every draw. Check whether a single-tree draw is cached between frames; cache the parent's
+   wood if it's redrawn each frame, leave it (and say so) if it isn't.
+4. Nits, if trivial: a lazy filter in `Fronts.rects(before:near:)`; drop `draw`'s unused `emerging` parameter.
+
 ## Keeping what works
 
 - **Clearance.** `clearing` lays out the bent bough, so a curl that drops a tier's tip is eased like any other
