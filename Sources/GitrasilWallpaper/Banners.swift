@@ -102,15 +102,20 @@ struct BannerPlan {
         /// and is only painted after it by coming later in the list.
         var places: [String: Int] = [:]
 
+        /// The layers painted after `pane`'s tree or bough.
+        private func layers(after pane: String) -> ArraySlice<[CGRect]> {
+            guard let place = places[pane], place + 1 < layers.count else { return [] }
+            return layers[(place + 1)...]
+        }
+
         /// What's painted in front of `pane`'s tree or bough.
         func rects(before pane: String) -> [CGRect] {
-            guard let place = places[pane], place + 1 < layers.count else { return [] }
-            return Array(layers[(place + 1)...].joined())
+            Array(layers(after: pane).joined())
         }
 
         /// What's painted in front of `pane`'s tree or bough, near `rect`.
         func rects(before pane: String, near rect: CGRect) -> [CGRect] {
-            rects(before: pane).filter { $0.intersects(rect) }
+            layers(after: pane).joined().filter { $0.intersects(rect) }
         }
     }
 
