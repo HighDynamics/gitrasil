@@ -683,6 +683,20 @@ extension TreeLayoutTests {
         XCTAssertEqual(TreeLayout.knot(of: "limb7", shuffle: 0, step: 4), TreeLayout.knot(of: "limb7", shuffle: 0, step: 4))
     }
 
+    func testALimbsKnotsDontShareDrawsWithItsElbowsHundredsOfStepsOn() {
+        // A knot's draws were once an elbow's a hundred steps later, so an elbow there meant a knot a hundred
+        // steps back every time; with streams of their own, those knots come as often as any other.
+        var elbows = 0, knotted = 0
+        for index in 0..<400 {
+            for step in 103..<203 where TreeLayout.elbow(of: "limb\(index)", shuffle: 0, step: step, after: 0) != 0 {
+                elbows += 1
+                if TreeLayout.knot(of: "limb\(index)", shuffle: 0, step: step - 100) != nil { knotted += 1 }
+            }
+        }
+        XCTAssertGreaterThan(elbows, 1000)
+        XCTAssertEqual(Double(knotted) / Double(elbows), TreeLayout.limbKnotChance, accuracy: 0.04, "\(knotted) of \(elbows)")
+    }
+
     func testAStemsKnotsSwellItsJointsAndStayPutAsItGrowsIn() {
         let limbs = (0..<30).map {
             RepoTree.Limb(name: "limb\($0)", commits: commits("l\($0)", 12), parent: .trunk(node: 20 + $0 * 6), isCheckedOut: false)

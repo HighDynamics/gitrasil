@@ -699,9 +699,14 @@ public struct TreeLayout: Sendable {
     /// How much wider again the wood swells at a joint with a knot.
     static let burl = 0.3
 
+    /// Where a limb's knots draw from, step by step: a base of their own, far enough below every other stream a
+    /// name is keyed with here (-1, -2, -3, -21, a bough's -23…-27, a limb's elbows -100 - step, its steps 0…)
+    /// that no step count reaches one.
+    static let knotStream = -1_000_000
+
     /// How big a knot the elbow at limb `name`'s step `step` has (`knotSize`), or nil for none.
     static func knot(of name: String, shuffle: Int, step: Int) -> Double? {
-        var rng = SeededRandom(SeededRandom.key(name, shuffle: shuffle), -200 - step)
+        var rng = SeededRandom(SeededRandom.key(name, shuffle: shuffle), knotStream - step)
         let has = rng.next() < limbKnotChance, size = rng.next(in: knotSize)
         return has ? size : nil
     }
