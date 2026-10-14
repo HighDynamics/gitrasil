@@ -114,7 +114,9 @@ An internal review of `feat/bough-joints` found nothing blocking; three points a
 2. **`tipTaper` cost.** It searches the curve for the node nearest each carry (curve points × limbs), and
    `taperFactor` builds it once per limb at fork time, so a stem with many limbs costs limbs² × curve length,
    and layout reruns per frame while growing in. A limb's node lies on the curve, so the curve index is
-   recorded when the node is appended, not searched for. Timed on a stem with ~150 limbs before and after.
+   recorded when the node is appended (`Stem.nodeIndices`), not searched for. Laying out a 300-commit trunk
+   with 150 limbs, and a 160-commit limb with 150 more, took 274 ms (release, median of 9) before and 8.7 ms
+   after, the same curves to the last digit.
 3. **`fadeIn` per grafted stem.** Each builds a `Path.union` of the parent's wood, a blurred edge stroke and a
    masked layer on every draw. Check whether a single-tree draw is cached between frames; cache the parent's
    wood if it's redrawn each frame, leave it (and say so) if it isn't.

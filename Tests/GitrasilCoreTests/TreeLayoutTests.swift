@@ -755,3 +755,26 @@ extension TreeLayoutTests {
         assertPoint(parent, "and on past it to a point")
     }
 }
+
+// MARK: Node indices
+
+extension TreeLayoutTests {
+    func testEachGrownNodeKnowsWhereItLiesOnItsCurve() {
+        let limbs = (0..<20).map {
+            RepoTree.Limb(name: "limb\($0)", commits: commits("l\($0)", 8), parent: .trunk(node: 10 + $0 * 4), isCheckedOut: false)
+        }
+        let tree = RepoTree(trunkName: "main", trunk: commits("t", 120), limbs: limbs, isTrunkCheckedOut: false)
+        for (seed, planting) in [("ash", TreeLayout.Planting.upright), ("oak", TreeLayout.Planting(heading: 0.9, girth: 0.7))] {
+            for growIn in [nil, 0.2, 0.5, 0.8] {
+                for stem in TreeLayout(tree: tree, seed: seed, planting: planting, growIn: growIn).stems {
+                    let name = "\(stem.name ?? "?") of \(seed) at \(growIn ?? 1)"
+                    for k in stem.nodes.indices where Double(k) <= stem.grown {
+                        let wood = stem.nodes[k].point, found = stem.curve[stem.curveIndex(ofNode: k)].point
+                        XCTAssertEqual(found.x, wood.x, accuracy: 1e-9, "\(name): node \(k)")
+                        XCTAssertEqual(found.y, wood.y, accuracy: 1e-9, "\(name): node \(k)")
+                    }
+                }
+            }
+        }
+    }
+}
