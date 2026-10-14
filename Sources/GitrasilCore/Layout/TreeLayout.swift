@@ -42,6 +42,21 @@ public struct TreeLayout: Sendable {
         public let scale: Double
         /// Where it grows out of other wood (nil for a trunk standing on the ground).
         public let fork: Fork?
+        /// The limbs leaving it, each where it leaves and how wide its base is: its taper never narrows it
+        /// below one before that limb leaves (`tipTaper`), so one carrying on from its tip carries on from
+        /// wood as wide as itself.
+        public var carries: [Carry] = []
+        /// Knots drawn on its wood at some of its elbows.
+        public var knots: [Knot] = []
+        /// Where each node lies along `curve` (its index there), where the layout knows it; a node without
+        /// one is found by its nearest point on the curve (`curveIndex(ofNode:)`).
+        public var nodeIndices: [Int] = []
+
+        /// How wide the widest limb carrying on from its very tip is, once it's grown that far (nil for
+        /// none): the stem ends that wide, rather than in a point (`tipTaper`).
+        public var carriedOn: Double? {
+            carries.filter { $0.node == nodes.count - 1 && Double($0.node) <= grown }.map(\.width).max()
+        }
 
         public var isTrunk: Bool { level == 0 }
         public var tip: Node? { nodes.last }
@@ -50,7 +65,8 @@ public struct TreeLayout: Sendable {
         /// no commits of its own and ends in the boughs it carries.
         public var tapersToTip: Bool { !(isTrunk && commits.isEmpty && !isBud) }
 
-        /// How this stem narrows to its end, as drawn (its curve as grown so far).
+        /// How this stem narrows to its end, as drawn (its curve as grown so far), held as wide as each
+        /// limb leaving it until that limb leaves (`carries`, once it's grown that far).
         public var tipTaper: TipTaper {
             // Nothing grown yet, or a single point: no length to taper over.
             guard curve.count >= 2 else { return TipTaper(stemLength: 0) { _ in 0 } }
@@ -59,7 +75,11 @@ public struct TreeLayout: Sendable {
             for (a, b) in zip(backwards, backwards.dropFirst()) {
                 ends.append(ends[ends.count - 1] + hypot(b.point.x - a.point.x, b.point.y - a.point.y))
             }
-            return TipTaper(stemLength: ends.last ?? 0) { distance in
+            let holds = carries.compactMap { carry -> (distance: Double, width: Double)? in
+                guard nodes.indices.contains(carry.node), Double(carry.node) <= grown else { return nil }
+                return (ends[curve.count - 1 - curveIndex(ofNode: carry.node)], carry.width)
+            }
+            return TipTaper(stemLength: ends.last ?? 0, holds: holds) { distance in
                 guard let i = ends.firstIndex(where: { $0 >= distance }) else { return backwards.last?.width ?? 0 }
                 guard i > 0 else { return backwards[0].width }
                 let f = (distance - ends[i - 1]) / max(ends[i] - ends[i - 1], 1e-12)
@@ -73,7 +93,9 @@ public struct TreeLayout: Sendable {
             func thin(_ node: Node) -> Node { Node(point: node.point, width: node.width * girth, heading: node.heading) }
             let joint = level == 0 ? fork : fork.map { Fork(parent: $0.parent, node: $0.node, width: $0.width * girth, heading: $0.heading) }
             return Stem(name: name, level: level, nodes: nodes.map(thin), curve: curve.map(thin), commits: commits, grown: grown,
-                        isBud: isBud, isCheckedOut: isCheckedOut, scale: scale, fork: joint)
+                        isBud: isBud, isCheckedOut: isCheckedOut, scale: scale, fork: joint,
+                        carries: carries.map { Carry(node: $0.node, width: $0.width * girth) }, knots: knots,
+                        nodeIndices: nodeIndices)
         }
 
         /// How much of its width the stem keeps, as drawn, at the point of its curve nearest `point`: 1
@@ -91,6 +113,15 @@ public struct TreeLayout: Sendable {
             }
             return tipTaper.factor(distanceToTip: toTip)
         }
+    }
+
+    /// A knot in the wood at a joint, drawn on it (`TreeDrawing`): at `index` along the stem's curve, `size`
+    /// of the wood's width there across, a little to the outside of the turn: `side` 1 is the stem's right
+    /// as it heads out, -1 its left.
+    public struct Knot: Sendable, Equatable {
+        public let index: Int
+        public let size: Double
+        public let side: Double
     }
 
     /// Where a stem leaves its parent: what its base flares into (`collarWidth`).
@@ -243,7 +274,14 @@ public struct TreeLayout: Sendable {
             let p = trunkPoint(h), q = trunkPoint(h + 0.01)
             return Node(point: p, width: Self.width(weight: above[node] + 1), heading: atan2(q.x - p.x, q.y - p.y))
         }
-        let (trunkCurve, curveHeights) = Self.trunkCurve(trunkNodes, heights: trunkHeights, height: height, bend: bend, at: trunkPoint)
+        let (trunkCurve, curveHeights, trunkIndices) = Self.trunkCurve(trunkNodes, heights: trunkHeights, height: height, bend: bend, at: trunkPoint)
+        // A knot at each elbow that has one, where it turns.
+        let trunkKnots = bend.elbows.filter { $0.knot > 0 }.map { elbow in
+            let h = elbow.at * height
+            let index = curveHeights.indices.min { abs(curveHeights[$0] - h) < abs(curveHeights[$1] - h) } ?? 0
+            return Knot(index: index, size: elbow.knot, side: elbow.turn > 0 ? -1 : 1)
+        }
+        let carries = Self.carries(tree, weights: weights, count: count)
         let trunkName = tree.trunkName ?? ""
         var trunkGrown = grown[trunkName] ?? Double(count)
         // Growing in, each stem grows over its own stretch (`growInSchedule`): the trunk rises from its
@@ -261,7 +299,9 @@ public struct TreeLayout: Sendable {
         }
         stems.append(Stem(name: tree.trunkName, level: 0, nodes: shownTrunk, curve: shownCurve, commits: tree.trunk,
                           grown: trunkGrown, isBud: false,
-                          isCheckedOut: tree.isTrunkCheckedOut, scale: 1, fork: planting.fork))
+                          isCheckedOut: tree.isTrunkCheckedOut, scale: 1, fork: planting.fork,
+                          carries: carries[-1] ?? [], knots: trunkKnots.filter { $0.index < shownCurve.count },
+                          nodeIndices: trunkIndices))
 
         // The limbs, each grown from its parent's node.
         var limbStems: [Stem?] = []
@@ -307,11 +347,12 @@ public struct TreeLayout: Sendable {
             if let growIn {
                 shown = full * schedule.limbs[index].progress(at: growIn)
             }
-            let (nodes, curve) = Self.grow(limb, from: base, lean: lean, scale: scale * planting.limbReach, shown: shown,
+            let (nodes, curve, knots, nodeIndices) = Self.grow(limb, from: base, lean: lean, scale: scale * planting.limbReach, shown: shown,
                                            shuffle: shuffle, tropism: planting.limbTropism,
                                            weight: { k in Self.remainingWeight(limb, index: index, tree: tree, weights: weights, beyond: k) })
             let stem = Stem(name: limb.name, level: level, nodes: nodes, curve: curve, commits: limb.commits, grown: shown,
-                            isBud: limb.isBud, isCheckedOut: limb.isCheckedOut, scale: scale, fork: fork)
+                            isBud: limb.isBud, isCheckedOut: limb.isCheckedOut, scale: scale, fork: fork,
+                            carries: carries[index] ?? [], knots: knots, nodeIndices: nodeIndices)
             stemIndex[index] = stems.count
             limbStems.append(stem)
             stems.append(stem)
@@ -529,10 +570,10 @@ public struct TreeLayout: Sendable {
     /// any two far apart (the bare foot, say), and closer through an elbow of its `bend`, so it turns there
     /// rather than kinks, its wood thickening at the joint. `point` places a height up the trunk.
     private static func trunkCurve(_ nodes: [Node], heights: [Double], height: Double, bend: Bend,
-                                   at point: (Double) -> CGPoint) -> (curve: [Node], heights: [Double]) {
+                                   at point: (Double) -> CGPoint) -> (curve: [Node], heights: [Double], nodeIndices: [Int]) {
         // Where the elbows turn, as heights up the trunk.
         let joints = bend.elbows.map { (from: ($0.at - $0.span * 0.75) * height, to: ($0.at + $0.span * 0.75) * height) }
-        var curve: [Node] = [], curveHeights: [Double] = []
+        var curve: [Node] = [], curveHeights: [Double] = [], nodeIndices: [Int] = []
         for (index, (a, b)) in zip(nodes, nodes.dropFirst()).enumerated() {
             let from = heights[index], to = heights[index + 1]
             let pieces = max(1, Int(ceil((to - from) / 0.03)))
@@ -540,6 +581,7 @@ public struct TreeLayout: Sendable {
             for joint in joints where joint.from < to && joint.to > from {
                 hs += stride(from: max(joint.from, from), to: min(joint.to, to), by: elbowStep).filter { $0 > from }
             }
+            nodeIndices.append(curve.count)
             for h in Set(hs).sorted() {
                 let t = (h - from) / max(to - from, 1e-12)
                 curve.append(Node(point: point(h), width: (a.width + (b.width - a.width) * t) * bend.knuckle(at: h / max(height, 0.001)),
@@ -547,7 +589,7 @@ public struct TreeLayout: Sendable {
                 curveHeights.append(h)
             }
         }
-        return (curve + nodes.suffix(1), curveHeights + heights.suffix(1))
+        return (curve + nodes.suffix(1), curveHeights + heights.suffix(1), nodeIndices + (nodes.isEmpty ? [] : [curve.count]))
     }
 
     /// What a limb still carries beyond node `k`: its later commits and the limbs leaving at or after it.
@@ -563,14 +605,18 @@ public struct TreeLayout: Sendable {
     /// turning by a seeded amount, curling its own seeded way (`limbCurl`) and bending toward straight
     /// up, spread over a few sub-steps so a long step curves too. Now and then, past its first few
     /// steps, a step turns sharply at an elbow (`limbElbow`), thickening a little at the joint, so a long
-    /// limb has more of them. `shown` commits are grown, the last one part-way. Returns the commit nodes
-    /// and the finer curve through them.
-    static func grow(_ limb: RepoTree.Limb, from base: Node, lean: Double, scale: Double, shown: Double,
-                     shuffle: Int = 0, tropism: Double = tropism, weight: (Int) -> Double) -> (nodes: [Node], curve: [Node]) {
+    /// limb has more of them, some with a knot (`limbKnot`). `shown` commits are grown, the last one
+    /// part-way. Returns the commit nodes, the finer curve through them, the knots on it and where each node
+    /// lies on it.
+    static func grow(_ limb: RepoTree.Limb, from base: Node, lean: Double, scale: Double, shown: Double, shuffle: Int = 0,
+                     tropism: Double = tropism, weight: (Int) -> Double)
+        -> (nodes: [Node], curve: [Node], knots: [Knot], nodeIndices: [Int]) {
         let steps = Int(ceil(shown))
-        guard steps > 0 else { return ([], []) }
+        guard steps > 0 else { return ([], [], [], []) }
+        var knots: [Knot] = []
         var nodes = [Node(point: base.point, width: min(base.width, width(weight: weight(0))), heading: lean)]
         var curve = nodes
+        var nodeIndices = [0]
         var heading = lean
         var point = base.point
         var length = (limb.isBud ? 0.35 : 1) * firstStep * scale
@@ -597,48 +643,18 @@ public struct TreeLayout: Sendable {
                 heading = min(max(heading, -1.75), 1.75)
                 point = CGPoint(x: point.x + sin(heading) * length * part, y: point.y + cos(heading) * length * part)
                 let t = start + part
-                let thick = j == 1 ? knuckle : j == 2 ? 1 + (knuckle - 1) * 0.4 : 1
+                var thick = j == 1 ? knuckle : j == 2 ? 1 + (knuckle - 1) * 0.4 : 1
+                if j == 1, elbow != 0, let size = Self.knot(of: limb.name, shuffle: shuffle, step: k) {
+                    knots.append(Knot(index: curve.count, size: size, side: elbow > 0 ? -1 : 1))
+                    thick += Self.burl
+                }
                 curve.append(Node(point: point, width: (from + (to - from) * t) * thick, heading: heading))
             }
             nodes.append(curve[curve.count - 1])
+            nodeIndices.append(curve.count - 1)
             length = (k == 1 ? step * scale : length * stepDecay)
         }
-        return (nodes, curve)
-    }
-
-    /// How a stem narrows to a point at its end. The layout's widths (the pipe model) never get below
-    /// a floor at the last node, which drawn as is leaves a flat cut, so the drawing multiplies a
-    /// stem's width by `factor` over its last `length`: from 1 where the taper starts (easing in, so
-    /// there's no corner there) to a fine point at the very end.
-    public struct TipTaper: Sendable, Equatable {
-        /// How far from the end the taper starts, in tree units.
-        public let length: Double
-
-        /// The taper is this many times the stem's width where it starts, ...
-        static let reach = 12.0
-        /// ... but at most this much of the stem, so a short limb or a bud is a thorn: pointed over
-        /// nearly all of it, rather than a stub with a point on.
-        static let share = 0.85
-        /// The factor at the very end: a point as fine as a line.
-        static let point = 0.04
-
-        /// - Parameters:
-        ///   - stemLength: how long the stem is as drawn (as grown so far, while it's growing).
-        ///   - widthAt: the stem's width, before tapering, `distance` from its end. It's asked where
-        ///     the taper would start, so a stem that's still wide a little way back (a trunk's top)
-        ///     tapers over a longer stretch than one that's already fine.
-        public init(stemLength: Double, widthAt: (Double) -> Double) {
-            var length = Self.reach * widthAt(0)
-            for _ in 0..<2 { length = Self.reach * widthAt(min(length, stemLength)) }
-            self.length = max(min(length, Self.share * stemLength), 0)
-        }
-
-        /// The width's multiplier `distance` from the end (0 at the end; 1 from `length` on).
-        public func factor(distanceToTip distance: Double) -> Double {
-            guard length > 0, distance < length else { return 1 }
-            let s = max(distance / length, 0)
-            return Self.point + (1 - Self.point) * sin(s * .pi / 2)
-        }
+        return (nodes, curve, knots, nodeIndices)
     }
 
     /// A branch collar: how wide a stem is drawn `distance` along it from its fork (tree units), where
@@ -676,11 +692,30 @@ public struct TreeLayout: Sendable {
     /// A limb's elbows: from its `limbElbowFrom`th step on, each step has this chance of one, turning it
     /// this many degrees, back the other way from its last elbow more often than not. Tropism eases it
     /// back toward upright after, as a real limb grows on toward the light.
-    static let limbElbowChance = 0.14
+    static let limbElbowChance = 0.24
     static let limbElbowFrom = 3
-    static let limbElbow: ClosedRange<Double> = 16...30
+    static let limbElbow: ClosedRange<Double> = 22...40
     /// How much wider the wood is at an elbow's joint, at most (for the sharpest), and at least.
-    static let knuckleWidth: ClosedRange<Double> = 0.1...0.22
+    static let knuckleWidth: ClosedRange<Double> = 0.18...0.38
+    /// How often an elbow has a knot drawn at its joint, on a bough and on a limb, and how big it is, as a
+    /// share of the wood's width there.
+    static let boughKnotChance = 0.55
+    static let limbKnotChance = 0.4
+    static let knotSize: ClosedRange<Double> = 0.6...0.9
+    /// How much wider again the wood swells at a joint with a knot.
+    static let burl = 0.3
+
+    /// Where a limb's knots draw from, step by step: a base of their own, far enough below every other stream a
+    /// name is keyed with here (-1, -2, -3, -21, a bough's -23…-27, a limb's elbows -100 - step, its steps 0…)
+    /// that no step count reaches one.
+    static let knotStream = -1_000_000
+
+    /// How big a knot the elbow at limb `name`'s step `step` has (`knotSize`), or nil for none.
+    static func knot(of name: String, shuffle: Int, step: Int) -> Double? {
+        var rng = SeededRandom(SeededRandom.key(name, shuffle: shuffle), knotStream - step)
+        let has = rng.next() < limbKnotChance, size = rng.next(in: knotSize)
+        return has ? size : nil
+    }
 
     /// The elbow limb `name` turns at its step `step`, in radians, or 0 where it has none; `after` is the
     /// last elbow before it (0 for none).
@@ -708,15 +743,18 @@ public struct TreeLayout: Sendable {
 
     /// A joint where a bough turns sharply and carries on its new way (`Bend`): `turn` radians (as a
     /// bend's `curl`), turned over `span` of the bough's length centred `at` along it (both as `t`).
+    /// `knot` is how big a knot is drawn at its joint (`knotSize`), 0 for none.
     public struct Elbow: Sendable, Equatable {
         public var at: Double
         public var span: Double
         public var turn: Double
+        public var knot: Double
 
-        public init(at: Double, span: Double, turn: Double) {
+        public init(at: Double, span: Double, turn: Double, knot: Double = 0) {
             self.at = at
             self.span = span
             self.turn = turn
+            self.knot = knot
         }
 
         /// How much of its turn it has made by `t`: none before it, all after, smoothly between.
@@ -765,9 +803,10 @@ public struct TreeLayout: Sendable {
                 let distance = TreeLayout.elbowFirst + TreeLayout.elbowEvery * (Double(k) + joint.next(in: k == 0 ? 0...0.3 : -0.3...0.3))
                 let down = joint.next() < 0.45, back = joint.next() < 0.7
                 let size = joint.next(in: TreeLayout.boughElbow) * .pi / 180
+                let knotted = joint.next() < TreeLayout.boughKnotChance, knot = joint.next(in: TreeLayout.knotSize)
                 guard distance <= TreeLayout.elbowReach * length else { break }
                 way = k == 0 ? (down ? side : -side) : (back ? -way : way)
-                let elbow = Elbow(at: distance / length, span: TreeLayout.elbowSpan / length, turn: way * size)
+                let elbow = Elbow(at: distance / length, span: TreeLayout.elbowSpan / length, turn: way * size, knot: knotted ? knot : 0)
                 guard let fitted = fitted(elbow, within: most) else { continue }
                 way = fitted.turn < 0 ? -1 : 1
                 elbows.append(fitted)
@@ -781,7 +820,7 @@ public struct TreeLayout: Sendable {
             for scale in [1.0, 0.8, 0.6, 0.4] {
                 for way in [1.0, -1.0] {
                     var trial = self
-                    trial.elbows.append(Elbow(at: elbow.at, span: elbow.span, turn: elbow.turn * scale * way))
+                    trial.elbows.append(Elbow(at: elbow.at, span: elbow.span, turn: elbow.turn * scale * way, knot: elbow.knot))
                     if trial.most(from: elbow.at - elbow.span / 2) <= most - Self.sampling { return trial.elbows.last }
                 }
             }
@@ -801,11 +840,12 @@ public struct TreeLayout: Sendable {
             elbows.reduce(curl * t * t + wave * sin(.pi * t) * t) { $0 + $1.turn * $1.made(at: t) }
         }
 
-        /// How much wider the bough's wood is at `t` along it: thicker at each elbow's joint (`knuckle`).
+        /// How much wider the bough's wood is at `t` along it: thicker at each elbow's joint (`knuckle`), and
+        /// thicker still at one with a knot (`burl`).
         public func knuckle(at t: Double) -> Double {
             elbows.reduce(1) { total, elbow in
                 let d = (t - elbow.at) / elbow.span
-                return total + (TreeLayout.knuckle(elbow.turn) - 1) * exp(-d * d * 4)
+                return total + (TreeLayout.knuckle(elbow.turn) - 1 + (elbow.knot > 0 ? TreeLayout.burl : 0)) * exp(-d * d * 4)
             }
         }
     }
@@ -815,18 +855,18 @@ public struct TreeLayout: Sendable {
     static let boughWave: ClosedRange<Double> = 4...11
     /// How far a bough's elbow turns it, in degrees, before `boughTurn` holds it back; and how much of
     /// its length an elbow takes to turn (in tree units, about one and a half of a bough's widths).
-    static let boughElbow: ClosedRange<Double> = 18...34
-    static let elbowSpan = 0.06
+    static let boughElbow: ClosedRange<Double> = 24...44
+    static let elbowSpan = 0.05
     /// The most a bough's curl, wave and elbows together ever turn it from its planting's heading, either
     /// way, in degrees, so it zigzags rather than curling round. The one place the cap is set.
-    static let boughTurn = 26.0
+    static let boughTurn = 36.0
     /// Where a bough's elbows fall, in tree units from its foot: the first at least `elbowFirst` out, each
     /// next about `elbowEvery` further (seeded, ±30% of that), and only within `elbowReach` of its length,
     /// so none turns right at its tip; at most `mostElbows`.
-    static let elbowFirst = 0.35
-    static let elbowEvery = 0.4
-    static let elbowReach = 0.85
-    static let mostElbows = 3
+    static let elbowFirst = 0.28
+    static let elbowEvery = 0.28
+    static let elbowReach = 0.88
+    static let mostElbows = 5
     /// How far apart a bough's curve's points are through an elbow, in tree units.
     static let elbowStep = 0.012
 
@@ -864,5 +904,95 @@ public struct TreeLayout: Sendable {
             return total
         }
         return width(weight: limbs + Double(tree.trunk.count) * trunkCommitWeight + 1)
+    }
+}
+
+// MARK: - Carrying on
+
+extension TreeLayout {
+    /// A limb leaving a stem (`Stem.carries`): the stem's node it leaves from, and its base's width.
+    public struct Carry: Sendable, Equatable {
+        public let node: Int
+        public let width: Double
+    }
+
+    /// What leaves each stem of `tree`, and how wide (`Stem.carries`): the trunk's under -1, a limb's under
+    /// its index. `count` is the trunk's commits.
+    static func carries(_ tree: RepoTree, weights: [Double], count: Int) -> [Int: [Carry]] {
+        var carries: [Int: [Carry]] = [:]
+        for (index, limb) in tree.limbs.enumerated() {
+            let width = Self.width(weight: Self.remainingWeight(limb, index: index, tree: tree, weights: weights, beyond: 0))
+            switch limb.parent {
+            case .trunk(let node): carries[-1, default: []].append(Carry(node: min(node, count), width: width))
+            case .limb(let parent, let node): carries[parent, default: []].append(Carry(node: node, width: width))
+            }
+        }
+        return carries
+    }
+
+    /// How a stem narrows to a point at its end. The layout's widths (the pipe model) never get below
+    /// a floor at the last node, which drawn as is leaves a flat cut, so the drawing multiplies a
+    /// stem's width by `factor` over its last `length`: from 1 where the taper starts (easing in, so
+    /// there's no corner there) to a fine point at the very end.
+    public struct TipTaper: Sendable, Equatable {
+        /// How far from the end the taper starts, in tree units.
+        public let length: Double
+        /// Where a limb leaves within it (its distance from the end), and the factor that keeps the stem as
+        /// wide as that limb's base there (`Stem.carries`).
+        public let holds: [Hold]
+
+        // swiftlint:disable:next nesting - a hold is the taper's alone, nowhere else to put it
+        public struct Hold: Sendable, Equatable {
+            public let distance: Double
+            public let factor: Double
+        }
+
+        /// The taper is this many times the stem's width where it starts, ...
+        static let reach = 12.0
+        /// ... but at most this much of the stem, so a short limb or a bud is a thorn: pointed over
+        /// nearly all of it, rather than a stub with a point on.
+        static let share = 0.85
+        /// The factor at the very end: a point as fine as a line.
+        static let point = 0.04
+
+        /// - Parameters:
+        ///   - stemLength: how long the stem is as drawn (as grown so far, while it's growing).
+        ///   - widthAt: the stem's width, before tapering, `distance` from its end. It's asked where
+        ///     the taper would start, so a stem that's still wide a little way back (a trunk's top)
+        ///     tapers over a longer stretch than one that's already fine.
+        ///   - holds: where limbs leave it, as distances from its end, and their bases' widths.
+        public init(stemLength: Double, holds: [(distance: Double, width: Double)] = [], widthAt: (Double) -> Double) {
+            var length = Self.reach * widthAt(0)
+            for _ in 0..<2 { length = Self.reach * widthAt(min(length, stemLength)) }
+            self.length = max(min(length, Self.share * stemLength), 0)
+            self.holds = holds.map { Hold(distance: $0.distance, factor: min($0.width / max(widthAt($0.distance), 1e-12), 1)) }
+        }
+
+        /// The width's multiplier `distance` from the end (0 at the end; 1 from `length` on). Where a limb
+        /// leaves, it's no narrower than that limb's base, and past it narrows from there to the end in
+        /// the same way: one leaving at the very end leaves the stem ending as wide as it.
+        public func factor(distanceToTip distance: Double) -> Double {
+            holds.reduce(tapered(distance)) { factor, hold in
+                guard distance < hold.distance else { return max(factor, hold.factor) }
+                return max(factor, hold.factor * (Self.point + (1 - Self.point) * sin(distance / hold.distance * .pi / 2)))
+            }
+        }
+
+        private func tapered(_ distance: Double) -> Double {
+            guard length > 0, distance < length else { return 1 }
+            let s = max(distance / length, 0)
+            return Self.point + (1 - Self.point) * sin(s * .pi / 2)
+        }
+    }
+}
+
+extension TreeLayout.Stem {
+    /// Where node `k` lies along `curve`.
+    func curveIndex(ofNode k: Int) -> Int {
+        if nodeIndices.indices.contains(k) { return min(nodeIndices[k], curve.count - 1) }
+        let wood = nodes[k].point
+        return curve.indices.min { a, b in
+            hypot(curve[a].point.x - wood.x, curve[a].point.y - wood.y) < hypot(curve[b].point.x - wood.x, curve[b].point.y - wood.y)
+        }!
     }
 }

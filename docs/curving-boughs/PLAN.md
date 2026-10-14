@@ -9,6 +9,10 @@ Round 2 (Daniel, live, through Arbor): "More bend, and multiple directions, espe
 curving to give it more visual interest." A joint should read as wood, a slight knuckle, never a kink; the number
 of elbows grows with length, so short boughs stay simple; everything that held still holds.
 
+Round 3 (Daniel, through Arbor; branch `feat/bough-joints`, stacked on this one): more joints, and sharper,
+some of them knotted; boughs that grow out of the trunk rather than looking pasted onto it; a branch carrying
+on from its parent's tip that doesn't start thin; and the lows from Arbor's review of the hidden names.
+
 ## Where things stand
 
 - A **bough** (a repository's trunk leaning out of the shared trunk) is walked out along a centreline
@@ -37,36 +41,90 @@ of elbows grows with length, so short boughs stay simple; everything that held s
 
 ## Elbows
 
-- **On a bough.** An elbow (`TreeLayout.Elbow`) is a turn of 18–34° made over a short stretch of the bough
-  (6% of the tree's height, a smoothstep), so the bough changes direction fairly sharply and carries on in its
-  new one, smooth on either side. Each elbow has its own place, a seeded distance from the bough's foot (in
-  tree heights): the first 0.35–0.47 out, each next about 0.4 further (±30%), at most three. It's there once
-  the bough reaches past it by enough that it falls within 85% of the bough's length, so short boughs have
-  none and none turns right at a tip. The first heads down a little under half the time; each later one turns
-  back the other way 70% of the time, so a bough droops and comes back up, or turns and carries on. A bough
+- **On a bough.** An elbow (`TreeLayout.Elbow`) is a turn of 24–44° (round 2: 18–34°) made over a short
+  stretch of the bough (5% of the tree's height, a smoothstep), so the bough changes direction sharply and
+  carries on in its new one, smooth on either side. Each elbow has its own place, a seeded distance from the
+  bough's foot (in tree heights): the first 0.28–0.36 out, each next about 0.28 further (±30%), at most five
+  (round 2: 0.35–0.47, 0.4, three). It's there once the bough reaches past it by enough that it falls within
+  88% of the bough's length, so short boughs have none and none turns right at a tip. The first heads down a
+  little under half the time; each later one turns back the other way 70% of the time, so a bough droops and comes back up, or turns and carries on. A bough
   leaning left bends as the mirror of one leaning right (curl, bow and elbows).
-- **A cap.** The bough's heading never turns more than 26° (`boughTurn`, the one place it's set) from its
-  planting's heading, either way, anywhere along it: curl, bow and elbows together, as they actually add up at
-  every point. Each elbow is checked as it's added against everything before it, sampled along the rest of the
-  bough: its own way if that fits, else the other way, else 80%, 60% or 40% as big, else it's left out. Over
-  3,000 names at lengths 0.4–2.2 on both sides, the worst is 25.97°, and 99.7% of elbows keep their seeded size.
-  Looser (40°) let long side tiers climb steeply, out of the band they're meant to reach in.
+- **A cap.** The bough's heading never turns more than 36° (`boughTurn`, the one place it's set; round 2:
+  26°) from its planting's heading, either way, anywhere along it: curl, bow and elbows together, as they
+  actually add up at every point. Each elbow is checked as it's added against everything before it, sampled
+  along the rest of the bough: its own way if that fits, else the other way, else 80%, 60% or 40% as big, else
+  it's left out. Round 2 measured 26° as the bound over 3,000 names; 40° let long side tiers climb steeply, out
+  of the band they're meant to reach in, so round 3 stops short of it, where the sharper elbows have room to
+  zigzag. A test checks the cap over 150 names at ten lengths on both sides, every 0.0002 along.
 - **Ground clearance.** Once a bough leans out (more than 0.5 rad), its heading is held on its own side,
   between straight up and level (or its planting's own lean, if that's lower), so an elbow heading down can't
   take it nearer the ground than its planting has it. `clearing` still eases drooping
   tiers as before.
-- **Knuckles.** The wood thickens across an elbow, 10–22% by how sharp it turns, falling away within the elbow's
-  stretch. The bough's outline gets extra points only inside each elbow (every 0.012 of the height rather than
-  0.03), so a joint is drawn round, never as a kink.
-- **On a limb.** From its third step, each step of a limb has a 14% seeded chance of an elbow of 16–30°, made
-  over the two steps that follow, with a knuckle on them; each turns back from the last 70% of the time. It's
-  seeded by the branch's name and the step, so a new commit still moves nothing behind the tip.
+- **Knuckles.** The wood thickens across an elbow, 18–38% (round 2: 10–22%) by how sharp it turns, falling
+  away within the elbow's stretch. The bough's outline gets extra points only inside each elbow (every 0.012 of
+  the height rather than 0.03), so a joint is drawn round, never as a kink.
+- **On a limb.** From its third step, each step of a limb has a 24% seeded chance of an elbow of 22–40°
+  (round 2: 14%, 16–30°), made over the two steps that follow, with a knuckle on them; each turns back from the
+  last 70% of the time. It's seeded by the branch's name and the step, so a new commit still moves nothing
+  behind the tip. A limb's elbows have no cap of their own: tropism pulls each back toward upright, and a limb's
+  heading is held within ±1.75 rad of it.
 - **Seeded and stable.** Each bough elbow comes from the repository's name on a stream of its own, all its draws
   made every time, so nothing about it hangs on how many others there are. A commit that lengthens a trunk far
   enough adds the next elbow in its place, and the ones it had stay the same distance out from the foot; only
   a cap that binds differently on the longer bough can change one's size or way.
 - **Banners.** A ribbon's stops are placed by distance along the bough, not by the curve's points, which crowd
   together through an elbow, so a ribbon doesn't slide when an elbow comes or goes.
+
+## Joints (round 3)
+
+- **Knots.** Some elbows have a knot: 55% of a bough's, 40% of a limb's, sized 0.6–0.9 of the wood's width
+  there (`TreeLayout.Knot`). A bough's are drawn from its bend's stream with its elbow, a limb's from a stream
+  of its own seeded by its name and the step, so a knot stays put as the wood grows. The wood swells a further
+  30% (`burl`) at a knotted joint. It's drawn (`Knots.swift`) a little to the outside of the turn as an oval
+  half as long again along the wood as across it: a dark eye with a rim, the bark's streaks parting around it,
+  in each medium's own bark marks (light on brush ink, dark on charcoal, chalk on chalk). None on wood too fine
+  to show one.
+- **Grafts.** A bough off the shared trunk is drawn in a later group than the trunk, so it lay on the trunk as
+  a piece of its own: a cut end, a rim, a tone that wasn't the trunk's. It's now grafted (`Grafts.swift`):
+  narrowed inside the trunk's wood (a third of its width at the foot, all of it where it leaves) and faded in
+  from its foot over that wood only, so it grows out of it. Two things still gave it away: the fade's mask
+  stopped hard at the trunk's edge, leaving an anti-aliased seam, so it eases off 6% of the bough's width in
+  from the edge (`feather`); and a bough leaving at a slant bulged its collar out under itself past the trunk,
+  so a grafted collar's flare is soft-capped at 35% of its own width (`graftFlare`).
+- **Carrying on.** A limb leaving near or at its parent's tip grew from wood the tip taper had already
+  narrowed, so it started thin, or from a point, and thickened again. Each stem now knows the limbs leaving it
+  and how wide their bases are (`Stem.carries`), and its taper (`TipTaper`) never narrows it below one before
+  that limb leaves: a limb leaving a step back still lets the parent end in a point past it, and one carrying on
+  from the very tip leaves the parent ending as wide as itself.
+- **Hidden names** (Arbor's review lows). A name hidden behind wood painted in front of its bough waits only for
+  the trees painted in front of its own (`BannerPlan.places`), and among those only for the ones that began
+  growing in with it or before, so it no longer waits for forest trees behind it, and a late tree doesn't hide
+  a name that's already shown. Ribbons and hidden names go by one paint order: what's painted after a bough is
+  in front of it, a tie broken by bough order.
+
+## Review fixes (round 3, before the PR)
+
+An internal review of `feat/bough-joints` found nothing blocking; three points are fixed before it goes public:
+
+1. **Streams collide.** A limb's knot (`knot(of:)`, stream `-200 - step`) and elbow (`elbow(of:)`, `-100 - step`)
+   share a key, so step `s`'s elbow draws are step `s - 100`'s knot draws. Knots get a base of their own, far
+   from every other stream a name is keyed with in `TreeLayout.swift` (the tree's -1, a limb's -2, 0 and its
+   steps, a repository's -3, a limb's curl -21, a bough's elbows -23…-27, a limb's elbows -100 - step). Free
+   only before release: it moves where knots fall.
+2. **`tipTaper` cost.** It searches the curve for the node nearest each carry (curve points × limbs), and
+   `taperFactor` builds it once per limb at fork time, so a stem with many limbs costs limbs² × curve length,
+   and layout reruns per frame while growing in. A limb's node lies on the curve, so the curve index is
+   recorded when the node is appended (`Stem.nodeIndices`), not searched for. Laying out a 300-commit trunk
+   with 150 limbs, and a 160-commit limb with 150 more, took 274 ms (release, median of 9) before and 8.7 ms
+   after, the same curves to the last digit.
+3. **`fadeIn` per grafted stem.** Each builds a `Path.union` of the parent's wood, a blurred edge stroke and a
+   masked layer on every draw. Checked: the main tree's layer (`MainTreeLayer`) is `Equatable` and redrawn only
+   when its panes, the trunk's grow-in or the plan change, so an idle desktop never draws it again; while
+   trees grow in it's redrawn every frame. Timed at 12 boughs (`--benchmark`, chalk, single tree, 1440×900@2x,
+   median of 41, three runs each): 39.3, 39.4, 43.3 ms with the fades, 39.9, 39.9, 41.7 without, and a
+   grow-in frame 31.5–32.3 either way, so they cost nothing measurable. Left as they are: nothing to cache.
+4. Nits: `Fronts.rects(before:near:)` filters the following layers lazily, without building the array first.
+   `draw`'s `emerging` parameter isn't unused (`contours` reads it), so it stays.
 
 ## Keeping what works
 
@@ -81,6 +139,27 @@ Tests: a bent bough's foot leaves at its planting's heading; the bend is seeded 
 between names) and gentle; a limb curls the same way along its length and a new commit still moves nothing
 else; front boughs still start inside the trunk; drooping tiers still clear the ground. Renders in every
 palette, light and dark, at 8, 20 and 32; draw time against Round A with `--benchmark`. `scripts/check.sh`.
+
+## Results (round 3, joints)
+
+- **Renders** (at 8, 20 and 32, every palette, light and dark, plain and hanging): boughs zigzag at sharper,
+  more frequent joints, knotted here and there; boughs grow out of the trunk with no seam or lobe; a limb
+  carrying on from a tip carries on at its own width. Front boughs still come out of the trunk, and nothing
+  trails near the ground.
+- **Banners.** Pennants 38–42 of 52, 78–81 of 128, 67–76 of 202 (round 2: 43–46, 71–76, 67–78); ribbons
+  8/18–20/25. Hanging: pennants 14–16/52, 24–25/128, 13–15/202.
+- **Draw time** (`--benchmark`, chalk, 32, median of 11, round 2 back to back): trees 98.4 ms against 99.8 ms,
+  grow-in 71.6 against 70.4, unchanged. Banners 125.7 ms against 117.4 (hanging: 91.4 against 81.4), up 7–12%,
+  from the joints, not the hidden-name fixes (the commit before them: 124.3 and 90.6). That figure includes
+  planning the banners against the bent wood, which is kept between redraws. A gust frame does less: 92 layers,
+  55 masked, 1.66 Mpt² against 105, 67, 1.98 (hanging: 38, 24, 0.84 against 48, 28, 1.01).
+- **Tests.** Some elbows have a knot seeded by their name, and a stem's knots swell its joints and stay put as
+  it grows in; a limb carrying on from its parent's tip leaves wood as wide as itself; a bough's wave mirrors
+  with its side; the cap holds ten times finer along each bough; a hidden name waits only for trees in front of
+  its own that began with it or before; the plan keeps boughs and trees in the order they're painted.
+- **Lint.** `WallpaperView.swift` grew past the file-length limit, so the graft and knot drawing moved to
+  `Grafts.swift` and `Knots.swift`, and the banner fade-in (`shownBanners`) next to the banner plan in
+  `Banners.swift`; the carrying-on code and its tests sit in extensions of `TreeLayout` and its tests.
 
 ## Results (round 2, elbows)
 

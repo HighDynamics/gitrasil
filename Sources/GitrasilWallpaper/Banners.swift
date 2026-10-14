@@ -97,13 +97,25 @@ struct BannerPlan {
     struct Fronts {
         /// Each tree's or bough's foliage, in the order they're painted.
         var layers: [[CGRect]] = []
-        /// Each repository's place in `layers`, by its pane's id.
+        /// Each repository's place in `layers`, by its pane's id. Every tree or bough has a place of its
+        /// own, so what's painted after it is in front of it, even one that ties with it in the paint order
+        /// and is only painted after it by coming later in the list.
         var places: [String: Int] = [:]
+
+        /// The layers painted after `pane`'s tree or bough.
+        private func layers(after pane: String) -> ArraySlice<[CGRect]> {
+            guard let place = places[pane], place + 1 < layers.count else { return [] }
+            return layers[(place + 1)...]
+        }
+
+        /// What's painted in front of `pane`'s tree or bough.
+        func rects(before pane: String) -> [CGRect] {
+            Array(layers(after: pane).joined())
+        }
 
         /// What's painted in front of `pane`'s tree or bough, near `rect`.
         func rects(before pane: String, near rect: CGRect) -> [CGRect] {
-            guard let place = places[pane], place + 1 < layers.count else { return [] }
-            return layers[(place + 1)...].flatMap { $0.filter { $0.intersects(rect) } }
+            layers(after: pane).joined().filter { $0.intersects(rect) }
         }
     }
 
@@ -111,6 +123,9 @@ struct BannerPlan {
     var ribbons: [Ribbon] = []
     /// What hides the banners, when each hangs at its bough's depth; nil when all are drawn in view.
     var occlusion: Occlusion?
+    /// Each repository's place in the order the trees or boughs are painted, by its pane's id
+    /// (`Fronts.places`), when banners can be hidden: what's painted after its place is in front of it.
+    var places: [String: Int] = [:]
 }
 
 extension Landscape {
@@ -158,10 +173,11 @@ extension Landscape {
             }
             obstacles += crowns.joined()
             let ranks = Self.paintRanks(full), leaves = full.boughs.map { foliage($0.layout.stems, frame: frame) }
-            let inFront = ranks.map { rank in zip(ranks, leaves).filter { $0.0 > rank }.flatMap(\.1) }
-            let painted = ranks.indices.sorted { ranks[$0] < ranks[$1] }
+            // In the order they're painted, and a tie in the order they come.
+            let painted = ranks.indices.sorted { (ranks[$0], $0) < (ranks[$1], $1) }
             fronts.layers = painted.map { leaves[$0] }
             for (place, bough) in painted.enumerated() { fronts.places[ready[bough].id] = place }
+            let inFront = ready.map { fronts.rects(before: $0.id) }
             // The repositories' ribbons first, so they hang in the same places whether or not the
             // branches' pennants are shown; the pennants keep off them. Whether or not banners hang at
             // their boughs' depths, a ribbon keeps out from behind the boughs painted after its own.
@@ -251,6 +267,7 @@ extension Landscape {
     static func hidden(_ plan: BannerPlan, depths: [String: Int], fronts: BannerPlan.Fronts) -> BannerPlan {
         var plan = plan
         guard let occlusion = plan.occlusion else { return plan }
+        plan.places = fronts.places
         func behind(_ pane: String, _ box: CGRect, name: CGRect) -> Int? {
             guard let depth = depths[pane], occlusion.reaches(after: depth, into: box) else { return nil }
             return BannerLayout.share(of: name, under: fronts.rects(before: pane, near: name)) < mostlyHidden ? depth : nil
@@ -973,5 +990,56 @@ enum Sketched {
             return CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t)
         }
         return HandDrawn.displace(points, seed: seed, amplitude: 0.6 * hand, wavelength: 28)
+    }
+}
+
+extension WallpaperView {
+
+    /// How far each banner on growing wood has faded in at `date`: a pennant as its stem reaches its
+    /// tip (`TreeLayout.Stretch.nameShown`), a ribbon as its bough does; on a limb growing new
+    /// commits, over the end of the growth. Banners on still wood aren't listed (they're shown). A banner
+    /// hidden behind what's painted in front of it is masked by the full-grown trees, so on a tree growing
+    /// in it waits for the trees painted in front of its own (`BannerPlan.places`) to finish, rather than
+    /// show holes where leaves are still to come; trees behind it can't make holes, so it doesn't wait for them.
+    /// Nor for a tree that began growing in after its own (one arriving late), so a name already shown
+    /// doesn't vanish again when one does.
+    /// `growIn` is how far a pane's tree is in growing in at a date (`BackgroundModel.growIn`). Each
+    /// banner carries its stretch from the plan, so a frame only looks up a progress or two per pane.
+    static func shownBanners(_ plan: BannerPlan, panes: [WallpaperModel], at date: Date,
+                             growIn: (URL, Date) -> Double?) -> [String: Double] {
+        var growingIn: [String: Double] = [:], growing: [String: (pane: WallpaperModel, progress: Double)] = [:]
+        for pane in panes {
+            if let progress = growIn(pane.repoURL, date) {
+                growingIn[pane.repoURL.path] = progress
+            } else if let progress = pane.growthProgress(at: date) {
+                growing[pane.repoURL.path] = (pane, progress)
+            }
+        }
+        guard !growingIn.isEmpty || !growing.isEmpty else { return [:] }
+        var shown: [String: Double] = [:], waits: [String: Double] = [:]
+        // How far a hidden banner on `pane` has faded in: as the last of the trees in front of its own that
+        // began with it or before (as far along as it, or further) grows in.
+        func whole(_ pane: String) -> Double {
+            if let wait = waits[pane] { return wait }
+            let place = plan.places[pane] ?? .max, own = growingIn[pane] ?? 1
+            let front = growingIn.filter { other, progress in (plan.places[other] ?? .min) > place && progress >= own - 1e-9 }
+            let last = TreeLayout.Stretch.nameFade
+            let wait = front.values.min().map { min(max(($0 - (1 - last)) / last, 0), 1) } ?? 1
+            waits[pane] = wait
+            return wait
+        }
+        for hanging in plan.banners {
+            if let progress = growingIn[hanging.pane] {
+                shown[hanging.id] = min(hanging.stretch.nameShown(at: progress), hanging.hiddenFrom == nil ? 1 : whole(hanging.pane))
+            } else if let (pane, progress) = growing[hanging.pane], pane.growth[hanging.stem] != nil {
+                shown[hanging.id] = min(max((progress - 0.85) / 0.15, 0), 1)
+            }
+        }
+        for ribbon in plan.ribbons {
+            if let progress = growingIn[ribbon.pane] {
+                shown[ribbon.id] = min(ribbon.stretch.nameShown(at: progress), ribbon.hiddenFrom == nil ? 1 : whole(ribbon.pane))
+            }
+        }
+        return shown
     }
 }
