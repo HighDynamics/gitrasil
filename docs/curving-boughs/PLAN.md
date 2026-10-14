@@ -118,9 +118,13 @@ An internal review of `feat/bough-joints` found nothing blocking; three points a
    with 150 limbs, and a 160-commit limb with 150 more, took 274 ms (release, median of 9) before and 8.7 ms
    after, the same curves to the last digit.
 3. **`fadeIn` per grafted stem.** Each builds a `Path.union` of the parent's wood, a blurred edge stroke and a
-   masked layer on every draw. Check whether a single-tree draw is cached between frames; cache the parent's
-   wood if it's redrawn each frame, leave it (and say so) if it isn't.
-4. Nits, if trivial: a lazy filter in `Fronts.rects(before:near:)`; drop `draw`'s unused `emerging` parameter.
+   masked layer on every draw. Checked: the main tree's layer (`MainTreeLayer`) is `Equatable` and redrawn only
+   when its panes, the trunk's grow-in or the plan change, so an idle desktop never draws it again; while
+   trees grow in it's redrawn every frame. Timed at 12 boughs (`--benchmark`, chalk, single tree, 1440×900@2x,
+   median of 41, three runs each): 39.3, 39.4, 43.3 ms with the fades, 39.9, 39.9, 41.7 without, and a
+   grow-in frame 31.5–32.3 either way, so they cost nothing measurable. Left as they are: nothing to cache.
+4. Nits: `Fronts.rects(before:near:)` filters the following layers lazily, without building the array first.
+   `draw`'s `emerging` parameter isn't unused (`contours` reads it), so it stays.
 
 ## Keeping what works
 
