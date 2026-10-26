@@ -22,6 +22,21 @@ it on.
 
 The original worktree GUI is in git history, up to the `Drop the worktree GUI` commit.
 
+## Install
+
+Download `Gitrasil-<version>.dmg` (or the `.zip`) from the
+[latest release](https://github.com/HighDynamics/gitrasil/releases/latest). Open the disk image and
+drag Gitrasil onto Applications; from the zip, double-click it and move Gitrasil to Applications
+yourself. It needs macOS 14 or later and runs on Apple silicon and Intel Macs. Then open it
+from Spotlight: it lives in the menu bar (no Dock icon), and its menu has Quit.
+
+Releases aren't notarized by Apple, so the first time you open Gitrasil, and again for each new
+version, macOS says it can't verify the app. Click **Done**, open System Settings → Privacy &
+Security, scroll down to *"Gitrasil" was blocked* and click **Open Anyway**, then confirm with your
+password. Or, in Terminal: `xattr -dr com.apple.quarantine /Applications/Gitrasil.app`. Move it to
+Applications first: an app run from Downloads or the disk image can't open at login. More in
+`docs/distribution.md`.
+
 ## Architecture
 
 The guiding principle: **all logic lives below the UI layer.** Parsing, topology, layout and
